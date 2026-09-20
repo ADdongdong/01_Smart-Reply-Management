@@ -1,0 +1,1437 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>回函智能识别 · 交互原型</title>
+<style>
+/* ==========================================================================
+   设计令牌 —— 逐字取自本项目的 src/theme.ts 与 src/styles/global.css。
+   刻意只做浅色：本项目设计系统只有一套浅色令牌，原型服从项目既有语言。
+   ========================================================================== */
+:root {
+  --c-primary: #3b5bdb;
+  --c-ai-purple: #7c4dff;
+  --c-ai-cyan: #13a8a8;
+
+  --c-risk-high: #e5484d;
+  --c-risk-medium: #e8892b;
+  --c-risk-low: #3fa34d;
+  --c-verify: #1677ff;
+
+  --c-risk-high-text: #c0292e;
+  --c-risk-medium-text: #ad4e00;
+  --c-risk-low-text: #237804;
+  --c-ai-text: #6a3be0;
+
+  --c-text-1: #1d2129;
+  --c-text-2: rgba(29, 33, 41, 0.72);
+  --c-text-3: rgba(29, 33, 41, 0.6);
+
+  --c-hairline: rgba(16, 24, 40, 0.06);
+  --c-border: #e4e8f0;
+  --c-border-light: #f0f2f7;
+
+  --c-fill-light: #f7f9fc;
+  --c-bg-layout: #f5f7fb;
+
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-tag: 4px;
+
+  --shadow-card:
+    0 0 0 1px rgba(25, 28, 33, 0.05),
+    0 1px 1px -0.5px rgba(0, 0, 0, 0.05),
+    0 2px 3px -1px rgba(0, 0, 0, 0.06);
+  --shadow-hover:
+    0 0 0 1px rgba(25, 28, 33, 0.06),
+    0 1px 1px -0.5px rgba(0, 0, 0, 0.05),
+    0 3px 3px -1.5px rgba(0, 0, 0, 0.05),
+    0 6px 6px -3px rgba(0, 0, 0, 0.05);
+
+  --motion-fast: 150ms;
+  --motion-base: 180ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 域内第二字面：函证编号、发函记录编号、运单号一律等宽 —— 编号体系是
+     审计工作的原生材质，等宽让纵向比对成立 */
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, "Courier New", monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { margin: 0; }
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-text-1);
+  background: var(--c-bg-layout);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* 单冒号 —— 双冒号会被解析成伪元素，整条规则被丢弃（键盘焦点就没了） */
+:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d4d9e6; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #b8c0d6; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--c-text-3); }
+
+/* ------------------------------- 顶栏 ------------------------------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.brand__mark {
+  width: 16px; height: 16px;
+  border-radius: 3px;
+  background: var(--c-primary);
+  flex: none;
+  position: relative;
+}
+/* 品牌记号唯一的装饰：函证骑缝章的齿孔语汇，纯几何、无渐变 */
+.brand__mark::after {
+  content: "";
+  position: absolute;
+  left: 3px; right: 3px; top: 7px;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, #fff 0 2px, transparent 2px 4px);
+}
+.brand__name { font-size: 14px; font-weight: 500; letter-spacing: 0.02em; }
+.brand__sep { color: var(--c-text-3); }
+.brand__module { font-size: 13px; color: var(--c-text-2); }
+.topbar__right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.proto-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-tag);
+  font-size: 11px;
+  color: var(--c-ai-text);
+  background: rgba(124, 77, 255, 0.1);
+  white-space: nowrap;
+}
+
+/* ------------------------------- 页面 ------------------------------- */
+.page { padding: 24px; max-width: 1440px; margin: 0 auto; }
+
+.panel {
+  background: #fff;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+.panel + .panel, .panel + .bench { margin-top: 16px; }
+.pad { padding: 16px; }
+
+/* ------------------------------- 上传区 ------------------------------- */
+.dropzone {
+  display: block;
+  width: 100%;
+  border: 1px dashed #dce1ea;
+  border-radius: var(--radius-card);
+  background: var(--c-fill-light);
+  padding: 28px 16px;
+  text-align: center;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+.dropzone:hover, .dropzone.is-dragging {
+  border-color: var(--c-primary);
+  background: rgba(59, 91, 219, 0.04);
+}
+.dropzone__title { margin-top: 8px; font-size: 14px; font-weight: 500; }
+.dropzone__icon { color: var(--c-primary); }
+.dropzone__tips {
+  margin: 8px auto 0;
+  max-width: 620px;
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--c-text-3);
+  text-align: left;
+}
+.dropzone__tip { display: block; }
+
+.dropzone--compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+}
+.dropzone--compact .dropzone__title { margin-top: 0; font-size: 12px; font-weight: 400; color: var(--c-text-2); }
+.dropzone--compact .dropzone__more { margin-left: auto; font-size: 11px; color: var(--c-text-3); }
+
+.demo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.demo-row__label { font-size: 12px; color: var(--c-text-3); }
+
+/* ------------------------------- 按钮 ------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  border-radius: var(--radius-control);
+  border: 1px solid #dfe3ec;
+  background: #fff;
+  color: var(--c-text-1);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+.btn:hover { border-color: var(--c-primary); color: var(--c-primary); }
+.btn--primary { background: var(--c-primary); border-color: var(--c-primary); color: #fff; }
+.btn--primary:hover { background: #3452c9; border-color: #3452c9; color: #fff; }
+.btn--quiet { border-color: transparent; background: transparent; color: var(--c-text-2); }
+.btn--quiet:hover { background: var(--c-fill-light); border-color: transparent; color: var(--c-primary); }
+.btn--sm { height: 26px; padding: 0 8px; font-size: 12px; }
+.btn:disabled { cursor: not-allowed; opacity: 0.45; }
+.btn--primary:disabled { background: #b9c4ee; border-color: #b9c4ee; color: #fff; opacity: 1; }
+
+/* ------------------------------- 工作台两栏 ------------------------------- */
+.bench {
+  display: grid;
+  grid-template-columns: 372px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .bench { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ------------------------------- 队列 ------------------------------- */
+.queue__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.file-chip { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.file-chip__name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-chip__meta { font-size: 11px; color: var(--c-text-3); white-space: nowrap; }
+.queue__count { margin-left: auto; font-size: 11px; color: var(--c-text-3); white-space: nowrap; }
+
+.queue__list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+@media (max-width: 980px) { .queue__list { max-height: none; } }
+
+.task {
+  border-radius: var(--radius-card);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow var(--motion-fast) var(--ease-out);
+}
+.task:hover { box-shadow: var(--shadow-hover); }
+.task.is-selected {
+  background: rgba(59, 91, 219, 0.04);
+  box-shadow: 0 0 0 1px rgba(59, 91, 219, 0.4), var(--shadow-card);
+}
+.task.is-failed { background: rgba(229, 72, 77, 0.04); }
+.task.is-failed.is-selected { box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.45), var(--shadow-card); }
+.task.is-skipped { background: var(--c-fill-light); }
+.task.is-skipped .task__row1, .task.is-skipped .task__match, .task.is-skipped .task__row3 { opacity: 0.55; }
+
+.task__select {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-card);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.task__row1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.task__no { font-size: 13px; font-weight: 500; }
+.task__entity {
+  font-size: 12px;
+  color: var(--c-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.task__pages { margin-left: auto; font-size: 11px; color: var(--c-text-3); white-space: nowrap; }
+
+.task__match { display: flex; align-items: center; gap: 5px; margin-top: 6px; min-width: 0; }
+.task__match-text {
+  font-size: 11px;
+  color: var(--c-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task__row3 { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.task__prog { font-size: 11px; color: var(--c-text-3); }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-tag);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  background: transparent;
+}
+.tag--trade { color: #1d6f42; background: rgba(63, 163, 77, 0.12); }
+.tag--bank { color: #1a4fbd; background: rgba(59, 91, 219, 0.1); }
+.tag--risk-high { color: var(--c-risk-high-text); background: rgba(229, 72, 77, 0.1); }
+.tag--risk-medium { color: var(--c-risk-medium-text); background: rgba(232, 137, 43, 0.12); }
+.tag--risk-low { color: var(--c-risk-low-text); background: rgba(63, 163, 77, 0.1); }
+.tag--verified { color: #0b5bd3; background: rgba(22, 119, 255, 0.1); }
+.tag--skipped { color: var(--c-text-3); background: rgba(16, 24, 40, 0.05); }
+
+/* 状态圆符 —— 队列内一律不用横向进度条，全部用圆形图标 + 文字计数（项目约定） */
+.dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+  border: 1px solid #c9cdd4;
+}
+.dot--done { border: 0; background: var(--c-risk-low); }
+.dot--failed { border: 0; background: var(--c-risk-high); }
+.dot--manual { border: 0; background: var(--c-verify); }
+.dot--running {
+  border: 0;
+  border-top: 2px solid var(--c-primary);
+  border-right: 2px solid rgba(59, 91, 219, 0.25);
+  border-bottom: 2px solid rgba(59, 91, 219, 0.25);
+  border-left: 2px solid rgba(59, 91, 219, 0.25);
+  width: 12px; height: 12px;
+  animation: spin 700ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ------------------------------- 详情 ------------------------------- */
+.detail { min-width: 0; }
+
+.dhead { padding-bottom: 12px; border-bottom: 1px solid var(--c-hairline); }
+.dhead__top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dhead__no { font-size: 16px; font-weight: 500; }
+.dhead__entity { font-size: 14px; color: var(--c-text-2); margin-top: 4px; }
+
+.kv { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 10px 0 0; }
+.kv__item { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.kv__k { font-size: 11px; color: var(--c-text-3); white-space: nowrap; }
+.kv__v { font-size: 12px; color: var(--c-text-1); overflow-wrap: anywhere; }
+
+.dblock { padding-top: 16px; }
+.dblock__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  flex-wrap: wrap;
+}
+.dblock__count { font-size: 11px; color: var(--c-text-3); font-weight: 400; }
+
+.match-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--c-fill-light);
+}
+.match-line--failed { background: rgba(229, 72, 77, 0.05); }
+.match-line__text { font-size: 12px; color: var(--c-text-1); }
+
+/* AI 检测点明细 —— 每项独立一行，结论必须全暴露（审计证据链） */
+.stages { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.stage {
+  display: grid;
+  grid-template-columns: 14px 190px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.stage:last-child { border-bottom: 0; }
+.stage__icon { align-self: center; }
+.stage__label { font-size: 12px; color: var(--c-text-1); }
+.stage__detail { font-size: 12px; color: var(--c-text-2); overflow-wrap: anywhere; }
+.stage__detail--waiting { color: var(--c-text-3); }
+.stage__detail--running { color: var(--c-primary); }
+@media (max-width: 620px) {
+  .stage { grid-template-columns: 14px minmax(0, 1fr); }
+  .stage__label { grid-column: 2; }
+  .stage__detail { grid-column: 2; }
+}
+
+.verdict {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1px;
+  background: var(--c-hairline);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.verdict__cell { background: #fff; padding: 10px 12px; }
+.verdict__k { font-size: 11px; color: var(--c-text-3); }
+.verdict__v { margin-top: 2px; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.verdict__v--high { color: var(--c-risk-high-text); }
+.verdict__v--medium { color: var(--c-risk-medium-text); }
+.verdict__v--low { color: var(--c-risk-low-text); }
+
+.basis { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.basis li { display: flex; gap: 6px; font-size: 12px; color: var(--c-text-2); }
+.basis li::before { content: "·"; color: var(--c-text-3); }
+
+.note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: rgba(124, 77, 255, 0.06);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--c-ai-text);
+}
+
+.recovery {
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: rgba(229, 72, 77, 0.05);
+}
+.recovery__msg { margin: 0; font-size: 12px; color: var(--c-risk-high-text); }
+.recovery__row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.recovery__opts { margin: 10px 0 0; font-size: 11px; color: var(--c-text-3); }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field__label { font-size: 11px; color: var(--c-text-3); }
+
+select.select {
+  height: 30px;
+  max-width: 100%;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--c-text-1);
+  background: #fff;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-control);
+}
+select.select:hover { border-color: var(--c-primary); }
+
+.verify-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: var(--c-fill-light);
+}
+.verify-block__hint { font-size: 11px; color: var(--c-text-3); flex: 1 1 200px; min-width: 0; }
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-tag);
+  background: rgba(22, 119, 255, 0.08);
+  color: #0b5bd3;
+  font-size: 11px;
+}
+.suggest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  margin-bottom: 12px;
+}
+.suggest__k { font-size: 11px; color: var(--c-text-3); }
+.suggest__k + .suggest__k { margin-left: 8px; }
+.suggest__v { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+
+/* ------------------------------- 底栏 ------------------------------- */
+.actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 24px;
+  background: #fff;
+  border-top: 1px solid var(--c-hairline);
+  margin-top: 16px;
+}
+.actionbar__status { font-size: 12px; color: var(--c-text-2); }
+.actionbar__status b { font-weight: 500; }
+.actionbar__buttons { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 620px) {
+  .page { padding: 16px; }
+  .topbar { padding: 0 16px; }
+  .actionbar { padding: 12px 16px; }
+  .brand__module { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand__mark" aria-hidden="true"></span>
+    <span class="brand__name">函证系统</span>
+    <span class="brand__sep" aria-hidden="true">/</span>
+    <span class="brand__module">回函管理 · 智能识别工作台</span>
+  </div>
+  <div class="topbar__right">
+    <span class="proto-badge">交互原型 · 演示数据</span>
+    <button class="btn btn--quiet btn--sm" type="button" id="btnReset">重置演示</button>
+  </div>
+</header>
+
+<main class="page">
+
+  <section class="panel pad" aria-labelledby="uploadTitle">
+    <h2 class="sr-only" id="uploadTitle">上传回函文件</h2>
+    <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls" class="sr-only" tabindex="-1">
+    <div id="dropzoneMount"></div>
+
+    <div class="demo-row" id="demoRow">
+      <span class="demo-row__label">没有文件？用演示数据体验：</span>
+      <button class="btn btn--sm" type="button" data-demo="A">往来函证拼接回函（9 页 / 5 封）</button>
+      <button class="btn btn--sm" type="button" data-demo="B">银行函证回函（4 页 / 1 封）</button>
+    </div>
+  </section>
+
+  <div class="bench" id="bench" hidden>
+    <section class="panel pad queue" aria-labelledby="queueTitle">
+      <div class="queue__head" id="queueHead"></div>
+      <h2 class="sr-only" id="queueTitle">识别队列</h2>
+      <ul class="queue__list" id="queueList"></ul>
+    </section>
+
+    <section class="panel pad detail" aria-labelledby="detailTitle">
+      <h2 class="sr-only" id="detailTitle">选中函证的识别详情</h2>
+      <div id="detailMount"></div>
+    </section>
+  </div>
+
+</main>
+
+<div class="actionbar" id="actionbar" hidden>
+  <div class="actionbar__status" id="actionStatus"></div>
+  <div class="actionbar__buttons">
+    <button class="btn" type="button" id="btnCollapse">收起工作台</button>
+    <button class="btn btn--primary" type="button" id="btnFinish" disabled>完成并查看结果</button>
+  </div>
+</div>
+
+<p class="sr-only" id="live" aria-live="polite"></p>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ======================================================================
+     数据 —— 逐字取自 src/mock/recognition.ts 与 src/mock/confirmations.ts
+     ====================================================================== */
+
+  var STAGE_LABELS = {
+    match: "归属匹配",
+    consistency: "发/回函一致性检测",
+    sealExists: "回函文件是否印章检测",
+    crossPageSeal: "骑缝章检测",
+    sealNameMatch: "印章与被询证单位名称一致检测",
+    handwriting: "手写体检测",
+    bankText: "银行函证文本识别",
+    expressSheet: "快递面单识别"
+  };
+
+  /* 往来函证：手写体检测；银行函证：银行函证文本识别 */
+  var ORDER_TRADE = ["match", "consistency", "sealExists", "crossPageSeal", "sealNameMatch", "handwriting", "expressSheet"];
+  var ORDER_BANK  = ["match", "consistency", "sealExists", "crossPageSeal", "sealNameMatch", "bankText", "expressSheet"];
+
+  /* 失败时的可执行动作（来自 src/services/mockRecognition.ts 的 RECOVERY_ACTIONS） */
+  var RECOVERY_ACTIONS = {
+    match: ["手动指定函证", "标记为待处理"],
+    consistency: ["重新执行一致性比对", "转人工逐项核对"],
+    sealExists: ["重新执行印章检测", "人工确认盖章情况"],
+    crossPageSeal: ["重新检测骑缝章", "人工确认骑缝章"],
+    sealNameMatch: ["重新比对印章名称", "人工核对印章名称"],
+    handwriting: ["重新执行手写体转录", "转人工转录"],
+    bankText: ["重新执行文本识别", "手动指定函证"],
+    expressSheet: ["重新识别面单", "手动填写快递单号"]
+  };
+
+  var UPLOAD_TIPS = [
+    "支持往来函证「回函文件 + 快递面单」拼接 PDF（系统按右上角二维码自动切分）",
+    "支持银行函证回函 PDF（按「银行名称 + 被审计单位 + 函证起止日期」四要素自动归属）",
+    "支持多份文件批量拖入，识别过程异步执行，可边识别边浏览列表"
+  ];
+
+  /* 识别失败时「手动指定函证」的候选，来自 CANDIDATE_RECORDS */
+  var CANDIDATES = [
+    { no: "QS2024-018", entity: "齐商银行股份有限公司", type: "银行函证" },
+    { no: "whzf0010008", entity: "东方财富证券股份有限公司", type: "往来函证" },
+    { no: "whzf0010009", entity: "中金财富证券股份有限公司", type: "往来函证" },
+    { no: "QS2024-019", entity: "齐商银行股份有限公司", type: "银行函证" },
+    { no: "whzf0010010", entity: "平安证券股份有限公司", type: "往来函证" }
+  ];
+
+  var VERIFIERS = ["张审计", "李复核"];
+
+  /* 批次 A：往来函证拼接回函，含一个二维码识别失败案例 */
+  var SEEDS_A = [
+    {
+      confirmationNo: "whzf0010006",
+      entity: "广东证券股份有限公司",
+      pageRange: "第 1-2 页",
+      sendRecordNo: "20260810000006",
+      replySeq: "第 1 次回函",
+      matchDetail: "二维码解析成功 → 归属函证 whzf0010006（第 1 次回函）",
+      region: "信息不符区",
+      conclusion: "不相符",
+      risk: "high",
+      riskBasis: [
+        "印章落在「信息不符」区，据此推断回函结果为不相符",
+        "20 项科目逐行比对出现 2 项差异",
+        "手写体转录内容位于「信息不符」区"
+      ],
+      details: {
+        consistency: "20 项科目逐行比对完成 · 2 项差异",
+        sealExists: "已盖章 · 公章",
+        crossPageSeal: "检出 2 处骑缝章",
+        sealNameMatch: "印章名称与被询证单位一致",
+        handwriting: "已转录 · 位于「信息不符」区",
+        expressSheet: "运单号 SF7444706557147 已识别并关联"
+      }
+    },
+    {
+      confirmationNo: "whzf0010007",
+      entity: "招商证券股份有限公司",
+      pageRange: "第 3-4 页",
+      sendRecordNo: "20260809000014",
+      replySeq: "第 1 次回函",
+      matchDetail: "二维码解析成功 → 归属函证 whzf0010007（第 1 次回函）",
+      region: "信息证明无误区",
+      conclusion: "相符",
+      risk: "low",
+      riskBasis: [
+        "印章落在「信息证明无误」区，据此推断回函结果为相符",
+        "20 项科目逐行比对全部相符"
+      ],
+      details: {
+        consistency: "20 项科目逐行比对完成 · 全部相符",
+        sealExists: "已盖章 · 公章",
+        crossPageSeal: "检出 3 处骑缝章",
+        sealNameMatch: "印章名称与被询证单位一致",
+        handwriting: "已转录 · 位于「信息证明无误」区",
+        expressSheet: "运单号 SF7444706556912 已识别并关联"
+      }
+    },
+    {
+      confirmationNo: "whzf0010002",
+      entity: "中信证券股份有限公司",
+      pageRange: "第 5-6 页",
+      sendRecordNo: "20260810000002",
+      replySeq: "第 1 次回函",
+      matchDetail: "二维码解析成功 → 归属函证 whzf0010002（第 1 次回函）",
+      region: "信息证明无误区",
+      conclusion: "相符",
+      risk: "low",
+      riskBasis: [
+        "印章落在「信息证明无误」区，据此推断回函结果为相符",
+        "20 项科目逐行比对全部相符"
+      ],
+      details: {
+        consistency: "20 项科目逐行比对完成 · 全部相符",
+        sealExists: "已盖章 · 公章",
+        crossPageSeal: "检出 3 处骑缝章",
+        sealNameMatch: "印章名称与被询证单位一致",
+        handwriting: "已转录 · 位于「信息证明无误」区",
+        expressSheet: "运单号 SF528601590877 已识别并关联"
+      }
+    },
+    {
+      confirmationNo: "待指定",
+      entity: "—",
+      pageRange: "第 7 页",
+      sendRecordNo: "",
+      replySeq: "",
+      plannedFailure: "match",
+      failReason: "第 7 页未识别到系统二维码（可能为复印件或二维码被遮挡），无法归属到具体函证"
+    },
+    {
+      confirmationNo: "whzf0010005",
+      entity: "海通证券股份有限公司",
+      pageRange: "第 8-9 页",
+      sendRecordNo: "20260810000005",
+      replySeq: "第 2 次回函",
+      matchDetail: "二维码解析成功 → 归属函证 whzf0010005（第 2 次回函）",
+      region: "未识别（手写区域与印章区域不一致）",
+      conclusion: "待人工判定",
+      risk: "high",
+      riskBasis: [
+        "手写区域与印章区域不一致，无法据落章区域自动判定回函结果",
+        "未检出骑缝章（多页回函建议补盖）",
+        "20 项科目逐行比对出现 1 项差异"
+      ],
+      details: {
+        consistency: "20 项科目逐行比对完成 · 1 项差异",
+        sealExists: "已盖章 · 公章",
+        crossPageSeal: "未检出骑缝章（多页回函建议补盖）",
+        sealNameMatch: "印章名称与被询证单位一致",
+        handwriting: "已转录 · 手写区域与印章区域不一致",
+        expressSheet: "运单号 SF7444706556947 已识别并关联"
+      }
+    }
+  ];
+
+  /* 批次 B：银行函证回函（无二维码，按四要素匹配） */
+  var SEEDS_B = [
+    {
+      confirmationNo: "QS2024-031",
+      entity: "齐商银行股份有限公司",
+      pageRange: "第 1-4 页",
+      sendRecordNo: "20260810000004",
+      replySeq: "第 1 次回函",
+      matchDetail: "四要素匹配成功（齐商银行 / 2024-01-01 ~ 2024-03-31）→ 归属函证 QS2024-031",
+      region: "未识别",
+      conclusion: "待补充材料",
+      risk: "high",
+      riskBasis: [
+        "未检出印章，回函文件不满足盖章要求，需退回补盖",
+        "未检出骑缝章"
+      ],
+      details: {
+        consistency: "账面余额与发函底稿一致",
+        sealExists: "未检出印章 · 需退回补盖",
+        crossPageSeal: "未检出骑缝章",
+        sealNameMatch: "无印章，无法比对",
+        bankText: "银行名称 / 被审计单位 / 起止日期 四要素全部匹配",
+        expressSheet: "运单号 EMS1122334455667 已识别并关联"
+      }
+    }
+  ];
+
+  var PRESETS = {
+    A: { id: "batch-a", fileName: "0813回函123.pdf", fileSize: "625 KB", pageCount: 9, type: "往来函证", seeds: SEEDS_A },
+    B: { id: "batch-b", fileName: "齐商银行股份有限公司-20240331.pdf", fileSize: "1.07 MB", pageCount: 4, type: "银行函证", seeds: SEEDS_B }
+  };
+
+  /* ======================================================================
+     状态
+     ====================================================================== */
+
+  var TICK_MS = 200;
+
+  var state = {
+    batch: null,
+    selectedId: null,
+    timer: null,
+    verifyingName: ""
+  };
+
+  var els = {
+    dropzoneMount: document.getElementById("dropzoneMount"),
+    demoRow: document.getElementById("demoRow"),
+    fileInput: document.getElementById("fileInput"),
+    bench: document.getElementById("bench"),
+    queueHead: document.getElementById("queueHead"),
+    queueList: document.getElementById("queueList"),
+    detailMount: document.getElementById("detailMount"),
+    actionbar: document.getElementById("actionbar"),
+    actionStatus: document.getElementById("actionStatus"),
+    btnFinish: document.getElementById("btnFinish"),
+    btnCollapse: document.getElementById("btnCollapse"),
+    btnReset: document.getElementById("btnReset"),
+    live: document.getElementById("live")
+  };
+
+  /* ======================================================================
+     构建与推进（对齐 src/services/mockRecognition.ts 的推进语义）
+     ====================================================================== */
+
+  function makeTasks(preset) {
+    return preset.seeds.map(function (seed, i) {
+      var order = preset.type === "银行函证" ? ORDER_BANK : ORDER_TRADE;
+      var stages = order.map(function (key) {
+        return {
+          key: key,
+          label: STAGE_LABELS[key],
+          status: "waiting",
+          detail: seed.details ? seed.details[key] : undefined
+        };
+      });
+      return {
+        id: preset.id + "-" + i,
+        confirmationNo: seed.confirmationNo,
+        entity: seed.entity,
+        type: preset.type,
+        pageRange: seed.pageRange,
+        sendRecordNo: seed.sendRecordNo,
+        replySeq: seed.replySeq,
+        matchDetail: seed.matchDetail,
+        region: seed.region,
+        conclusion: seed.conclusion,
+        risk: seed.risk,
+        riskBasis: seed.riskBasis,
+        plannedFailure: seed.plannedFailure,
+        failReason: seed.failReason,
+        stages: stages,
+        status: "pending",
+        skipped: false,
+        verify: null,
+        manualAssigned: false
+      };
+    });
+  }
+
+  function startBatch(preset, fileName) {
+    stopTimer();
+    state.batch = {
+      id: preset.id,
+      fileName: fileName || preset.fileName,
+      fileSize: preset.fileSize,
+      pageCount: preset.pageCount,
+      type: preset.type,
+      tasks: makeTasks(preset)
+    };
+    state.selectedId = state.batch.tasks[0].id;
+    state.verifyingName = "";
+    renderAll();
+    announce("已接收文件 " + state.batch.fileName + "，共 " + state.batch.tasks.length + " 封函证，开始识别。");
+    startTimer();
+  }
+
+  /* 串行推进，保证「正在处理哪一封」清晰可见；失败任务不再推进 */
+  function advance() {
+    var b = state.batch;
+    if (!b) return true;
+
+    var target = null;
+    for (var i = 0; i < b.tasks.length; i++) {
+      var t = b.tasks[i];
+      if (t.skipped) continue;
+      if (t.status === "pending" && t.stages.some(function (s) { return s.status !== "done"; })) { target = t; break; }
+    }
+    if (!target) { renderAll(); return true; }
+
+    var idx = -1;
+    for (var j = 0; j < target.stages.length; j++) {
+      var st = target.stages[j].status;
+      if (st === "waiting" || st === "running") { idx = j; break; }
+    }
+    if (idx === -1) { target.status = "success"; renderAll(); return false; }
+
+    var stage = target.stages[idx];
+    if (stage.status === "waiting") {
+      if (target.plannedFailure === stage.key) {
+        stage.status = "failed";
+        target.status = "failed";
+        renderAll();
+        announce("函证 " + target.confirmationNo + " 在「" + stage.label + "」环节识别失败，需人工处理。");
+        return false;
+      }
+      stage.status = "running";
+      renderAll();
+      return false;
+    }
+    stage.status = "done";
+    if (idx === target.stages.length - 1) target.status = "success";
+    renderAll();
+    return false;
+  }
+
+  function startTimer() {
+    stopTimer();
+    state.timer = window.setInterval(function () {
+      if (advance()) stopTimer();
+    }, TICK_MS);
+  }
+  function stopTimer() {
+    if (state.timer) { window.clearInterval(state.timer); state.timer = null; }
+  }
+
+  /* ======================================================================
+     派生量
+     ====================================================================== */
+
+  function verifyStages(task) {
+    return task.stages.filter(function (s) { return s.key !== "match"; });
+  }
+  function verifyDone(task) {
+    return verifyStages(task).filter(function (s) { return s.status === "done"; }).length;
+  }
+  function taskFinished(task) {
+    return task.status === "success" || task.status === "failed" || task.skipped;
+  }
+  function batchDone(b) {
+    return b.tasks.every(taskFinished);
+  }
+  function activeTask(b) {
+    for (var i = 0; i < b.tasks.length; i++) {
+      var t = b.tasks[i];
+      if (!t.skipped && t.status === "pending") return t;
+    }
+    return null;
+  }
+  function countable(b) {
+    return b.tasks.filter(function (t) { return !t.skipped; });
+  }
+  function allVerified(b) {
+    var c = countable(b);
+    return c.length > 0 && c.every(function (t) { return !!t.verify; });
+  }
+
+  /* ======================================================================
+     渲染
+     ====================================================================== */
+
+  function renderAll() {
+    renderDropzone();
+    if (!state.batch) {
+      /* 无批次：工作台与底栏整体隐去，只留空态上传区 */
+      els.bench.hidden = true;
+      els.actionbar.hidden = true;
+      return;
+    }
+    els.bench.hidden = false;
+    els.actionbar.hidden = false;
+    renderQueue();
+    renderDetail();
+    renderActionbar();
+  }
+
+  function renderDropzone() {
+    var has = !!state.batch;
+    els.demoRow.hidden = has;
+
+    if (!has) {
+      els.dropzoneMount.innerHTML =
+        '<button class="dropzone" type="button" id="dz" aria-describedby="dzTips">' +
+          '<svg class="dropzone__icon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>' +
+          '</svg>' +
+          '<span class="dropzone__title">将回函文件拖到此处，或点击上传</span>' +
+          '<span class="dropzone__tips" id="dzTips"><span class="sr-only">上传说明</span><span aria-hidden="true">' +
+            UPLOAD_TIPS.map(function (t) { return '<span class="dropzone__tip">· ' + escapeHtml(t) + "</span>"; }).join("") +
+          '</span></span>' +
+        '</button>';
+    } else {
+      els.dropzoneMount.innerHTML =
+        '<button class="dropzone dropzone--compact" type="button" id="dz">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color:var(--c-primary)">' +
+            '<path d="M12 5v14"/><path d="M5 12h14"/>' +
+          '</svg>' +
+          '<span class="dropzone__title">继续追加回函文件</span>' +
+          '<span class="dropzone__more">支持多份文件批量拖入，识别异步执行</span>' +
+        '</button>';
+    }
+
+    var dz = document.getElementById("dz");
+    dz.addEventListener("click", function () { els.fileInput.click(); });
+    dz.addEventListener("dragenter", function (e) { e.preventDefault(); dz.classList.add("is-dragging"); });
+    dz.addEventListener("dragover", function (e) { e.preventDefault(); dz.classList.add("is-dragging"); });
+    dz.addEventListener("dragleave", function () { dz.classList.remove("is-dragging"); });
+    dz.addEventListener("drop", function (e) {
+      e.preventDefault();
+      dz.classList.remove("is-dragging");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  function renderQueue() {
+    var b = state.batch;
+    var success = b.tasks.filter(function (t) { return t.status === "success"; }).length;
+    var failed = b.tasks.filter(function (t) { return t.status === "failed"; }).length;
+    var skipped = b.tasks.filter(function (t) { return t.skipped; }).length;
+
+    els.queueHead.innerHTML =
+      '<div class="file-chip">' +
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c-risk-high)" stroke-width="1.6" aria-hidden="true">' +
+          '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>' +
+        '</svg>' +
+        '<span class="file-chip__name" title="' + escapeAttr(b.fileName) + '">' + escapeHtml(b.fileName) + '</span>' +
+        '<span class="file-chip__meta num">' + escapeHtml(b.fileSize) + ' · ' + b.pageCount + ' 页</span>' +
+        '<span class="tag tag--' + (b.type === "银行函证" ? "bank" : "trade") + '">' + escapeHtml(b.type) + '</span>' +
+      '</div>' +
+      '<span class="queue__count num">已完成 ' + (success + failed) + '/' + b.tasks.length +
+        (failed ? ' · <span style="color:var(--c-risk-high-text)">失败 ' + failed + '</span>' : '') +
+        (skipped ? ' · 跳过 ' + skipped : '') +
+      '</span>';
+
+    els.queueList.innerHTML = b.tasks.map(renderTaskCard).join("");
+
+    Array.prototype.forEach.call(els.queueList.querySelectorAll("[data-task]"), function (btn) {
+      btn.addEventListener("click", function () {
+        state.selectedId = btn.getAttribute("data-task");
+        renderQueue();
+        renderDetail();
+      });
+    });
+  }
+
+  function renderTaskCard(task) {
+    var isSelected = task.id === state.selectedId;
+    var isFailed = task.status === "failed" && !task.skipped;
+    var cls = "task" + (isSelected ? " is-selected" : "") + (isFailed ? " is-failed" : "") + (task.skipped ? " is-skipped" : "");
+
+    var matchDetail = task.skipped
+      ? "已跳过，该页未纳入回函资料"
+      : (task.manualAssigned
+          ? "人工指定 → 归属函证 " + task.confirmationNo + "（" + task.entity + "）"
+          : (task.matchDetail || (task.status === "failed" ? "归属匹配失败" : "等待二维码 / 四要素匹配…")));
+
+    var dotClass = task.skipped
+      ? "dot--manual"
+      : (task.status === "success" ? "dot--done"
+        : task.status === "failed" ? "dot--failed"
+        : "dot--running");
+
+    var total = verifyStages(task).length;
+    var done = verifyDone(task);
+
+    var tags = "";
+    tags += '<span class="tag tag--' + (task.type === "银行函证" ? "bank" : "trade") + '">' + escapeHtml(task.type) + '</span>';
+    if (taskFinished(task) && !task.skipped) {
+      if (task.risk === "high") tags += '<span class="tag tag--risk-high">风险 高</span>';
+      if (task.risk === "medium") tags += '<span class="tag tag--risk-medium">风险 中</span>';
+      if (task.risk === "low") tags += '<span class="tag tag--risk-low">风险 低</span>';
+    }
+    if (task.status === "failed" && !task.skipped) tags += '<span class="tag tag--risk-high">识别失败</span>';
+    if (task.skipped) tags += '<span class="tag tag--skipped">已跳过</span>';
+    if (task.verify) tags += '<span class="tag tag--verified">已人工核验</span>';
+
+    return '' +
+      '<li class="' + cls + '">' +
+        '<button class="task__select" type="button" data-task="' + escapeAttr(task.id) + '"' +
+          ' aria-current="' + (isSelected ? "true" : "false") + '">' +
+          '<span class="task__row1">' +
+            '<span class="dot ' + dotClass + '" aria-hidden="true"></span>' +
+            '<span class="mono task__no">' + escapeHtml(task.confirmationNo) + '</span>' +
+            '<span class="task__entity">' + escapeHtml(task.entity === "—" ? "归属未确定" : task.entity) + '</span>' +
+            '<span class="task__pages num">' + escapeHtml(task.pageRange) + '</span>' +
+          '</span>' +
+          '<span class="task__match">' +
+            '<span class="task__match-text" title="' + escapeAttr(matchDetail) + '">' + escapeHtml(matchDetail) + '</span>' +
+          '</span>' +
+          '<span class="task__row3">' +
+            tags +
+            '<span class="task__prog num">AI 智能核验 ' + done + '/' + total + '</span>' +
+          '</span>' +
+        '</button>' +
+      '</li>';
+  }
+
+  function renderDetail() {
+    var b = state.batch;
+    var task = b.tasks.filter(function (t) { return t.id === state.selectedId; })[0] || b.tasks[0];
+    if (!task) { els.detailMount.innerHTML = ""; return; }
+
+    var head = '' +
+      '<div class="dhead">' +
+        '<div class="dhead__top">' +
+          '<span class="mono dhead__no">' + escapeHtml(task.confirmationNo) + '</span>' +
+          '<span class="tag tag--' + (task.type === "银行函证" ? "bank" : "trade") + '">' + escapeHtml(task.type) + '</span>' +
+          (task.verify ? '<span class="tag tag--verified">已人工核验 · ' + escapeHtml(task.verify.by) + '</span>' : '') +
+          (task.skipped ? '<span class="tag tag--skipped">已跳过</span>' : '') +
+        '</div>' +
+        '<div class="dhead__entity">' + escapeHtml(task.entity === "—" ? "被询证单位：归属未确定" : task.entity) + '</div>' +
+        '<div class="kv">' +
+          kv("来源文件", b.fileName) +
+          kv("页码", task.pageRange) +
+          (task.sendRecordNo ? kvMono("发函记录编号", task.sendRecordNo) : "") +
+          (task.replySeq ? kv("回函次序", task.replySeq) : "") +
+        '</div>' +
+      '</div>';
+
+    var failed = task.status === "failed" && !task.manualAssigned && !task.skipped;
+    var matchDot = task.skipped ? "dot--manual"
+      : failed ? "dot--failed"
+      : (task.status === "success" || task.manualAssigned) ? "dot--done"
+      : "dot--running";
+
+    var matchBlock =
+      '<section class="dblock">' +
+        '<h3 class="dblock__title">归属匹配' +
+          '<span class="dblock__count">系统内部处理（页面切分 / 二维码或四要素定位），只给结果</span>' +
+        '</h3>' +
+        '<div class="match-line' + (failed ? " match-line--failed" : "") + '">' +
+          '<span class="dot ' + matchDot + '" aria-hidden="true"></span>' +
+          '<span class="match-line__text">' +
+            escapeHtml(task.skipped ? "该页已跳过，未纳入回函资料"
+              : task.manualAssigned ? "人工指定 → 归属函证 " + task.confirmationNo + "（" + task.entity + "）"
+              : task.matchDetail || (failed ? "未识别到系统二维码，无法归属" : "匹配中…")) +
+          '</span>' +
+        '</div>' +
+      '</section>';
+
+    els.detailMount.innerHTML = head + matchBlock + (failed ? renderFailedDetail(task) : renderNormalDetail(task));
+    bindDetail(task);
+  }
+
+  function renderNormalDetail(task) {
+    var stages = verifyStages(task);
+    var done = verifyDone(task);
+
+    var stageRows = stages.map(function (s) {
+      var icon = s.status === "done" ? '<span class="dot dot--done"></span>'
+        : s.status === "running" ? '<span class="dot dot--running"></span>'
+        : s.status === "failed" ? '<span class="dot dot--failed"></span>'
+        : '<span class="dot"></span>';
+      /* 人工归属后重跑：检测点确实执行了，但本原型不模拟其具体结论 —— 如实写「已完成」 */
+      var text = s.detail
+        || (s.status === "done" ? "已完成"
+          : s.status === "running" ? "检测中…" : "待检测");
+      var textCls = s.status === "waiting" ? " stage__detail--waiting"
+        : s.status === "running" ? " stage__detail--running" : "";
+      var stateText = s.status === "done" ? "已完成" : s.status === "running" ? "检测中" : s.status === "failed" ? "失败" : "待检测";
+      return '' +
+        '<li class="stage">' +
+          '<span class="stage__icon" aria-hidden="true">' + icon + '</span>' +
+          '<span class="stage__label">' + escapeHtml(s.label) + '</span>' +
+          '<span class="stage__detail' + textCls + '"><span class="sr-only">' + stateText + '：</span>' + escapeHtml(text) + '</span>' +
+        '</li>';
+    }).join("");
+
+    var allDone = done === stages.length;
+    var riskLabel = task.risk === "high" ? "高" : task.risk === "medium" ? "中" : task.risk === "low" ? "低" : "待人工判定";
+    var riskCls = task.risk ? "verdict__v--" + task.risk : "";
+    var basisItems = (task.riskBasis && task.riskBasis.length)
+      ? task.riskBasis.map(function (r) { return "<li>" + escapeHtml(r) + "</li>"; }).join("")
+      : "<li>该页由人工指定归属，AI 未产出判定依据，回函结果需人工判定。</li>";
+
+    var verdict = allDone ? '' +
+      '<section class="dblock">' +
+        '<h3 class="dblock__title">风险与结论<span class="dblock__count">AI 建议值，尚未写入回函资料</span></h3>' +
+        '<div class="verdict">' +
+          '<div class="verdict__cell"><div class="verdict__k">印章落章区域</div><div class="verdict__v">' + escapeHtml(task.region || "待人工判定") + '</div></div>' +
+          '<div class="verdict__cell"><div class="verdict__k">回函结果是否相符</div><div class="verdict__v">' + escapeHtml(task.conclusion || "待人工判定") + '</div></div>' +
+          '<div class="verdict__cell"><div class="verdict__k">风险等级</div><div class="verdict__v ' + riskCls + '">' + riskLabel + '</div></div>' +
+        '</div>' +
+        '<ul class="basis">' + basisItems + '</ul>' +
+        '<p class="note">判定依据：印章落在「信息证明无误」区则相符、落在「信息不符」区则不相符；该规则同时决定上方两个建议值。</p>' +
+      '</section>' : '';
+
+    return '' +
+      '<section class="dblock">' +
+        '<h3 class="dblock__title">AI 智能核验<span class="dblock__count num">' + done + '/' + stages.length + ' 项检测点</span></h3>' +
+        '<ul class="stages">' + stageRows + '</ul>' +
+      '</section>' +
+      verdict +
+      (allDone ? renderVerifyBlock(task) : '');
+  }
+
+  function renderFailedDetail(task) {
+    var failedStage = task.stages.filter(function (s) { return s.status === "failed"; })[0];
+    var actions = RECOVERY_ACTIONS[failedStage.key] || [];
+
+    var options = '<option value="">请选择要归属的函证…</option>' + CANDIDATES.map(function (c) {
+      return '<option value="' + escapeAttr(c.no) + '">' + escapeHtml(c.no + "　" + c.entity + "（" + c.type + "）") + '</option>';
+    }).join("");
+
+    return '' +
+      '<section class="dblock">' +
+        '<h3 class="dblock__title">归属匹配失败<span class="dblock__count">识别已停止，等待人工处理</span></h3>' +
+        '<div class="recovery">' +
+          '<p class="recovery__msg">' + escapeHtml(task.failReason) + '</p>' +
+          '<div class="recovery__row">' +
+            '<div class="field">' +
+              '<label class="field__label" for="manualSelect">手动指定该页归属的函证</label>' +
+              '<select class="select" id="manualSelect">' + options + '</select>' +
+            '</div>' +
+            '<button class="btn btn--sm" type="button" id="btnApplyManual">确认归属</button>' +
+            '<button class="btn btn--sm" type="button" id="btnSkip">跳过该页</button>' +
+          '</div>' +
+          '<p class="recovery__opts">可执行动作：' + escapeHtml(actions.join(" / ")) + '</p>' +
+        '</div>' +
+      '</section>' +
+      '<section class="dblock">' +
+        '<h3 class="dblock__title">AI 智能核验<span class="dblock__count">未执行</span></h3>' +
+        '<p class="muted" style="font-size:12px;margin:0">归属未确定，6 项检测点不会执行 —— 没有归属的识别结果无法写入任何函证。</p>' +
+      '</section>';
+  }
+
+  function renderVerifyBlock(task) {
+    if (task.verify) {
+      return '' +
+        '<section class="dblock">' +
+          '<h3 class="dblock__title">人工核验<span class="dblock__count">已留痕</span></h3>' +
+          '<div class="verify-block">' +
+            '<span class="stamp">' +
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>' +
+              '已人工核验 · ' + escapeHtml(task.verify.by) + ' · <span class="mono">' + escapeHtml(task.verify.at) + '</span>' +
+            '</span>' +
+            '<span class="verify-block__hint">建议值已写入回函资料，核验留痕同步记入审计证据链。</span>' +
+            '<button class="btn btn--sm btn--quiet" type="button" id="btnRevoke">撤销核验</button>' +
+          '</div>' +
+        '</section>';
+    }
+
+    var opts = '<option value="">选择核验人…</option>' + VERIFIERS.map(function (v) {
+      return '<option value="' + escapeAttr(v) + '"' + (state.verifyingName === v ? " selected" : "") + '>' + escapeHtml(v) + '</option>';
+    }).join("");
+
+    return '' +
+      '<section class="dblock">' +
+        '<h3 class="dblock__title">人工核验<span class="dblock__count">AI 不会自动落库</span></h3>' +
+        '<div class="suggest">' +
+          '<span class="suggest__k">待写入的回函结果</span>' +
+          '<span class="suggest__v">' + escapeHtml(task.conclusion) + '</span>' +
+          '<span class="suggest__k">风险</span>' +
+          '<span class="suggest__v">' + (task.risk === "high" ? "高" : task.risk === "medium" ? "中" : "低") + '</span>' +
+          '<span class="suggest__k">落章区域</span>' +
+          '<span class="suggest__v">' + escapeHtml(task.region) + '</span>' +
+        '</div>' +
+        '<div class="verify-block">' +
+          '<div class="field">' +
+            '<label class="field__label" for="verifierSelect">核验人</label>' +
+            '<select class="select" id="verifierSelect">' + opts + '</select>' +
+          '</div>' +
+          '<button class="btn btn--primary btn--sm" type="button" id="btnVerify">确认并写入回函资料</button>' +
+          '<span class="verify-block__hint">请先核对印章定位与落章区域结论；确认后写入核验人与时间。</span>' +
+        '</div>' +
+      '</section>';
+  }
+
+  function bindDetail(task) {
+    var manualSelect = document.getElementById("manualSelect");
+    var btnApplyManual = document.getElementById("btnApplyManual");
+    if (manualSelect && btnApplyManual) {
+      btnApplyManual.addEventListener("click", function () {
+        var no = manualSelect.value;
+        if (!no) { manualSelect.focus(); announce("请先选择要归属的函证。"); return; }
+        var target = CANDIDATES.filter(function (c) { return c.no === no; })[0];
+        task.confirmationNo = target.no;
+        task.entity = target.entity;
+        task.type = target.type;
+        task.manualAssigned = true;
+        task.status = "pending";
+        task.plannedFailure = undefined;
+        task.stages.forEach(function (s) { s.status = "waiting"; s.detail = undefined; });
+        task.stages[0].status = "done";
+        task.stages[0].detail = "人工指定 → 归属函证 " + target.no + "（" + target.entity + "）";
+        renderAll();
+        announce("已人工归属到函证 " + target.no + "，检测点将重新执行。");
+        startTimer();
+      });
+    }
+
+    var btnSkip = document.getElementById("btnSkip");
+    if (btnSkip) {
+      btnSkip.addEventListener("click", function () {
+        task.skipped = true;
+        renderAll();
+        announce("该页已跳过，未纳入回函资料。");
+      });
+    }
+
+    var verifierSelect = document.getElementById("verifierSelect");
+    if (verifierSelect) {
+      verifierSelect.addEventListener("change", function () {
+        state.verifyingName = verifierSelect.value;
+      });
+    }
+
+    var btnVerify = document.getElementById("btnVerify");
+    if (btnVerify) {
+      btnVerify.addEventListener("click", function () {
+        if (!state.verifyingName) {
+          if (verifierSelect) verifierSelect.focus();
+          announce("请先选择核验人。");
+          return;
+        }
+        task.verify = { by: state.verifyingName, at: formatNow() };
+        renderAll();
+        announce("函证 " + task.confirmationNo + " 已由 " + task.verify.by + " 完成人工核验并写入回函资料。");
+      });
+    }
+
+    var btnRevoke = document.getElementById("btnRevoke");
+    if (btnRevoke) {
+      btnRevoke.addEventListener("click", function () {
+        var who = task.verify.by;
+        task.verify = null;
+        renderAll();
+        announce("已撤销 " + who + " 的核验留痕，建议值回到待确认状态。");
+      });
+    }
+  }
+
+  function renderActionbar() {
+    var b = state.batch;
+    var done = b.tasks.filter(taskFinished).length;
+    var active = activeTask(b);
+    var finished = batchDone(b);
+    var c = countable(b);
+    var verifiedCount = c.filter(function (t) { return !!t.verify; }).length;
+
+    var status = '识别进度 <b class="num">' + done + "/" + b.tasks.length + "</b>";
+    if (active) status += " · 正在处理：<b>" + escapeHtml(active.confirmationNo) + "</b>";
+    if (finished) {
+      status += ' · <span style="color:var(--c-risk-low-text)">全部完成</span>';
+      status += ' · 已人工核验 <b class="num">' + verifiedCount + "/" + c.length + "</b>";
+    }
+    els.actionStatus.innerHTML = status;
+
+    var ready = finished && allVerified(b);
+    els.btnFinish.disabled = !ready;
+    els.btnFinish.textContent = finished && !ready ? "全部核验后可查看" : "完成并查看结果";
+  }
+
+  /* ======================================================================
+     工具
+     ====================================================================== */
+
+  function kv(k, v) {
+    return '<div class="kv__item"><span class="kv__k">' + escapeHtml(k) + '</span><span class="kv__v">' + escapeHtml(v) + '</span></div>';
+  }
+  function kvMono(k, v) {
+    return '<div class="kv__item"><span class="kv__k">' + escapeHtml(k) + '</span><span class="kv__v mono">' + escapeHtml(v) + '</span></div>';
+  }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function formatNow() {
+    var d = new Date();
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " +
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+  }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+  function announce(msg) { els.live.textContent = msg; }
+
+  /* ======================================================================
+     事件绑定
+     ====================================================================== */
+
+  function handleFile(file) {
+    if (!file) return;
+    if (/\.(xlsx|xls)$/i.test(file.name)) {
+      announce("快递数据 Excel 由「快递数据导入」通道处理，本原型不做步骤化处理。");
+      return;
+    }
+    var preset = /银行|齐商|工商|建设|农业|中国银行/i.test(file.name) ? PRESETS.B : PRESETS.A;
+    startBatch(preset, file.name);
+  }
+
+  els.fileInput.addEventListener("change", function () {
+    if (els.fileInput.files && els.fileInput.files[0]) handleFile(els.fileInput.files[0]);
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-demo]"), function (btn) {
+    btn.addEventListener("click", function () {
+      startBatch(PRESETS[btn.getAttribute("data-demo")]);
+    });
+  });
+
+  els.btnReset.addEventListener("click", function () {
+    stopTimer();
+    state.batch = null;
+    state.selectedId = null;
+    state.verifyingName = "";
+    els.fileInput.value = "";
+    renderAll();
+    announce("演示已重置。");
+  });
+
+  els.btnCollapse.addEventListener("click", function () {
+    announce("工作台已收起，识别结果保留在列表中。");
+  });
+
+  els.btnFinish.addEventListener("click", function () {
+    announce("已跳转回函管理列表，识别结果与人工核验留痕已就位。");
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

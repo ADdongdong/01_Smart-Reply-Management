@@ -1,0 +1,461 @@
+:root {
+  /* 主色 —— 页面唯一的强调色（主操作 / 链接 / 当前态 / AI 产出 / 人工核验留痕）。
+     整站只有一个色相，收敛后用「同色相深浅 + 底/边/字分工」建立层级 */
+  --c-primary: #3b5bdb;
+
+  /* 语义色 —— 只有两档，且只出现在状态标签上：
+       红 = 风险 / 不相符；绿 = 通过 / 相符。
+     中风险在数据层保留（riskLevel: 'medium'），视觉并入红档 */
+  --c-risk-high: #e5484d;
+  --c-risk-low: #3fa34d;
+
+  /* 底色 —— 全项目只有这几档，不再各自写 rgba(...)：
+       · 结构区块（卡片、分区、嵌套块）一律用中性色
+       · 语义底色只出现在「状态 / 结论」上 */
+  --c-neutral-bg: rgba(16, 24, 40, 0.03);
+  --c-primary-bg: rgba(59, 91, 219, 0.08);
+  /* AI 产出底 —— 与主色同色相、淡一档。AI 靠「浅底 + 虚线 + ✦ AI 前缀」识别，不靠第二个色相 */
+  --c-ai-bg: rgba(59, 91, 219, 0.05);
+  --c-risk-high-bg: rgba(229, 72, 77, 0.08);
+  --c-risk-low-bg: rgba(63, 163, 77, 0.08);
+  /* 标签底统一档位（比静态底略深） */
+  --c-tag-bg: rgba(16, 24, 40, 0.05);
+
+  /* 文字层级 —— 同一色相靠透明度拉开层次，而不是换色相。
+     这样整页只有一种「墨色」，不会出现蓝灰混排的浑浊感。
+     对比度：0.72 → 6.4:1；0.60 → 4.6:1，均达 WCAG AA */
+  --c-text-1: #1d2129;
+  --c-text-2: rgba(29, 33, 41, 0.72);
+  --c-text-3: rgba(29, 33, 41, 0.6);
+
+  /* 线条体系 —— 只保留三级且都极淡。
+     层次感由留白与阴影承担，线条仅在必须分隔处出现一次 */
+  --c-hairline: rgba(16, 24, 40, 0.06);
+  --c-border: #e4e8f0;
+  --c-border-light: #f0f2f7;
+
+  --c-fill-light: #f7f9fc;
+  --c-bg-layout: #f5f7fb;
+  /* 文件预览区底 —— 中性蓝灰，让「纸」浮起来（结构性底色，不承载语义） */
+  --c-preview-bg: #e6eaf3;
+
+  /* 圆角三级 —— 卡片 / 控件 / 标签 */
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-tag: 4px;
+
+  /* 阴影 —— 多层叠加而非单层硬投影。
+     每层偏移与模糊成比例递减，堆出接近真实光照的柔和过渡 */
+  --shadow-card:
+    0 0 0 1px rgba(25, 28, 33, 0.05),
+    0 1px 1px -0.5px rgba(0, 0, 0, 0.05),
+    0 2px 3px -1px rgba(0, 0, 0, 0.06);
+  --shadow-hover:
+    0 0 0 1px rgba(25, 28, 33, 0.06),
+    0 1px 1px -0.5px rgba(0, 0, 0, 0.05),
+    0 3px 3px -1.5px rgba(0, 0, 0, 0.05),
+    0 6px 6px -3px rgba(0, 0, 0, 0.05);
+  --shadow-pop:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 1px 1px -0.5px rgba(0, 0, 0, 0.04),
+    0 3px 3px -1.5px rgba(0, 0, 0, 0.04),
+    0 6px 6px -3px rgba(0, 0, 0, 0.05),
+    0 12px 12px -6px rgba(0, 0, 0, 0.06),
+    0 24px 24px -12px rgba(0, 0, 0, 0.07);
+
+  /* 小字号文字专用的深色语义色 —— 在浅色底上对比度 ≥ 4.5:1（WCAG AA）
+     注：图形/色块仍使用上面鲜亮的语义色，二者分工不同 */
+  --c-risk-high-text: #c0292e;
+  --c-risk-low-text: #237804;
+
+  /* 动效：时长 + 自定义缓动曲线。
+     内置 ease-out 起步太急、收尾太软；expo 型曲线起步果断、收尾极慢，
+     是「有质量感」的关键 */
+  --motion-fast: 150ms;
+  --motion-base: 180ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 固定层级刻度（禁止随意写 z-index 数值） */
+  --z-sticky-header: 20;
+  --z-floating-card: 60;
+  --z-modal: 1000;
+}
+
+/* 尊重系统的「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+    'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--c-text-1);
+  background: var(--c-bg-layout);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 键盘焦点必须可见 —— 否则 Tab 走一遍根本不知道焦点在哪（WCAG 2.4.7） */
+::focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 滚动条 —— 更克制 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d9e6;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b8c0d6;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------- 语义标识 ------------------------- */
+
+.ai-mark {
+  color: var(--c-primary);
+  font-size: 12px;
+  margin-left: 2px;
+  cursor: help;
+}
+
+.ai-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-tag);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--c-primary);
+  background: var(--c-ai-bg);
+  white-space: nowrap;
+}
+
+/* 高风险行左侧标记条 —— 语义性线条，保留但收窄 */
+.row-risk-high > td:first-child {
+  position: relative;
+}
+.row-risk-high > td:first-child::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--c-risk-high);
+}
+
+/* 识别完成后对应行的高亮提示
+   说明：只动画 opacity（compositor 属性），叠加层用伪元素，不触发重排与重绘 */
+@keyframes rowFlash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.row-flash > td {
+  position: relative;
+}
+.row-flash > td::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--c-primary-bg);
+  pointer-events: none;
+  animation: rowFlash 1.2s var(--ease-out) 2 forwards;
+}
+
+/* ------------------------- 通用布局类 ------------------------- */
+
+/* 8px 网格 —— 所有结构性间距都是 8 的倍数 */
+.page {
+  padding: 24px;
+}
+
+/* 卡片 —— 无边框，靠多层柔和阴影表达边界 */
+.panel {
+  background: #fff;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.panel + .panel {
+  margin-top: 16px;
+}
+
+.panel-pad {
+  padding: 16px;
+}
+
+/* 内容分块 —— 用于展开区、嵌套区块等「不希望再加一层框」的场景 */
+.subtle-block {
+  background: var(--c-fill-light);
+  border-radius: var(--radius-control);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--c-text-1);
+}
+
+.muted {
+  color: var(--c-text-3);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------- 语义提示块（无边框） ------------------------- */
+
+/* 模块级提示一律用浅底块表达，禁止 1px 描边。
+   颜色配额：只有红 / 绿两档语义色（分别承担「风险」与「相符」），
+   AI 产出与一般提示统一走主色浅档，其余一律中性 —— 整页只有一个色相在传递信息 */
+.tone-block {
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.tone-neutral {
+  background: var(--c-neutral-bg);
+}
+.tone-ai {
+  background: var(--c-ai-bg);
+}
+.tone-primary {
+  background: var(--c-primary-bg);
+}
+.tone-risk {
+  background: var(--c-risk-high-bg);
+}
+.tone-ok {
+  background: var(--c-risk-low-bg);
+}
+
+/* 提示块的标题行 —— AI 产出走主色，风险走红档 */
+.tone-caption {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.tone-caption-ai {
+  color: var(--c-primary);
+}
+.tone-caption-risk {
+  color: var(--c-risk-high-text);
+}
+
+/* 拖拽上传区 —— 虚线仅作「可放置」的功能性提示，压到最淡 */
+.dropzone {
+  border: 1px dashed #dce1ea;
+  border-radius: var(--radius-card);
+  background: var(--c-fill-light);
+  padding: 20px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+.dropzone:hover,
+.dropzone.dragging {
+  border-color: var(--c-primary);
+  background: var(--c-primary-bg);
+}
+
+/* 仿 PDF 页面预览 —— 像一张浮起的纸，不用边框框住 */
+.pdf-canvas {
+  position: relative;
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  margin: 0 auto;
+  font-size: 11px;
+  color: #333;
+}
+
+/* 印章定位框 —— 常规章走主色（AI 检出的位置信息），异常章才用红档 */
+.pdf-canvas .seal-box {
+  position: absolute;
+  border: 2px solid var(--c-primary);
+  border-radius: 2px;
+  background: var(--c-primary-bg);
+}
+.pdf-canvas .seal-box.abnormal {
+  border-color: var(--c-risk-high);
+  background: var(--c-risk-high-bg);
+}
+.pdf-canvas .seal-box span {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-size: 11px;
+  line-height: 14px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--c-primary);
+  color: #fff;
+  white-space: nowrap;
+}
+.pdf-canvas .seal-box.abnormal span {
+  background: var(--c-risk-high);
+}
+
+/* 手写区域高亮 —— AI 产出统一用主色浅底，文字回归墨色（转录文本是内容，不是语义状态） */
+.handwriting-zone {
+  background: var(--c-ai-bg);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  font-family: 'Kaiti SC', 'KaiTi', 'STKaiti', cursive;
+  font-size: 14px;
+  color: var(--c-text-1);
+}
+
+/* 悬浮进度卡 —— 入场只动画 opacity 与 transform */
+@keyframes floatIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.floating-card {
+  animation: floatIn var(--motion-base) var(--ease-out);
+}
+
+/* 核验进度徽标 */
+.verify-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+/* ------------------------- Alert 去边框 ------------------------- */
+
+/* antd Alert 默认带 1px 描边，是页面上「框」的最大来源（15 处使用）。
+   去掉描边后仍靠状态图标 + 浅底色区分，可辨识度不受影响 */
+.ant-alert {
+  border: none;
+}
+.ant-alert .ant-alert-icon {
+  align-self: flex-start;
+  margin-top: 1px;
+}
+
+/* ------------------------- 全屏弹窗 ------------------------- */
+
+/* 全屏 Modal —— 四个业务入口（查看 / AI 核验 / 资料录入 / 结果填写）统一形态。
+   样式只作用于 .fs-modal 作用域内，不影响新手引导、快递导入抽屉与 modal.confirm */
+.fs-modal .ant-modal {
+  width: 100vw;
+  max-width: 100vw;
+  top: 0;
+  margin: 0;
+  padding-bottom: 0;
+}
+.fs-modal .ant-modal .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  border-radius: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.fs-modal .ant-modal-content .ant-modal-header {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 12px 24px;
+  box-shadow: 0 1px 0 var(--c-hairline);
+}
+.fs-modal .ant-modal-content .ant-modal-close {
+  top: 9px;
+  inset-inline-end: 18px;
+}
+.fs-modal .ant-modal-content .ant-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px;
+}
+.fs-modal .ant-modal-content .ant-modal-footer {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 12px 24px;
+  box-shadow: 0 -8px 16px -12px rgba(16, 24, 40, 0.14);
+}
+
+/* 全屏后内容区限宽居中 —— 避免超宽屏下行长过界 */
+.fs-body-inner {
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* ------------------------- 表格去线 ------------------------- */
+
+/* 去掉 antd 表头的列分隔伪元素 */
+.ant-table-thead > tr > th::before {
+  display: none !important;
+}
+
+/* 表头：全表唯一一条稍重的分隔线；字距略放宽、颜色退后一步，让数据站出来 */
+.ant-table-thead > tr > th {
+  border-bottom-color: rgba(16, 24, 40, 0.1) !important;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* 数据行：仅保留极淡的行线，不使用竖向网格线 */
+.ant-table-tbody > tr > td {
+  border-bottom-color: var(--c-border-light);
+  border-inline-end: none !important;
+}
+
+/* 最后一行不画线，避免与卡片底边重叠形成的「双线」 */
+.ant-table-tbody > tr:last-child > td {
+  border-bottom-color: transparent;
+}
+
+/* 表格外框与分页区域不画线 */
+.ant-table-wrapper .ant-table-container,
+.ant-table-wrapper .ant-table {
+  border-radius: 0;
+}
