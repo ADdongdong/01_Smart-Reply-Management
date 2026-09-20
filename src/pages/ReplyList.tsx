@@ -912,14 +912,11 @@ export default function ReplyList() {
           dataSource={data}
           scroll={{ x: 1140 }}
           locale={{ emptyText: emptyNode }}
-          rowClassName={(row) =>
-            [
-              row.main.risk === 'high' ? 'row-risk-high' : '',
-              state.flashRowId === row.confirmationNo ? 'row-flash' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')
-          }
+          /* 行首不再加「高风险」红色竖条（2026-09-20 用户要求去掉）：
+             风险等级已由「AI 风险」列的状态标签表达，行首再画一条属于重复表达。
+             `row-risk-high` 保留给明细表的「差异行 / 未匹配行」——
+             那些表没有独立的风险列，需要左侧标记做视觉定位。 */
+          rowClassName={(row) => (state.flashRowId === row.confirmationNo ? 'row-flash' : '')}
           pagination={{
             size: 'small',
             pageSize: 10,

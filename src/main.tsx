@@ -9,22 +9,12 @@ import { themeConfig } from './theme'
 import { AppProvider } from './store/AppStore'
 import './styles/global.css'
 
-// 第三方组件（AntD 点击波纹 / 浮层定位）在触发元素卸载后仍在测量，会抛
-// `Cannot read properties of null (reading 'getBoundingClientRect')`。
-// 已从源头规避（关闭点击波纹 + 弹窗延后一帧卸载）；这里再对这条**已知的第三方测量竞态**
-// 做精确静默，避免 IDE 预览面板与浏览器控制台被这种「无功能影响」的噪音刷屏。
-// 匹配条件极窄（必须同时包含 getBoundingClientRect 与 null），其余错误一律照常抛出。
-window.addEventListener(
-  'error',
-  (e) => {
-    const msg = e.message || ''
-    if (msg.includes('getBoundingClientRect') && msg.includes('null')) {
-      e.preventDefault()
-      e.stopImmediatePropagation()
-    }
-  },
-  true,
-)
+// 说明：原先这里挂了一个针对「第三方测量竞态」的全局静默（getBoundingClientRect of null）。
+// 它有两个问题，已在 2026-09-20 修掉：
+//   ① 只监听 `error`，漏了 AntD 大量使用的 `Promise.resolve().then(...)` 延后测量（那是 unhandledrejection）；
+//   ② 挂在 main.tsx 里，任何比它更早执行的脚本抛错都覆盖不到。
+// 现在这条守卫内联在 index.html 中、且同时覆盖 error 与 unhandledrejection —— 见 index.html 内的注释。
+// 另外从源头换掉了 `resize-observer-polyfill`（vite alias → src/utils/nativeResizeObserver.ts）。
 
 dayjs.locale('zh-cn')
 

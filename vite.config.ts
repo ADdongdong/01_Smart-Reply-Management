@@ -7,6 +7,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // AntD 的 rc-resize-observer 无条件 import 这个 polyfill，导致本项目从未用到浏览器原生
+      // ResizeObserver；而该 polyfill 内部自行调用 getBoundingClientRect，元素卸载竞态会抛
+      // 「Cannot read properties of null (reading 'getBoundingClientRect')」。
+      // 目标环境（Chromium）原生支持，故整体换成原生实现 —— 详见 src/utils/nativeResizeObserver.ts
+      'resize-observer-polyfill': fileURLToPath(
+        new URL('./src/utils/nativeResizeObserver.ts', import.meta.url),
+      ),
     },
   },
   optimizeDeps: {

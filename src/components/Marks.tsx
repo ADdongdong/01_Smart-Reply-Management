@@ -43,16 +43,20 @@ export function AiChip({ confidence, label = 'AI' }: { confidence: number; label
 /* ------------------- 风险等级 ------------------- */
 
 /**
- * 标签文字统一走墨色，风险等级由底色承担（颜色只走底色，文字只走墨色）。
- * 一律「浅底无边框」—— 描边标签会在密集列表里堆出大量线条。
+ * 风险标签 —— 只有红 / 绿两档：中风险在数据层保留（业务上要区分关注程度），
+ * 视觉并入红档，档位差异由标签文字「高风险 / 中风险」表达，不引入第三个色相。
  *
- * 色彩只有红 / 绿两档：中风险在数据层保留（业务上需要区分关注程度），
- * 视觉并入红档 —— 档位差异由标签文字表达，不再引入第三个色相。
+ * 色彩用法（2026-09-20 调整。起因：用户反馈「AI 风险那列的标签饱和度太低，看着很不清晰」）：
+ * · 底色继续走浅档（`--c-risk-*-bg`）且**无边框** —— 描边标签会在密集列表里堆出大量线条；
+ * · 但**文字改用深档语义色**（`--c-risk-high-text` / `--c-risk-low-text`），不再一律用墨色。
+ *   原因是「墨色文字 + 8% 浅底」的最终观感是**整片偏灰**，红绿只藏在底色里，扫视时认不出来；
+ *   改用深档语义色后，红 / 绿在浅底上依然 ≥ 4.5:1（WCAG AA），且这两个色已排除橙色系，
+ *   不会出现用户反感的「咖啡色」。
  */
 const RISK_MAP: Record<RiskLevel, { text: string; color: string; bg: string }> = {
-  high: { text: '高风险', color: 'var(--c-text-1)', bg: 'var(--c-risk-high-bg)' },
-  medium: { text: '中风险', color: 'var(--c-text-1)', bg: 'var(--c-risk-high-bg)' },
-  low: { text: '低风险', color: 'var(--c-text-1)', bg: 'var(--c-risk-low-bg)' },
+  high: { text: '高风险', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' },
+  medium: { text: '中风险', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' },
+  low: { text: '低风险', color: 'var(--c-risk-low-text)', bg: 'var(--c-risk-low-bg)' },
   none: { text: '未核验', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' },
 }
 
@@ -70,6 +74,7 @@ export function RiskTag({ level, reasons }: { level: RiskLevel; reasons?: string
         lineHeight: 1,
         color: cfg.color,
         background: cfg.bg,
+        fontWeight: 500,
         whiteSpace: 'nowrap',
       }}
     >

@@ -7,6 +7,55 @@
   </head>
   <body>
     <div id="root"></div>
+
+    <!--
+      第三方测量竞态守卫 —— **必须在任何模块脚本之前执行**，所以内联在这里而不是写在 main.tsx
+      （原先写在 main.tsx，任何更早加载的脚本抛错都覆盖不到）。
+
+      背景：AntD / rc-* 会在 Promise 微任务与 rAF 里「延后测量」浮层与表格尺寸，
+      当触发元素已经卸载时就会抛 `Cannot read properties of null (reading 'getBoundingClientRect')`。
+      它没有功能影响，但会刷满 IDE 预览面板与浏览器控制台。
+
+      两个要点（原先的写法缺其一，所以没生效）：
+      1. **必须同时处理 `unhandledrejection`** —— AntD 内部大量使用 `Promise.resolve().then(...)`
+         延后执行（rc-resize-observer 的 onResize、trigger 的 onAlign 都是），
+         那种抛错是 unhandledrejection，不是 error，只监听 error 会漏掉。
+      2. 匹配条件保持**极窄**：必须同时含 `getBoundingClientRect` 与 `null`；其余错误一律照常抛出。
+    -->
+    <script>
+      (function () {
+        function isThirdPartyMeasureRace(msg) {
+          return (
+            typeof msg === 'string' &&
+            msg.indexOf('getBoundingClientRect') !== -1 &&
+            msg.indexOf('null') !== -1
+          )
+        }
+        window.addEventListener(
+          'error',
+          function (e) {
+            if (isThirdPartyMeasureRace(e.message)) {
+              e.preventDefault()
+              e.stopImmediatePropagation()
+            }
+          },
+          true,
+        )
+        window.addEventListener(
+          'unhandledrejection',
+          function (e) {
+            var reason = e.reason
+            var msg = reason && (reason.message || String(reason))
+            if (isThirdPartyMeasureRace(msg)) {
+              e.preventDefault()
+              e.stopImmediatePropagation()
+            }
+          },
+          true,
+        )
+      })()
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
