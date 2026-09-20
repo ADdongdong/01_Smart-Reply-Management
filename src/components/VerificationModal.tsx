@@ -2,7 +2,7 @@ import { Button } from 'antd'
 import type { ReplyRecord } from '@/types'
 import FullscreenModal from '@/components/FullscreenModal'
 import VerificationPanel from '@/components/VerificationPanel'
-import { RiskTag, VerifyBadge, VerifyProgress } from '@/components/Marks'
+import { RiskTag, VerifyBadge } from '@/components/Marks'
 
 /**
  * AI 智能核验（列表页入口的弹窗形态）。
@@ -39,13 +39,12 @@ export default function VerificationModal({
             本页用于查看 AI 的判断依据；核验确认与留痕在「确认回函快递信息」时一次性完成
           </span>
           <span style={{ marginLeft: 'auto' }} />
+          {/*
+            去掉「核验进度 6/6」（v2.25）：计数是系统内部指标，用户看不出它的含义；
+            AI 究竟查了哪几项，本页正文已经逐项列出，不需要再给一个数。
+          */}
           {v && (
-            <span style={{ fontSize: 13, color: 'var(--c-text-2)' }}>
-              核验进度 <VerifyProgress done={v.completedModules} total={v.totalModules} risk={v.riskLevel} />
-              <span style={{ marginLeft: 10 }}>
-                <VerifyBadge status={record.verifyStatus} by={record.verifiedBy} at={record.verifiedAt} />
-              </span>
-            </span>
+            <VerifyBadge status={record.verifyStatus} by={record.verifiedBy} at={record.verifiedAt} />
           )}
           <Button onClick={onClose}>关闭</Button>
         </div>

@@ -20,7 +20,7 @@ import VerificationModal from '@/components/VerificationModal'
 import RecordDetailModal from '@/components/RecordDetailModal'
 import ReplyDocEntryModal from '@/components/ReplyDocEntryModal'
 import ReplyResultModal from '@/components/ReplyResultModal'
-import { RiskTag, VerifyBadge, VerifyProgress } from '@/components/Marks'
+import { MatchTag, RiskTag, VerifyBadge } from '@/components/Marks'
 import { afterPaint } from '@/utils/afterPaint'
 
 /** 四个业务入口的全屏弹窗 */
@@ -283,6 +283,61 @@ export default function ReplyList() {
       onOk: () => dispatch({ type: 'REMOVE_CONFIRMATION', confirmationNo: row.confirmationNo }),
     })
 
+  /* ------------------------------------------------------------------ */
+  /* 「回函是否相符」取值 —— 列表列用（v2.25）                            */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 相符性判定（业务硬规则，不可违背）：
+   * · **人工填写过回函结果 → 以人工值为准**（`resultInfo.matched`）；
+   * · 否则用 AI 建议值 —— **印章落章区域**：落「信息证明无误」区 → 相符；落「信息不符」区 → 不相符；
+   * · **银行函证再叠加「询证事项逐项核对」：有差异即判不相符**；
+   * · 印章区域未识别且无差异 → **无法判定**（`null`）。
+   *
+   * 返回 `byAi` 让标签能区分「AI 建议」与「已人工确认」——
+   * 这是「AI 只出建议、人工确认才算数」这条底线在列表上的表达。
+   */
+  const matchOf = (
+    rec: ReplyRecord,
+  ): { matched: boolean | null; byAi: boolean; basis?: string; reasons?: string[] } => {
+    // ① 人工已确认 → 以人工值为准
+    if (rec.resultInfo?.matched !== undefined) {
+      return {
+        matched: rec.resultInfo.matched,
+        byAi: false,
+        reasons: rec.resultInfo.diffDesc ? [rec.resultInfo.diffDesc] : undefined,
+      }
+    }
+
+    // ② 银行函证：逐项核对有差异 → 不相符（覆盖印章区域的判定）
+    const bankDiff = rec.bankItems?.filter((i) => !i.match) ?? []
+    if (bankDiff.length) {
+      return {
+        matched: false,
+        byAi: true,
+        basis: `询证事项逐项核对有 ${bankDiff.length} 项差异`,
+        reasons: rec.verification?.riskReasons,
+      }
+    }
+
+    // ③ 印章落章区域
+    const region = rec.verification?.seal.region
+    if (region === '信息证明无误区') {
+      return { matched: true, byAi: true, basis: '印章落于「信息证明无误」区' }
+    }
+    if (region === '信息不符区') {
+      return {
+        matched: false,
+        byAi: true,
+        basis: '印章落于「信息不符」区',
+        reasons: rec.verification?.riskReasons,
+      }
+    }
+
+    // ④ 未识别 → 无法判定
+    return { matched: null, byAi: true }
+  }
+
   /* ------------------------- 列定义 ------------------------- */
   /* 说明：不使用组间竖分隔线 —— 分组信息由列顺序与表头文字承担 */
 
@@ -315,7 +370,118 @@ export default function ReplyList() {
         </span>
       ),
     },
+    /* ---------- 回函是否相符 ---------- */
+    /*
+     * 用户诉求（v2.25）：「人工核验」列前面的 6/6 从用户角度不直观 ——
+     * 6/6 是**系统内部的检测点计数**，而业务人员看列表最想知道的是「**这封回函到底相符吗**」。
+     * 故独立成列：给结论 + 区分结论**来自 AI 建议还是人工确认**（不相符时悬停看原因）。
+     *
+     * 位置：紧随「被询证单位 / 函证编号」，排在「AI 风险」之前 ——
+     * 相符与否是首位业务结论，先于风险等级这类辅助判断。
+     */
+    {
+      title: '回函是否相符',
+      key: 'match',
+      width: 132,
+      render: (_, row) => {
+        const m = matchOf(row.main)
+        return (
+          <MatchTag matched={m.matched} byAi={m.byAi} basis={m.basis} reasons={m.reasons} />
+        )
+      },
+    },
+    {
+      title: 'AI 风险',
+      key: 'risk',
+      width: 84,
+      render: (_, row) => (
+        <RiskTag level={row.main.risk as RiskLevel} reasons={row.main.verification?.riskReasons} />
+      ),
+    },
+    /*
+     * 只留「是否已人工核验」—— 一个**业务上说得清**的状态。
+     *
+     * v2.25 修正（用户）：「不展示 6/6 这个数字，因为用户不知道 6/6 是啥、有什么含义。」
+     * 那个数字是 **AI 检测点的完成计数**（系统内部指标）：既没有解释、也就没有意义。
+     * AI 究竟查了哪几项，在「更多 → AI 核验」页会逐项列出，不需要在列表上用计数暗示。
+     */
+    {
+      title: (
+        <span>
+          人工核验
+          <Tooltip title="是否已完成人工核验。核验人与核验时间在「确认回函快递信息」时留痕；AI 具体查了哪几项，见「更多 → AI 核验」">
+            <QuestionCircleOutlined
+              style={{ marginLeft: 4, fontSize: 12, color: 'var(--c-text-3)' }}
+            />
+          </Tooltip>
+        </span>
+      ),
+      key: 'verify',
+      width: 104,
+      render: (_, row) => (
+        <VerifyBadge
+          status={row.main.verifyStatus}
+          by={row.main.verifiedBy}
+          at={row.main.verifiedAt}
+        />
+      ),
+    },
+
+    /* ---------- 是否重新发函 ---------- */
+    /*
+     * 用户诉求（v2.26）：「还需要增加一列：是否重新发函。如果，有历史的回函记录，则就标记为重新发函。」
+     *
+     * **判定口径**：该函证**存在历史回函记录**（回函次数 > 1）→ 标记「重新发函」；只有一次回函 → 「—」。
+     * 它是**客观事实标记**、不是状态结论，故走中性灰阶（不占用红 / 绿两档语义色）。
+     * 悬停说明「共几次回函、本次是第几次」，避免留下一个「没有解释的标记」。
+     *
+     * 位置（用户指定）：**倒数第二个字段** —— 前面依次是「定位（谁）→ 结论（相符 / 风险 / 核验）」，
+     * 这个事实标记收在流程状态之前，不打断前面的阅读主线。
+     */
+    {
+      title: '是否重新发函',
+      key: 'resend',
+      width: 104,
+      render: (_, row) => {
+        const times = row.history.length
+        if (times <= 1) {
+          return (
+            <span className="muted" style={{ fontSize: 13 }}>
+              —
+            </span>
+          )
+        }
+        return (
+          <Tooltip
+            title={`该函证共 ${times} 次回函；本行呈现最新一次（第 ${times} 次）。历史回函已被覆盖，展开行可查看`}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                height: 20,
+                padding: '0 6px',
+                borderRadius: 'var(--radius-tag)',
+                fontSize: 12,
+                lineHeight: 1,
+                color: 'var(--c-text-1)',
+                background: 'var(--c-tag-bg)',
+                fontWeight: 500,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              重新发函
+            </span>
+          </Tooltip>
+        )
+      },
+    },
     /* ---------- 回函进度 ---------- */
+    /*
+     * 位置（用户指定）：**倒数第一个字段、紧邻操作列**。
+     * 这样「进度 → 下一步：xxx」与右侧操作列的主按钮**相邻可读** ——
+     * 读到「下一步做什么」时，动作就在紧右边，不需要横向来回找。
+     */
     {
       title: '回函进度',
       key: 'progress',
@@ -346,43 +512,6 @@ export default function ReplyList() {
         )
       },
     },
-    {
-      title: 'AI 风险',
-      key: 'risk',
-      width: 84,
-      render: (_, row) => (
-        <RiskTag level={row.main.risk as RiskLevel} reasons={row.main.verification?.riskReasons} />
-      ),
-    },
-    {
-      title: (
-        <span>
-          人工核验
-          <Tooltip title="六项 AI 检测：发/回函一致性、是否盖章、骑缝章、印章名称一致、手写体（银行函证为银行函证文本）、快递面单">
-            <QuestionCircleOutlined
-              style={{ marginLeft: 4, fontSize: 12, color: 'var(--c-text-3)' }}
-            />
-          </Tooltip>
-        </span>
-      ),
-      key: 'verify',
-      width: 132,
-      render: (_, row) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <VerifyProgress
-            done={row.main.verification?.completedModules ?? 0}
-            total={row.main.verification?.totalModules ?? 6}
-            risk={row.main.risk}
-          />
-          <VerifyBadge
-            status={row.main.verifyStatus}
-            by={row.main.verifiedBy}
-            at={row.main.verifiedAt}
-          />
-        </span>
-      ),
-    },
-
     /* ---------- 操作 ---------- */
     /*
      * 「下一步 + 查看 + 更多」—— **每行结构完全一致**，只有主按钮文案随进度变化。
@@ -910,7 +1039,7 @@ export default function ReplyList() {
           rowKey="confirmationNo"
           columns={columns}
           dataSource={data}
-          scroll={{ x: 1140 }}
+          scroll={{ x: 1344 }}
           locale={{ emptyText: emptyNode }}
           /* 行首不再加「高风险」红色竖条（2026-09-20 用户要求去掉）：
              风险等级已由「AI 风险」列的状态标签表达，行首再画一条属于重复表达。

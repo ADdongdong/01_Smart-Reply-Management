@@ -97,8 +97,102 @@ export function RiskTag({ level, reasons }: { level: RiskLevel; reasons?: string
   )
 }
 
+/* ------------------- 回函是否相符 ------------------- */
+
+/**
+ * 「回函是否相符」标签 —— 列表列专用（v2.25）。
+ *
+ * **判定口径（业务硬规则，不可违背）**：
+ * · 印章落「信息证明无误」区 → **相符**；落「信息不符」区 → **不相符**；未识别 → 无法判定；
+ * · 银行函证再叠加「询证事项逐项核对」—— **有差异即判不相符**；
+ * · 人工填写过回函结果后（`resultInfo.matched`），**以人工值为准**。
+ *
+ * **为什么必须区分来源**：项目底线是「AI 只出建议、人工确认才算数」。
+ * 未人工填写时带 `✦` 前缀与「AI 建议」说明，避免读者把 AI 结论误当成已确认的结论。
+ *
+ * 视觉口径与 `RiskTag` 一致（v2.23）：**浅底无边框 + 深档语义色文字 + 字重 500**；
+ * 「无法判定」走中性灰 —— 它不是结论，只是一种未知。
+ */
+export function MatchTag({
+  matched,
+  byAi,
+  basis,
+  reasons,
+}: {
+  /** 相符 = true；不相符 = false；无法判定 = null */
+  matched: boolean | null
+  /** 是否为 AI 建议（回函结果尚未人工填写） */
+  byAi?: boolean
+  /** 一句话依据，如「印章落于「信息证明无误」区」 */
+  basis?: string
+  /** 不相符时的原因 / 差异说明（与「AI 风险」列一致：只用悬停，不加图标） */
+  reasons?: string[]
+}) {
+  const cfg =
+    matched === true
+      ? { text: '相符', color: 'var(--c-risk-low-text)', bg: 'var(--c-risk-low-bg)' }
+      : matched === false
+        ? { text: '不相符', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' }
+        : { text: '无法判定', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' }
+
+  const tag = (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 20,
+        padding: '0 6px',
+        borderRadius: 'var(--radius-tag)',
+        fontSize: 12,
+        lineHeight: 1,
+        color: cfg.color,
+        background: cfg.bg,
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {byAi && matched !== null && <span style={{ marginRight: 2, fontSize: 10 }}>✦</span>}
+      {cfg.text}
+    </span>
+  )
+
+  const tips: string[] = []
+  if (matched === null) {
+    tips.push('AI 未能识别印章落章区域，无法自动判定 —— 待人工判定')
+  } else if (byAi) {
+    tips.push('✦ AI 建议 —— 尚未经人工确认，以「填写回函结果」时确认的结论为准')
+  } else {
+    tips.push('已人工确认（回函结果填写）')
+  }
+  if (basis) tips.push(`依据：${basis}`)
+  if (reasons?.length) tips.push(...reasons.map((r) => `· ${r}`))
+
+  return (
+    <Tooltip
+      title={
+        <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+          {tips.map((t) => (
+            <div key={t}>{t}</div>
+          ))}
+        </div>
+      }
+    >
+      {tag}
+    </Tooltip>
+  )
+}
+
 /* ------------------- 人工核验徽标 ------------------- */
 
+/**
+ * 人工核验徽标 —— 「待核验」中性灰 / 「✓ 已人工核验」主色。
+ *
+ * 配色调整（v2.25，用户反馈「已人工核验的标签颜色需要调整」）：
+ * 原先已核验态是「墨色文字 + 8% 主色底」，与「待核验」的灰底墨字**拉不开差距**，
+ * 扫视时几乎看不出哪几行已经核验过。现改为**主色文字**（`--c-primary` 在此浅底上约 5.5:1，
+ * 达 WCAG AA）+ 字重 500 —— 与 v2.23 对风险标签的同一处理口径：
+ * 靠「文字着色 + 字重」提辨识度，而不是加描边或新色相。
+ */
 export function VerifyBadge({
   status,
   by,
@@ -120,8 +214,9 @@ export function VerifyBadge({
             borderRadius: 'var(--radius-tag)',
             fontSize: 12,
             lineHeight: 1,
-            color: 'var(--c-text-1)',
+            color: 'var(--c-primary)',
             background: 'var(--c-primary-bg)',
+            fontWeight: 500,
             whiteSpace: 'nowrap',
             cursor: 'help',
           }}
@@ -143,6 +238,7 @@ export function VerifyBadge({
         lineHeight: 1,
         color: 'var(--c-text-3)',
         background: 'var(--c-tag-bg)',
+        fontWeight: 500,
         whiteSpace: 'nowrap',
       }}
     >
@@ -151,32 +247,16 @@ export function VerifyBadge({
   )
 }
 
-/* ------------------- AI 核验进度徽标 ------------------- */
+/* ------------------- （已移除）AI 核验进度徽标 ------------------- */
 
-export function VerifyProgress({
-  done,
-  total,
-  risk,
-}: {
-  done: number
-  total: number
-  risk?: RiskLevel
-}) {
-  if (total === 0) {
-    return (
-      <span className="muted" style={{ fontSize: 13 }}>
-        —
-      </span>
-    )
-  }
-  // 文字只走墨色；已完成退灰，未完成用主色提示「还差几项」
-  const color = done === total ? 'var(--c-text-1)' : 'var(--c-primary)'
-  return (
-    <span className="num" style={{ color, fontWeight: 500, fontSize: 13 }}>
-      {done}/{total}
-    </span>
-  )
-}
+/*
+ * 原 `VerifyProgress`（显示 `6/6` 这类「AI 检测点完成计数」）已于 v2.25 删除。
+ *
+ * 删除原因（用户）：「不展示 6/6 这个数字，因为用户不知道 6/6 是啥、有什么含义。」
+ * 这个计数属于**系统内部指标** —— 列表与核验弹窗上都不再出现；
+ * AI 具体查了哪几项，在「AI 核验」页正文里逐项列出即可（那才是用户要看的「依据」）。
+ * 需要恢复时从 git 历史取回即可（数据结构里的 `completedModules` / `totalModules` 仍然保留）。
+ */
 
 /* ------------------- 核验明细的统一骨架 ------------------- */
 
