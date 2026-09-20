@@ -4,9 +4,9 @@ import {
   CheckCircleFilled,
   CloseCircleFilled,
   CloudUploadOutlined,
+  DoubleRightOutlined,
   FilePdfOutlined,
   LoadingOutlined,
-  MinusOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
@@ -345,8 +345,16 @@ export default function RecognitionDrawer() {
       width={920}
       open={state.recognitionOpen}
       onClose={() => dispatch({ type: 'CLOSE_RECOGNITION' })}
-      mask={false}
-      styles={{ body: { paddingTop: 12 } }}
+      /*
+       * 遮罩「存在但完全不可见」—— 刻意不用 mask={false}：
+       * 不渲染遮罩层时 antd 也不会绑定「点击外部 → onClose」，
+       * 于是左侧列表点上去毫无反应。保留遮罩层、只把背景设为透明，
+       * 左侧列表的视觉逐位不变，但点一下就能最小化工作台。
+       */
+      styles={{
+        mask: { background: 'transparent' },
+        body: { paddingTop: 12 },
+      }}
       footer={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: 'var(--c-text-2)' }}>
@@ -373,9 +381,15 @@ export default function RecognitionDrawer() {
             )}
           </span>
           <span style={{ marginLeft: 'auto' }} />
-          <Button icon={<MinusOutlined />} onClick={() => dispatch({ type: 'CLOSE_RECOGNITION' })}>
-            收起
-          </Button>
+          {/* 该动作的用户语义是「最小化」：只收起抽屉，识别继续进行，由右下角悬浮卡接管 */}
+          <Tooltip title="最小化到右下角的识别进度卡 —— 识别继续进行，可随时展开">
+            <Button
+              icon={<DoubleRightOutlined />}
+              onClick={() => dispatch({ type: 'CLOSE_RECOGNITION' })}
+            >
+              最小化
+            </Button>
+          </Tooltip>
           <Button
             type="primary"
             disabled={!allDone || pendingAssignCount > 0}

@@ -1,16 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { App, Button, Col, Empty, Input, Row, Select, Space, Table, Tag, Tooltip } from 'antd'
+import { App, Button, Col, Dropdown, Empty, Input, Row, Select, Space, Table, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   CloudUploadOutlined,
+  DownOutlined,
   FileExcelOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
-  ThunderboltOutlined,
-  WarningFilled,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { EXPRESS_IMPORT_RESULT } from '@/mock/expressImport'
@@ -23,7 +22,6 @@ import ReplyDocEntryModal from '@/components/ReplyDocEntryModal'
 import ReplyResultModal from '@/components/ReplyResultModal'
 import { RiskTag, VerifyBadge, VerifyProgress } from '@/components/Marks'
 import { afterPaint } from '@/utils/afterPaint'
-import { buildQuickConfirmMap } from '@/utils/quickConfirm'
 
 /** 四个业务入口的全屏弹窗 */
 type ModalKind = 'view' | 'verify' | 'doc' | 'result'
@@ -32,7 +30,6 @@ type ModalKind = 'view' | 'verify' | 'doc' | 'result'
 /* 回函进度 —— 用户视角的「下一步要做什么」                              */
 /* ------------------------------------------------------------------ */
 
-/** 进度文字色 —— 使用深一档语义色，保证 12px 文字对比度达标 */
 /** 进度文字统一墨色（颜色只走底色），已完成退灰 */
 const PROGRESS_COLOR: Record<ReplyProgress, string> = {
   待确认快递信息: 'var(--c-text-1)',
@@ -40,11 +37,27 @@ const PROGRESS_COLOR: Record<ReplyProgress, string> = {
   已完成: 'var(--c-text-3)',
 }
 
+/**
+ * 「下一步该做什么」—— **直写在进度列里**，不靠悬停。
+ *
+ * 这是本轮针对「第一次使用不知道该点哪个」的核心改动：原先进度列只写状态
+ * （`待确认快递信息`），用户还得自己把它翻译成一个动作；现在把动作直接写出来，
+ * 且**与操作列主按钮文案严格同词** —— 用户在同一行里就能对上「说的就是这个按钮」。
+ */
+const NEXT_STEP: Record<ReplyProgress, string | null> = {
+  待确认快递信息: '确认回函快递信息',
+  待填写回函结果: '填写回函结果',
+  /** 已完成没有「下一步」—— 修正已填内容走「更多」，不占用主按钮位 */
+  已完成: null,
+}
+
+/** 进度列的悬停说明 —— 只补充「为什么要这么做」，不重复已经直写出来的动作 */
 const PROGRESS_HINT: Record<ReplyProgress, string> = {
   待确认快递信息:
-    'AI 已识别并归属到函证，等待人工核对回函快递信息 —— 这一步同时完成 AI 核验的人工确认与留痕（唯一的核验签字动作）',
-  待填写回函结果: '回函快递信息已确认，等待填写回函结果 —— AI 核验结论已带入表单，采纳或修改后保存',
-  已完成: '回函快递信息与回函结果均已人工确认',
+    'AI 已识别并归属到函证。这一步同时完成 AI 六项检测的人工确认与留痕 —— 全流程唯一的核验签字动作',
+  待填写回函结果: '回函快递信息已确认。AI 核验结论已带入表单，逐项采纳或修改后保存即归档',
+  已完成:
+    '回函快递信息与回函结果均已人工确认。如需修正，在「更多」里打开「回函快递信息」或「回函结果」—— 改后仍保持「已完成」，并记录修改人与时间',
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,16 +185,21 @@ interface FilterState {
 const EMPTY_FILTER: FilterState = {}
 
 export default function ReplyList() {
-  const { modal, message } = App.useApp()
+  const { modal } = App.useApp()
   const { state, dispatch } = useApp()
 
   const [form, setForm] = useState<FilterState>(EMPTY_FILTER)
   const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER)
-  /** 四个业务入口共用一个弹窗状态 —— 保证不会同时打开多个弹窗 */
-  const [activeModal, setActiveModal] = useState<{ kind: ModalKind; recordId: string } | null>(null)
+  /**
+   * 四个业务入口共用一个弹窗状态 —— 保证不会同时打开多个弹窗。
+   * `note` 只在从展开行的历次回函打开「查看」时携带，用于说明该次回函的语境。
+   */
+  const [activeModal, setActiveModal] = useState<{
+    kind: ModalKind
+    recordId: string
+    note?: ReactNode
+  } | null>(null)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
-  /** 批量确认的勾选项 —— 存函证编号（列表行粒度是函证，不是单次回函） */
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
 
   /* ------------------------- 归并、筛选与排序 ------------------------- */
 
@@ -220,40 +238,6 @@ export default function ReplyList() {
       })
   }, [rows, filter])
 
-  /* ------------------------- 无风险件快速通道 ------------------------- */
-
-  /**
-   * 判定结果整表算一次再查表。
-   * 判定内部要构造十余个预填字段对象，若逐行实时算，会在筛选、输入关键字等高频渲染中反复重算。
-   */
-  const quickMap = useMemo(() => buildQuickConfirmMap(state.records), [state.records])
-
-  /** 当前筛选结果里可快速确认的封数（供批量操作条提示口径） */
-  const quickEligibleCount = useMemo(
-    () => data.filter((row) => quickMap.get(row.main.id)?.ok).length,
-    [data, quickMap],
-  )
-
-  const runQuickConfirm = (recordIds: string[]) => dispatch({ type: 'QUICK_CONFIRM', recordIds })
-
-  /**
-   * 如实反馈快速确认的实际生效条数。
-   * reducer 会逐条复校，生效条数可能少于请求条数 —— 不给「已确认 N 封」的虚假承诺。
-   */
-  useEffect(() => {
-    const result = state.quickConfirmResult
-    if (!result) return
-    if (result.applied === 0) {
-      message.warning('没有可快速确认的函证，请逐条人工核对')
-    } else if (result.applied < result.requested) {
-      message.warning(
-        `已快速确认 ${result.applied} 封；另有 ${result.requested - result.applied} 封状态已变化，请逐条核对`,
-      )
-    } else {
-      message.success(`已快速确认 ${result.applied} 封，核验人与时间已留痕`)
-    }
-  }, [state.quickConfirmResult, message])
-
   const activeChips = useMemo(() => {
     const chips: { key: keyof FilterState; label: string }[] = []
     if (filter.keyword) chips.push({ key: 'keyword', label: `关键字：${filter.keyword}` })
@@ -286,13 +270,6 @@ export default function ReplyList() {
    */
   const closeModal = () => afterPaint(() => setActiveModal(null))
 
-  const toggleExpand = (confirmationNo: string) =>
-    setExpandedKeys((keys) =>
-      keys.includes(confirmationNo)
-        ? keys.filter((k) => k !== confirmationNo)
-        : [...keys, confirmationNo],
-    )
-
   const confirmDelete = (row: ConfirmationRow) =>
     modal.confirm({
       title: '确认删除该函证的回函记录？',
@@ -305,35 +282,6 @@ export default function ReplyList() {
       cancelText: '取消',
       onOk: () => dispatch({ type: 'REMOVE_CONFIRMATION', confirmationNo: row.confirmationNo }),
     })
-
-  /** 批量快速确认 —— 批量动作必须二次确认，并列明将确认的函证编号与动作内容 */
-  const confirmBatchQuick = () => {
-    const nos = selectedKeys
-    /*
-     * 勾选粒度是「函证」，而状态更新粒度是「该函证的最终有效回函」那条记录 —— 这里做一次映射。
-     * 映射不到的（记录已被删除等）直接忽略，不让整批动作因此失败。
-     */
-    const recordIds = nos
-      .map((no) => rows.find((r) => r.confirmationNo === no)?.main.id)
-      .filter((id): id is string => Boolean(id))
-
-    modal.confirm({
-      title: `确认对已选 ${nos.length} 封函证执行快速确认？`,
-      content: (
-        <div style={{ fontSize: 13, lineHeight: 1.9 }}>
-          <div>
-            将标记「已人工核验」（核验人：张审计，记录当前时间），并把回函进度推进到「待填写回函结果」。
-          </div>
-          <div style={{ marginTop: 6, color: 'var(--c-text-2)' }}>函证编号：{nos.join('、')}</div>
-        </div>
-      ),
-      okText: '确认',
-      onOk: () => {
-        runQuickConfirm(recordIds)
-        setSelectedKeys([])
-      },
-    })
-  }
 
   /* ------------------------- 列定义 ------------------------- */
   /* 说明：不使用组间竖分隔线 —— 分组信息由列顺序与表头文字承担 */
@@ -367,64 +315,36 @@ export default function ReplyList() {
         </span>
       ),
     },
-    {
-      title: (
-        <span>
-          回函次数
-          <Tooltip title="同一函证多次回函时，以最近一次回函的数据为准；历史回函可在展开行中查看，可不处理">
-            <QuestionCircleOutlined
-              style={{ marginLeft: 4, fontSize: 12, color: 'var(--c-text-3)' }}
-            />
-          </Tooltip>
-        </span>
-      ),
-      key: 'replyCount',
-      width: 104,
-      render: (_, row) => {
-        const count = row.history.length
-        if (count <= 1)
-          return (
-            <span className="muted" style={{ fontSize: 13 }}>
-              1 次
-            </span>
-          )
-        const expanded = expandedKeys.includes(row.confirmationNo)
-        return (
-          <Button
-            type="link"
-            size="small"
-            style={{ padding: 0, height: 'auto', fontSize: 13 }}
-            aria-expanded={expanded}
-            onClick={() => toggleExpand(row.confirmationNo)}
-          >
-            {count} 次
-            <RightOutlined
-              style={{
-                fontSize: 9,
-                marginLeft: 2,
-                transform: expanded ? 'rotate(90deg)' : 'none',
-                transition: 'transform var(--motion-fast) ease-out',
-              }}
-            />
-          </Button>
-        )
-      },
-    },
-
     /* ---------- 回函进度 ---------- */
     {
       title: '回函进度',
       key: 'progress',
-      width: 138,
-      render: (_, row) => (
-        <Tooltip title={PROGRESS_HINT[row.main.replyProgress]}>
-          <span
-            style={{ color: PROGRESS_COLOR[row.main.replyProgress], fontSize: 13, cursor: 'help' }}
-          >
-            {row.main.replyProgress}
-          </span>
-        </Tooltip>
-      ),
+      width: 176,
+      render: (_, row) => {
+        const p = row.main.replyProgress
+        return (
+          <Tooltip title={PROGRESS_HINT[p]}>
+            <span
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 0,
+                cursor: 'help',
+                lineHeight: 1.25,
+              }}
+            >
+              <span style={{ color: PROGRESS_COLOR[p], fontSize: 13 }}>{p}</span>
+              {/*
+               * 下一步动作直写在这里，且与操作列主按钮**严格同词**。
+               * 已完成没有下一步（修正走「更多」），故这一行不显示 —— 与空着的主按钮位保持一致。
+               */}
+              {NEXT_STEP[p] && (
+                <span style={{ color: 'var(--c-text-3)', fontSize: 12 }}>下一步：{NEXT_STEP[p]}</span>
+              )}
+            </span>
+          </Tooltip>
+        )
+      },
     },
     {
       title: 'AI 风险',
@@ -465,105 +385,67 @@ export default function ReplyList() {
 
     /* ---------- 操作 ---------- */
     /*
-     * 收敛为「一个主按钮 + AI 核验 + 更多」：
-     * 主按钮按回函进度直接给出「下一步」，业务人员不必自己判断该点哪个入口；
-     * 无风险件的主按钮位让给「一键确认」，有风险件则永远没有快速通道。
+     * 「下一步 + 查看 + 更多」—— **每行结构完全一致**，只有主按钮文案随进度变化。
+     *
+     * 收敛的动因：此前操作列有 5 个平铺入口，高亮位置随进度移动，无风险件还会多出
+     * 一个「一键确认」——同一列里按钮因行而异，业务人员建立不起稳定记忆，
+     * 第一次使用更无从判断「该点哪个、点了会怎样」。现在每行只有三个固定位置：
+     *   ① 主按钮 = 「这一步该做什么」（文案与「回函进度」列的小字严格同词）
+     *   ② 查看   = 只读看函证
+     *   ③ 更多   = 其余入口（回函快递信息 / 回函结果 / AI 核验 / 删除）
+     * 下拉里**不放「查看」** —— 外部已有，重复入口正是 v2.15 用户亲自否决过的问题。
      */
     {
       title: '操作',
       key: 'action',
-      width: 320,
+      width: 220,
       fixed: 'right',
       render: (_, row) => {
         const m = row.main
-        const quick = quickMap.get(m.id)
-
-        /**
-         * 两个业务入口的分工：
-         *   · **常驻** —— 已填写过的内容随时可以重新打开查看与修改（这正是「填过就改不了」的根因）
-         *   · **高亮** —— 当前该做的那一个用主色承担「下一步」引导，因此不再需要额外的主按钮
-         *   · **无风险件**的主色位让给「一键确认」，「回函快递信息」降为普通链接（不出现两个主色按钮）
-         *   · **待确认阶段不呈现「回函结果」**：SUBMIT_RESULT 会把核验状态置为已核验，
-         *     从该状态进来等于绕过「确认回函快递信息」这个唯一留痕入口（审计底线）
-         */
         const awaitingExpress = m.replyProgress === '待确认快递信息'
-        const expressHighlight = awaitingExpress && !quick?.ok
-        const resultHighlight = m.replyProgress === '待填写回函结果'
 
         /**
-         * 待核验且确有风险原因 → AI 核验入口给提示（哪几封必须看依据）。
-         * 已核验的行不再提醒（避免长期噪音）；无风险的行也不需要引导去看。
+         * 待核验且确有风险原因 → 需要去看依据的行，在「更多」按钮上给一句悬停说明。
+         * 入口虽然收进了下拉，但「哪几封必须看依据」不该完全无声；
+         * 不过**不再用图标标记** —— 操作列里的感叹号被判为视觉噪音，
+         * 风险等级已在「AI 风险」列用标签表达，此处不重复。
          */
         const needsVerifyAttention =
           m.verifyStatus === 'pending' && (m.verification?.riskReasons.length ?? 0) > 0
 
+        /**
+         * 主按钮 = 「这一步该做什么」；文案与「回函进度」列的小字严格同词。
+         *
+         * **已完成行不显示主按钮** —— 已完成没有「下一步」：修正已填内容是补正行为，
+         * 不是流程动作，从「更多」里的「回函快递信息」/「回函结果」进入即可。
+         */
+        const primary: { text: string; kind: ModalKind } | null =
+          m.replyProgress === '待确认快递信息'
+            ? { text: '确认回函快递信息', kind: 'doc' }
+            : m.replyProgress === '待填写回函结果'
+              ? { text: '填写回函结果', kind: 'result' }
+              : null
+
+        /** 悬停直接说明「点了会发生什么」—— 不让人靠猜 */
+        const primaryHint =
+          m.replyProgress === '待确认快递信息'
+            ? '点击后：打开回函快递信息逐项确认；确认将标记「已人工核验」并记录核验人与时间，进度推进到「待填写回函结果」'
+            : '点击后：打开回函结果填写；处理完必填项并保存后归档，进度变为「已完成」'
+
         return (
           <Space size={2}>
-            {quick?.ok && (
-              <Tooltip title="AI 全项通过且无低置信字段：点击即采纳全部 AI 资料、标记「已人工核验」，并把进度推进到「待填写回函结果」（不跳转，便于先把一批过完）">
+            {primary && (
+              <Tooltip title={primaryHint}>
                 <Button
                   size="small"
                   type="primary"
-                  icon={<ThunderboltOutlined />}
-                  onClick={() => runQuickConfirm([m.id])}
+                  ghost
+                  onClick={() => setActiveModal({ kind: primary.kind, recordId: m.id })}
                 >
-                  一键确认
+                  {primary.text}
                 </Button>
               </Tooltip>
             )}
-
-            <Tooltip
-              title={
-                awaitingExpress
-                  ? `确认回函快递信息后可填写回函结果${quick?.reason ? `；未走快速通道：${quick.reason}` : ''}`
-                  : '可随时打开查看或修改已确认的回函快递信息'
-              }
-            >
-              <Button
-                type={expressHighlight ? 'primary' : 'link'}
-                ghost={expressHighlight}
-                size="small"
-                style={expressHighlight ? undefined : { padding: '0 4px' }}
-                onClick={() => setActiveModal({ kind: 'doc', recordId: m.id })}
-              >
-                回函快递信息
-              </Button>
-            </Tooltip>
-
-            {!awaitingExpress && (
-              <Tooltip title="可随时打开查看或修改已填写的回函结果">
-                <Button
-                  type={resultHighlight ? 'primary' : 'link'}
-                  ghost={resultHighlight}
-                  size="small"
-                  style={resultHighlight ? undefined : { padding: '0 4px' }}
-                  onClick={() => setActiveModal({ kind: 'result', recordId: m.id })}
-                >
-                  回函结果
-                </Button>
-              </Tooltip>
-            )}
-
-            <Tooltip
-              title={
-                needsVerifyAttention
-                  ? `存在 ${m.verification?.riskReasons.length ?? 0} 项风险提示，建议先核对依据`
-                  : undefined
-              }
-            >
-              <Button
-                type="link"
-                size="small"
-                style={{ padding: '0 4px' }}
-                disabled={!m.verification}
-                onClick={() => setActiveModal({ kind: 'verify', recordId: m.id })}
-              >
-                {needsVerifyAttention && (
-                  <WarningFilled style={{ color: 'var(--c-risk-high)', marginRight: 2 }} />
-                )}
-                AI 核验
-              </Button>
-            </Tooltip>
 
             <Button
               type="link"
@@ -574,15 +456,38 @@ export default function ReplyList() {
               查看
             </Button>
 
-            <Button
-              type="link"
-              size="small"
-              danger
-              style={{ padding: '0 4px' }}
-              onClick={() => confirmDelete(row)}
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'doc', label: '回函快递信息' },
+                  /*
+                   * 待确认阶段**不呈现**该项（不是禁用）：SUBMIT_RESULT 会把核验状态置为已核验，
+                   * 从该状态进入等于绕过「确认回函快递信息」这个唯一的核验留痕入口（审计底线）。
+                   */
+                  ...(awaitingExpress ? [] : [{ key: 'result', label: '回函结果' }]),
+                  { key: 'verify', label: 'AI 核验', disabled: !m.verification },
+                  { type: 'divider' as const },
+                  { key: 'delete', label: '删除', danger: true },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'delete') confirmDelete(row)
+                  else setActiveModal({ kind: key as ModalKind, recordId: m.id })
+                },
+              }}
             >
-              删除
-            </Button>
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: '0 4px' }}
+                title={
+                  needsVerifyAttention
+                    ? `存在 ${m.verification?.riskReasons.length ?? 0} 项风险提示，建议先核对依据`
+                    : undefined
+                }
+              >
+                更多 <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
           </Space>
         )
       },
@@ -592,26 +497,144 @@ export default function ReplyList() {
   /* ------------------------- 展开行 ------------------------- */
   /* 说明：历次回函区块使用浅底而非边框 —— 展开区已有一层卡片，不再嵌套第二个框 */
 
-  /** 均分列宽（fr）—— 去掉弹性列后，相邻字段不会再被撑出大片空白 */
-  const HISTORY_GRID = '72px 1.3fr 1fr 1.3fr 1.1fr 1.2fr'
+  /**
+   * 历史回函表 —— 含只读「查看」列。
+   * 历史回函**只能看不能改**：它们已被覆盖、不参与统计，给修改入口只会让人误改到无效数据。
+   * 注：列里**不含「状态」**（全表恒为「已被覆盖」，含义上移到区块标题），
+   * 也**不含当前有效那一次**（它在上面的「当前有效回函」分组里，避免同一次数据出现两处）。
+   */
+  const HISTORY_GRID = '72px 1.3fr 1fr 1.3fr 1.1fr 56px'
 
   const expandedRowRender = (row: ConfirmationRow) => {
     const { main, history } = row
     const v = main.verification
-    const multi = history.length > 1
+    /** 回函总次数（含本次）—— 用于「第 N 次」的表达 */
+    const times = history.length
+    /** 历史回函 = 除当前有效之外的那些 */
+    const past = history.filter((h) => h.id !== main.id)
+    /** 分组内是否还有后续块（决定「函件与物流」的下间距） */
+    const grouped = Boolean(v) || Boolean(main.lastEditedAt)
 
     return (
       <div style={{ padding: '4px 12px 8px' }}>
-        {/* 历次回函 —— 仅多次回函的函证展示 */}
-        {multi && (
-          <div style={{ marginBottom: 14 }}>
-            <div className="section-title" style={{ marginBottom: 8 }}>
-              历次回函
+        {/*
+         * 当前有效回函 —— 下面这几块讲的都是**同一次回函**（该函证的最终有效那次），
+         * 所以收进一个带标题的分组：标题写明「第几次 + 回函时间」，
+         * 读者不必再猜「这几块数据到底属于谁」。
+         */}
+        <div
+          className="subtle-block"
+          style={{ padding: '12px 14px', marginBottom: past.length > 0 ? 14 : 0 }}
+        >
+          <div className="section-title" style={{ marginBottom: 10 }}>
+            当前有效回函
+            {times > 1 && (
+              <span className="muted" style={{ fontWeight: 400 }}>
+                　· 第 {times} 次
+              </span>
+            )}
+            {main.replyDate && (
               <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
-                （以最新一次为准，历史回函可不处理）
+                　· {main.replyDate}
+              </span>
+            )}
+          </div>
+
+          {/* 函件与物流 */}
+          <div style={{ marginBottom: grouped ? 12 : 0 }}>
+            <div className="section-title" style={{ marginBottom: 8 }}>
+              函件与物流
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
+              <FieldCell label="发函方式" value={main.sendMethod} />
+              <FieldCell label="快递公司" value={main.expressCompany ?? '—'} />
+              <FieldCell label="快递单号" value={<span className="num">{main.expressNo ?? '—'}</span>} />
+              <FieldCell label="发函登记" value={<span className="num">{main.sendDate}</span>} />
+              <FieldCell label="回函登记" value={<span className="num">{main.replyDate ?? '—'}</span>} />
+            </div>
+          </div>
+
+          {/* 修改留痕 —— 仅在已归档数据被改动过后出现，不做常驻噪音 */}
+          {main.lastEditedAt && (
+            <div style={{ marginBottom: v ? 12 : 0 }}>
+              <div className="section-title" style={{ marginBottom: 8 }}>
+                修改留痕
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
+                <FieldCell label="最近修改" value={<span className="num">{main.lastEditedAt}</span>} />
+                <FieldCell label="修改人" value={main.lastEditedBy ?? '—'} />
+              </div>
+            </div>
+          )}
+
+          {/* AI 核验结论 */}
+          {v && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span className="section-title">AI 核验结论</span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Button
+                    size="small"
+                    type="primary"
+                    ghost
+                    onClick={() => setActiveModal({ kind: 'verify', recordId: main.id })}
+                  >
+                    查看核验详情
+                  </Button>
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+                <FieldCell
+                  label="回函一致性"
+                  value={
+                    v.consistency.diffCount > 0 ? (
+                      <b style={{ fontWeight: 600 }}>{v.consistency.diffCount} 项差异</b>
+                    ) : (
+                      '全部相符'
+                    )
+                  }
+                />
+                <FieldCell
+                  label="印章"
+                  value={
+                    v.seal.hasSeal
+                      ? `${v.seal.sealType} · ${v.seal.region}${v.seal.crossPageSeal ? ' · 有骑缝章' : ' · 无骑缝章'}`
+                      : '未检出印章'
+                  }
+                />
+                {v.bankText && (
+                  <FieldCell
+                    label="银行四要素"
+                    value={
+                      v.bankText.level === 'confirm'
+                        ? '建议归属，需人工确认'
+                        : v.bankText.fields.every((f) => f.matched)
+                          ? '全部匹配'
+                          : '存在不一致'
+                    }
+                  />
+                )}
+                {v.handwriting && (
+                  <FieldCell label="手写体" value={`已转录（位于${v.handwriting.region}）`} />
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/*
+         * 历史回函 —— 只列**本次之前**的那些（本次已在上面）。
+         * 区块**不加外层浅底**（表本身沿用行间发丝线），与上面的浅底分组形成「主（有底）/ 次（无底）」对比。
+         */}
+        {past.length > 0 && (
+          <div>
+            <div className="section-title" style={{ marginBottom: 8 }}>
+              历史回函
+              <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
+                （已被覆盖，仅供参考，可不处理）
               </span>
             </div>
-            <div className="subtle-block" style={{ overflow: 'hidden' }}>
+            <div style={{ overflow: 'hidden' }}>
               <div
                 style={{
                   display: 'grid',
@@ -627,10 +650,11 @@ export default function ReplyList() {
                 <span>回函日期</span>
                 <span>快递单号</span>
                 <span>回函情况</span>
-                <span>状态</span>
+                <span>操作</span>
               </div>
-              {history.map((h, i) => {
-                const isMain = h.id === main.id
+              {past.map((h) => {
+                /* past 已排除本次，用它在原 history 里的位置反推是第几次 */
+                const seq = times - history.findIndex((x) => x.id === h.id)
                 const c = conclusionOf(h)
                 return (
                   <div
@@ -641,105 +665,35 @@ export default function ReplyList() {
                       gap: 8,
                       padding: '8px 12px',
                       fontSize: 13,
-                      color: isMain ? 'var(--c-text-1)' : 'var(--c-text-3)',
+                      color: 'var(--c-text-3)',
+                      borderTop: '1px solid var(--c-hairline)',
                     }}
                   >
-                    <span>第 {history.length - i} 次</span>
+                    <span>第 {seq} 次</span>
                     <span className="num">{h.sendRecordNo}</span>
                     <span className="num">{h.replyDate ?? '—'}</span>
                     <span className="num">{h.expressNo ?? '—'}</span>
-                    <span style={{ fontWeight: c.danger ? 600 : undefined }}>{c.text}</span>
+                    <span>{c.text}</span>
                     <span>
-                      {isMain ? (
-                        <SoftTag color="var(--c-text-1)" bg="var(--c-risk-low-bg)">
-                          最终有效
-                        </SoftTag>
-                      ) : (
-                        <span style={{ color: 'var(--c-text-3)' }}>已被覆盖，可不处理</span>
-                      )}
+                      {/* 历史回函只读 —— 给的是「查看」而不是「修改」：它们已被覆盖、不参与统计 */}
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ padding: 0, height: 'auto', fontSize: 13 }}
+                        onClick={() =>
+                          setActiveModal({
+                            kind: 'view',
+                            recordId: h.id,
+                            note: `这是第 ${seq} 次回函，已被后续回函覆盖，仅供参考；当前有效为第 ${times} 次。本页为只读查看，如需修改请从列表行操作区的「更多」进入。`,
+                          })
+                        }
+                      >
+                        查看
+                      </Button>
                     </span>
                   </div>
                 )
               })}
-            </div>
-          </div>
-        )}
-
-        {/* 函件与物流 */}
-        <div style={{ marginBottom: v || main.lastEditedAt ? 12 : 0 }}>
-          <div className="section-title" style={{ marginBottom: 8 }}>
-            函件与物流
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
-            <FieldCell label="发函方式" value={main.sendMethod} />
-            <FieldCell label="快递公司" value={main.expressCompany ?? '—'} />
-            <FieldCell label="快递单号" value={<span className="num">{main.expressNo ?? '—'}</span>} />
-            <FieldCell label="发函登记" value={<span className="num">{main.sendDate}</span>} />
-            <FieldCell label="回函登记" value={<span className="num">{main.replyDate ?? '—'}</span>} />
-          </div>
-        </div>
-
-        {/* 修改留痕 —— 仅在已归档数据被改动过后出现，不做常驻噪音 */}
-        {main.lastEditedAt && (
-          <div style={{ marginBottom: v ? 12 : 0 }}>
-            <div className="section-title" style={{ marginBottom: 8 }}>
-              修改留痕
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
-              <FieldCell label="最近修改" value={<span className="num">{main.lastEditedAt}</span>} />
-              <FieldCell label="修改人" value={main.lastEditedBy ?? '—'} />
-            </div>
-          </div>
-        )}
-
-        {/* AI 核验结论 */}
-        {v && (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span className="section-title">AI 核验结论</span>
-              <span style={{ marginLeft: 'auto' }}>
-                <Button
-                  size="small"
-                  type="primary"
-                  ghost
-                  onClick={() => setActiveModal({ kind: 'verify', recordId: main.id })}
-                >
-                  查看核验详情并确认
-                </Button>
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
-              <FieldCell
-                label="回函一致性"
-                value={
-                  v.consistency.diffCount > 0 ? (
-                    <b style={{ fontWeight: 600 }}>{v.consistency.diffCount} 项差异</b>
-                  ) : (
-                    '全部相符'
-                  )
-                }
-              />
-              <FieldCell
-                label="印章"
-                value={
-                  v.seal.hasSeal
-                    ? `${v.seal.sealType} · ${v.seal.region}${v.seal.crossPageSeal ? ' · 有骑缝章' : ' · 无骑缝章'}`
-                    : '未检出印章'
-                }
-              />
-              {v.bankText && (
-                <FieldCell
-                  label="银行四要素"
-                  value={
-                    v.bankText.level === 'confirm'
-                      ? '建议归属，需人工确认'
-                      : v.bankText.fields.every((f) => f.matched)
-                        ? '全部匹配'
-                        : '存在不一致'
-                  }
-                />
-              )}
-              {v.handwriting && <FieldCell label="手写体" value={`已转录（位于${v.handwriting.region}）`} />}
             </div>
           </div>
         )}
@@ -951,64 +905,13 @@ export default function ReplyList() {
 
       {/* 表格 */}
       <div className="panel" style={{ padding: '4px 0' }}>
-        {/* 批量操作条 —— 勾选后出现。只有无风险件可勾选，故「已选」恒等于「可批量确认」 */}
-        {selectedKeys.length > 0 && (
-          <div
-            style={{
-              margin: '6px 12px 10px',
-              padding: '8px 12px',
-              borderRadius: 6,
-              background: 'var(--c-primary-bg)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              fontSize: 13,
-            }}
-          >
-            <span>
-              已选 <b className="num">{selectedKeys.length}</b> 封（均为无风险件）
-            </span>
-            {data.length > quickEligibleCount && (
-              <span className="muted">
-                其余 <b className="num">{data.length - quickEligibleCount}</b> 封存在风险提示，需逐条人工核对
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Button size="small" onClick={() => setSelectedKeys([])}>
-                取消选择
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<ThunderboltOutlined />}
-                onClick={confirmBatchQuick}
-              >
-                批量确认
-              </Button>
-            </span>
-          </div>
-        )}
-
         <Table<ConfirmationRow>
           size="small"
           rowKey="confirmationNo"
           columns={columns}
           dataSource={data}
-          scroll={{ x: 1344 }}
+          scroll={{ x: 1140 }}
           locale={{ emptyText: emptyNode }}
-          rowSelection={{
-            selectedRowKeys: selectedKeys,
-            onChange: (keys) => setSelectedKeys(keys as string[]),
-            columnWidth: 36,
-            getCheckboxProps: (row) => {
-              const check = quickMap.get(row.main.id)
-              return {
-                disabled: !check?.ok,
-                // 置灰原因用原生 title 呈现 —— 悬停即可看到「为什么这封不能批量勾选」
-                title: check?.ok ? undefined : (check?.reason ?? '不满足快速确认条件'),
-              }
-            },
-          }}
           rowClassName={(row) =>
             [
               row.main.risk === 'high' ? 'row-risk-high' : '',
@@ -1056,7 +959,12 @@ export default function ReplyList() {
 
       {/* 四个业务入口统一为全屏弹窗，共用一个互斥状态 */}
       <VerificationModal open={activeModal?.kind === 'verify'} record={activeRecord} onClose={closeModal} />
-      <RecordDetailModal open={activeModal?.kind === 'view'} record={activeRecord} onClose={closeModal} />
+      <RecordDetailModal
+        open={activeModal?.kind === 'view'}
+        record={activeRecord}
+        onClose={closeModal}
+        note={activeModal?.kind === 'view' ? activeModal.note : undefined}
+      />
       <ReplyDocEntryModal
         key={modalKey('doc')}
         open={activeModal?.kind === 'doc'}

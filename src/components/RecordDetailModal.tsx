@@ -1,4 +1,5 @@
 import { Button, Descriptions, Tabs } from 'antd'
+import type { ReactNode } from 'react'
 import type { ReplyRecord } from '@/types'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
@@ -31,10 +32,16 @@ export default function RecordDetailModal({
   open,
   record,
   onClose,
+  note,
 }: {
   open: boolean
   record?: ReplyRecord
   onClose: () => void
+  /**
+   * 语境提示（可选）—— 从展开行的历次回函进来时，用来说明「这是第几次、是否已被覆盖」。
+   * 不传时本页行为与之前完全一致（纯增量、向后兼容）。
+   */
+  note?: ReactNode
 }) {
   if (!record) return null
 
@@ -66,6 +73,11 @@ export default function RecordDetailModal({
       onClose={onClose}
       footer={<Button onClick={onClose}>关闭</Button>}
     >
+      {note && (
+        <div className="tone-block tone-neutral" style={{ marginBottom: 12 }}>
+          {note}
+        </div>
+      )}
       <Descriptions
         size="small"
         column={4}

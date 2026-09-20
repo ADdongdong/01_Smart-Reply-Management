@@ -490,7 +490,7 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     verification: VERIFY_QS,
   },
 
-  /* ---------- 华泰证券：1 次回函，全部相符、无任何提示 → 低风险，可快速确认 ---------- */
+  /* ---------- 华泰证券：1 次回函，全部相符、无任何提示 → 低风险待确认 ---------- */
   {
     id: 'whzf0010003-1',
     sendSeq: 1,

@@ -207,8 +207,6 @@ export interface ReplyRecord {
   verifyStatus: VerifyStatus
   verifiedBy?: string
   verifiedAt?: string
-  /** 确认方式留痕 —— manual：打开弹窗逐项确认；quick：无风险件经快速通道确认 */
-  confirmMode?: 'manual' | 'quick'
   /**
    * 回函快递信息的人工确认值（12 项）。
    * AI 识别值只作预填，人工在弹窗内采纳/修改并保存后才写入这里；

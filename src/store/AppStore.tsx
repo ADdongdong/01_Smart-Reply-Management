@@ -2,7 +2,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { ExpressImportResult, RecognitionTask, ReplyRecord, UploadBatch } from '@/types'
 import { BANK_ITEMS_QS, REPLY_RECORDS } from '@/mock/confirmations'
 import { advanceBatch } from '@/services/mockRecognition'
-import { checkQuickConfirm } from '@/utils/quickConfirm'
 import dayjs from 'dayjs'
 
 /** 演示用当前用户 —— 所有人工核验留痕都记在他名下 */
@@ -17,24 +16,26 @@ interface AppState {
   floatingVisible: boolean
   /** 识别完成后需要高亮闪烁的函证（按函证编号） */
   flashRowId: string | null
-  /** 首次使用引导 */
+  /** 操作指引弹窗是否展开 —— **不自动弹出**，只由「操作指引」入口 / 顶部问号图标手动打开 */
   onboardingVisible: boolean
   /** 演示数据是否已加载 */
   demoLoaded: boolean
   /** 快递数据导入结果（不做步骤化处理，直接展示匹配代入结果） */
   expressResult: ExpressImportResult | null
   expressOpen: boolean
-  /**
-   * 最近一次快速确认的执行结果。
-   * reducer 会逐条复校，实际生效条数可能少于请求条数 —— 界面据此如实反馈，不给虚假承诺。
-   */
-  quickConfirmResult: { requested: number; applied: number } | null
 }
 
 type Action =
   | { type: 'START_BATCH'; batch: UploadBatch }
   | { type: 'TICK' }
   | { type: 'OPEN_RECOGNITION' }
+  /**
+   * 关闭识别工作台抽屉。
+   *
+   * **用户语义是「最小化」而不是「取消」** —— 它只收起抽屉，识别任务照常继续，
+   * 并由右下角的悬浮进度卡接管（`FloatingProgress`，可再点「展开」召回）。
+   * 底栏「最小化」按钮、点抽屉外部、标题栏 `×`、`Esc` 四条入口都走这里。
+   */
   | { type: 'CLOSE_RECOGNITION' }
   | { type: 'SET_FLOATING'; visible: boolean }
   | { type: 'CLEAR_FLASH' }
@@ -47,8 +48,6 @@ type Action =
   | { type: 'RETRY_TASK'; taskId: string }
   | { type: 'SKIP_TASK'; taskId: string }
   | { type: 'CONFIRM_DOC'; recordId: string; patch?: Partial<ReplyRecord> }
-  /** 无风险件快速确认 —— 单条与批量共用（单条即长度为 1 的数组） */
-  | { type: 'QUICK_CONFIRM'; recordIds: string[] }
   /**
    * 编辑态：修改**已确认过**的回函快递信息。
    * 与 CONFIRM_DOC 的差别只有两点 —— 不推进回函进度、不重打核验留痕：
@@ -66,11 +65,15 @@ const initialState: AppState = {
   recognitionOpen: false,
   floatingVisible: false,
   flashRowId: null,
-  onboardingVisible: true,
+  /**
+   * 操作指引**不自动弹出**（默认关闭）。
+   * 进入页面即弹会打断正在用它的人，而且刷新一次弹一次；
+   * 需要时从主操作行的「操作指引」按钮、或顶部导航的问号图标手动打开。
+   */
+  onboardingVisible: false,
   demoLoaded: false,
   expressResult: null,
   expressOpen: false,
-  quickConfirmResult: null,
 }
 
 /** 从原始 mock 中取回某个函证的核验结果 */
@@ -324,44 +327,12 @@ function reducer(state: AppState, action: Action): AppState {
                 ...action.patch,
                 replyProgress: '待填写回函结果',
                 verifyStatus: 'verified',
-                confirmMode: 'manual',
                 verifiedBy: CURRENT_USER,
                 verifiedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
               }
             : r,
         ),
       }
-
-    /**
-     * 无风险件快速确认（单条与批量共用）。
-     *
-     * 与「逐项确认」在业务语义上完全一致 —— 同样是人工动作、同样打核验留痕，
-     * 差别只有两点：一次性采纳全部 AI 资料、确认方式记为 quick。
-     *
-     * **逐条复校**：即便界面已按判定结果过滤过，这里仍重新跑一遍判定 ——
-     * 内控口径不能依赖「按钮是否显示」兜底：过期视图、竞态、以及后续新增的调用方，
-     * 都不应该能把有风险的回函确认掉。代价是 O(k) 次判定，可忽略。
-     */
-    case 'QUICK_CONFIRM': {
-      const targets = new Set(action.recordIds)
-      const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
-      let applied = 0
-
-      const records = state.records.map((r) => {
-        if (!targets.has(r.id) || !checkQuickConfirm(r).ok) return r
-        applied += 1
-        return {
-          ...r,
-          replyProgress: '待填写回函结果' as const,
-          verifyStatus: 'verified' as const,
-          confirmMode: 'quick' as const,
-          verifiedBy: CURRENT_USER,
-          verifiedAt: now,
-        }
-      })
-
-      return { ...state, records, quickConfirmResult: { requested: targets.size, applied } }
-    }
 
     /**
      * 编辑态保存 —— 只写内容与「最近修改」留痕。
