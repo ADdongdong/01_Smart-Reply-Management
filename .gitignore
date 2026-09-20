@@ -5,3 +5,6 @@ dist-ssr
 .DS_Store
 .vite
 *.log
+
+# 本地智能体数据（记忆 / 计划 / 会话产物），不参与 git 同步
+.codebuddy/
