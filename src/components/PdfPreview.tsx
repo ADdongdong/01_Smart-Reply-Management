@@ -19,9 +19,15 @@ import { DEFAULT_PREVIEW_MODE, browserSampleUrlOf, type PreviewMode } from '@/co
  *
  * 视图可由外部受控（`viewMode` + `onViewModeChange`）—— AI 核验页据此在切到「印章识别」时
  * 自动切到批注视图；不传则内部自管理。`forceAnnotated` 用于锁定批注视图且不显示切换按钮。
+ *
+ * 另有两个「换内容 / 换范围」的入口，供**预览的不是整份回函**的场景使用：
+ * · `fileUrl` —— 直接指定文件（如快递面单：一份独立的单页面单扫描件），不传则按函证编号推断；
+ * · `singlePage` —— 只渲染 `page` 那一页（面单只看一页，不把整份回函铺出来）。
  */
 export default function PdfPreview({
   confirmationNo,
+  fileUrl,
+  singlePage = false,
   entity = '广东证券股份有限公司',
   indexNo = 'LC2026006906',
   page = 1,
@@ -32,10 +38,21 @@ export default function PdfPreview({
   height = 420,
   handwriting,
   forceAnnotated = false,
+  hideViewToggle = false,
   viewMode,
   onViewModeChange,
 }: {
   confirmationNo: string
+  /**
+   * 直接指定要渲染的文件地址；不传则按函证编号推断回函附件样例。
+   * 用于**内容不是回函附件**的预览（如快递面单：一份独立的单页面单扫描件）。
+   */
+  fileUrl?: string
+  /**
+   * **只渲染 `page` 那一页** —— 用于只看单页的场景（快递面单）。
+   * 与 `hideViewToggle` 搭配使用：面单上没有印章 / 落章区域 / 手写区，也没有其它页可看。
+   */
+  singlePage?: boolean
   /** 以下三项由调用方传入，原件渲染不依赖（回函文件自带这些信息），保留以兼容既有调用 */
   entity?: string
   indexNo?: string
@@ -49,6 +66,11 @@ export default function PdfPreview({
   handwriting?: string
   /** 锁定为 AI 批注视图，不提供切换（需要叠加定位框时使用） */
   forceAnnotated?: boolean
+  /**
+   * 隐藏「原始文件 / AI 批注」切换 —— 用于**本身没有 AI 批注可看**的预览
+   * （如快递面单页：面单上没有印章、落章区域与手写区，留着切换只会误导）。
+   */
+  hideViewToggle?: boolean
   /** 受控视图（配合 `onViewModeChange` 使用；不传则内部自管理） */
   viewMode?: PreviewMode
   onViewModeChange?: (mode: PreviewMode) => void
@@ -66,7 +88,7 @@ export default function PdfPreview({
    * 视图切换 —— 固定在预览右上角，当前视图用主色实心按钮标识，
    * 让用户随时知道「现在看的是原件，还是带 AI 批注的原件」。
    */
-  const switcher = !forceAnnotated && (
+  const switcher = !forceAnnotated && !hideViewToggle && (
     <div
       style={{
         position: 'absolute',
@@ -104,8 +126,9 @@ export default function PdfPreview({
     <div style={{ position: 'relative' }}>
       {/* 批注开关只切换叠加层，pdf.js 画布始终复用 —— 切换不重渲染、不闪动 */}
       <AnnotatedPdfPreview
-        fileUrl={browserSampleUrlOf(confirmationNo)}
+        fileUrl={fileUrl ?? browserSampleUrlOf(confirmationNo)}
         page={page}
+        singlePage={singlePage ? page : undefined}
         height={height}
         sealBoxes={annotated ? sealBoxes : []}
         showRegions={annotated && showRegions}

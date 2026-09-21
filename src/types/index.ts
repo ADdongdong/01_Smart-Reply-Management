@@ -204,6 +204,14 @@ export interface ReplyRecord {
   expressCompany?: string
   expressNo?: string
   replyFile?: string
+  /**
+   * 快递面单。
+   *
+   * 快递面单**不是单独上传的文件** —— 它拼接在回函文件里（往来函证是「多封回函 + 面单」
+   * 拼成一个 PDF），单号与所属函证都由识别阶段读出。该字段存识别出的面单文件名；
+   * 「回函快递信息」弹窗左侧只看面单，面单内容按函证编号取（见 `config/preview.ts`
+   * 的 `faceSheetUrlOf`），**不存页码** —— 界面只渲染面单本身那一页。
+   */
   faceSheet?: string
   replyProgress: ReplyProgress
   hasReplied: boolean

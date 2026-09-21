@@ -5,12 +5,14 @@ import {
   ClearOutlined,
   CloudUploadOutlined,
   FilePdfOutlined,
+  InboxOutlined,
   InfoCircleFilled,
   ThunderboltOutlined,
   WarningFilled,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { buildPrefillFields } from '@/mock/confirmations'
+import { faceSheetUrlOf } from '@/config/preview'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
 import { AiChip, AiMark } from '@/components/Marks'
@@ -62,6 +64,14 @@ export default function ReplyDocEntryModal({
   )
 
   if (!open || !record) return null
+
+  /**
+   * 面单样例地址 —— 快递面单**不是单独上传的文件**，而是回函文件里的一页
+   * （单号与所属函证都由识别阶段读出）。本弹窗只看面单，因此左侧直接渲染**一份独立的
+   * 单页面单扫描件**并**只渲染这一页**，不把整份回函附件铺出来（看函证正文从列表「查看」进）。
+   * 取不到（该回函确实没有面单，如银行函证）时给**空态**，不退回展示函证正文。
+   */
+  const faceSheetUrl = faceSheetUrlOf(record.confirmationNo)
 
   /**
    * 编辑态 —— 该函证的核验留痕已经打过（已完成人工核验）。
@@ -158,23 +168,55 @@ export default function ReplyDocEntryModal({
       }
     >
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        {/* 左：PDF 预览 */}
+        {/*
+         * 左：**回函快递面单**预览（v2.31）
+         * 本弹窗承载的是「回函快递信息」，左侧就该只给面单 —— 面单是回函文件里的一页，
+         * 这里直接渲染**面单本身的单页文件**（`fileUrl` + `singlePage`），
+         * 因此滚不出其它页、也看不到函证正文（要看正文从列表的「查看」入口进）。
+         * 面单上没有印章 / 落章区域 / 手写区，故不传 `showRegions` / `sealBoxes`，并隐藏「AI 批注」切换。
+         */}
         <div style={{ width: 460, flexShrink: 0 }}>
           <div className="panel" style={{ padding: 10 }}>
             <div className="section-title" style={{ marginBottom: 8 }}>
-              回函函证
+              回函快递面单
               <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-                来自识别切分结果
+                {faceSheetUrl ? '仅展示面单页' : '未识别到面单'}
               </span>
             </div>
-            <PdfPreview
-              confirmationNo={record.confirmationNo}
-              entity={record.entity}
-              showRegions
-              activeRegion={record.verification?.seal.region}
-              sealBoxes={record.verification?.seal.boxes}
-              height={520}
-            />
+            {faceSheetUrl ? (
+              <PdfPreview
+                confirmationNo={record.confirmationNo}
+                fileUrl={faceSheetUrl}
+                singlePage
+                hideViewToggle
+                height={520}
+              />
+            ) : (
+              /* 该回函确实没有面单（如银行函证）—— 只说明事实，不退回展示函证正文 */
+              <div
+                style={{
+                  height: 520,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--c-neutral-bg)',
+                  borderRadius: 8,
+                  padding: 24,
+                  textAlign: 'center',
+                }}
+              >
+                <InboxOutlined style={{ fontSize: 26, color: 'var(--c-text-3)' }} />
+                <div style={{ fontSize: 13, color: 'var(--c-text-2)' }}>未识别到快递面单</div>
+                <div style={{ fontSize: 12, color: 'var(--c-text-3)', lineHeight: 1.9 }}>
+                  面单随回函一并寄回、由识别阶段读出
+                  {record.type === '银行函证' && '；银行函证回函由银行自行出具，通常不含快递面单'}
+                  <br />
+                  可对照右侧「快递面单」字段核对单号；查看函证正文请回列表点「查看」
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

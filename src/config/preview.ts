@@ -70,6 +70,60 @@ export function sampleFileUrlOf(confirmationNo: string): string {
   return `${FILE_HOST}/samples/${sampleFileOf(confirmationNo)}`
 }
 
+/* ------------------------------------------------------------------ */
+/* 快递面单样例（独立单页扫描件）                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 面单样例目录。
+ *
+ * **快递面单不是一个单独上传的文件，而是回函文件里的一页** —— 但界面上只看面单
+ * （「回函快递信息」弹窗左侧），因此这里直接放**单页的面单扫描件**，让预览只渲染这一页、
+ * 不把整份回函附件铺出来。真实环境里面单地址由「快递面单识别」读出并回传，本表只用于演示。
+ *
+ * 目录内文件与原样例的对应关系（原文件位于 `01_售前演示数据/标准数据/快递面单/`）：
+ * · `face-sheet-0010005.pdf` ← `csyhhz0010005.pdf`（顺丰面单，尾号映射到 whzf0010005）
+ * · `face-sheet-0010014.pdf` ← `csyhhz0010014.pdf`（顺丰面单，演示数据暂无同尾号函证，预留）
+ * · `face-sheet-1.pdf`       ← `测试快递面单1.pdf`（通用样例）
+ * · `face-sheet-2.pdf`       ← `测试快递面单2.pdf`（通用样例）
+ * · `face-sheet-none.pdf`    ← `csyhhz0010016（无）.pdf`（该函证「无面单」的标记件，不参与映射）
+ */
+const FACE_SHEET_DIR = '/samples/faceSheets/'
+
+/**
+ * 按函证编号**单独指定**的面单样例；`null` = 该函证明确「无面单」，左侧渲染空态
+ * （银行函证回函由银行自行出具、通常不含快递面单）。
+ */
+const FACE_SHEET_BY_CONFIRMATION: Record<string, string | null> = {
+  whzf0010005: 'face-sheet-0010005.pdf',
+  whzf0010014: 'face-sheet-0010014.pdf',
+  'QS2024-031': null,
+}
+
+/**
+ * 通用面单样例池 —— 未单独指定的函证按**编号稳定取一张**（不用随机数，
+ * 同一封函证每次进入看到的都是同一张面单，截图与演示可复现）。
+ */
+const FACE_SHEET_POOL = ['face-sheet-1.pdf', 'face-sheet-2.pdf']
+
+/** 由函证编号算一个稳定下标 */
+function stableIndex(seed: string, mod: number): number {
+  let sum = 0
+  for (let i = 0; i < seed.length; i++) sum = (sum + seed.charCodeAt(i)) % 997
+  return sum % mod
+}
+
+/**
+ * 取某封函证的快递面单样例地址；`null` = 无面单（调用方据此显示空态，
+ * 而不是退回展示函证正文）。
+ */
+export function faceSheetUrlOf(confirmationNo: string): string | null {
+  const hit = FACE_SHEET_BY_CONFIRMATION[confirmationNo]
+  if (hit === null) return null
+  const file = hit ?? FACE_SHEET_POOL[stableIndex(confirmationNo, FACE_SHEET_POOL.length)]
+  return `${FACE_SHEET_DIR}${file}`
+}
+
 /**
  * 构造 KKFileView 预览地址。
  *

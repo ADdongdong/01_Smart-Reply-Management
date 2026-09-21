@@ -93,6 +93,9 @@ type ZoomMode = 'fit-width' | 'fit-page' | 'custom'
  * · **批注随缩放同步** —— 批注用页面百分比定位，缩放与滚动时自动贴合，无需重算坐标。
  *
  * 缩放过程先用 CSS 拉伸已渲染的 canvas 撑住视觉，停手后按新比例重渲染以保证清晰度。
+ *
+ * · **可只渲染一页**（`singlePage`）—— 用于「只看这一页」的场景（如快递面单预览）：
+ *   其余页不进 DOM、页码指示为 `1 / 1`，「适应宽度 / 适应页面」也只按这一页算。
  */
 export default function AnnotatedPdfPreview({
   fileUrl,
@@ -102,6 +105,7 @@ export default function AnnotatedPdfPreview({
   showRegions = false,
   activeRegion,
   handwriting,
+  singlePage,
 }: {
   fileUrl: string
   /** 打开时定位到的页（默认第 1 页） */
@@ -112,6 +116,11 @@ export default function AnnotatedPdfPreview({
   showRegions?: boolean
   activeRegion?: '信息证明无误区' | '信息不符区' | '未识别'
   handwriting?: string
+  /**
+   * **只渲染指定的一页**（1-based）—— 用于「只看这一页」的场景（如快递面单预览：
+   * 面单在回函拼接件里只是一页，不该把整份回函铺出来）。不传 = 渲染全部页。
+   */
+  singlePage?: number
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const pageElRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -121,20 +130,29 @@ export default function AnnotatedPdfPreview({
   const renderedRef = useRef<Map<number, number>>(new Map())
   const scaleRef = useRef(1)
 
+  /** 单页模式的页号（1-based）；`undefined` = 多页模式（默认行为） */
+  const single = singlePage && singlePage >= 1 ? Math.floor(singlePage) : undefined
+
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
-  /** 各页的 PDF 点尺寸（缩放基准） */
+  /** 各**渲染槽位**的 PDF 点尺寸（缩放基准）；单页模式下只有一项 */
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([])
+  /**
+   * 各渲染槽位对应的**真实页号**（1-based）—— 渲染、页码指示、批注层筛选都以此为准。
+   * 与 `sizes` 一一对应、由加载 effect 同步写入；单页模式下只有一项。
+   */
+  const [pageNos, setPageNos] = useState<number[]>([])
   const [viewport, setViewport] = useState({ w: 0, h: 0 })
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
   const [scale, setScale] = useState(1)
-  const [currentPage, setCurrentPage] = useState(page)
+  /** 页码指示用的是**槽位序号**（单页模式恒为 1） */
+  const [currentPage, setCurrentPage] = useState(single ? 1 : page)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [errText, setErrText] = useState('')
 
   scaleRef.current = scale
 
-  /* ---------------------- 加载文档与逐页尺寸 ---------------------- */
+  /* ---------------- 加载文档与页尺寸（单页模式只读一页） ---------------- */
 
   useEffect(() => {
     let cancelled = false
@@ -152,14 +170,22 @@ export default function AnnotatedPdfPreview({
         task = pdfjsLib.getDocument({ data })
         const d: PDFDocumentProxy = await task.promise
         if (cancelled) return
+        /*
+         * 单页模式只读被指定那页的尺寸 —— 既省一遍逐页解析，
+         * 也让「适应宽度 / 适应页面」只按这一页算（不被其它页宽高带偏）。
+         */
+        const targets = single
+          ? [Math.min(Math.max(1, single), d.numPages)]
+          : Array.from({ length: d.numPages }, (_, i) => i + 1)
         const list: { w: number; h: number }[] = []
-        for (let i = 1; i <= d.numPages; i++) {
-          const p = await d.getPage(i)
+        for (const n of targets) {
+          const p = await d.getPage(n)
           const vp = p.getViewport({ scale: 1 })
           list.push({ w: vp.width, h: vp.height })
         }
         if (cancelled) return
         setSizes(list)
+        setPageNos(targets)
         setDoc(d)
         setLoading(false)
       } catch (e) {
@@ -175,7 +201,7 @@ export default function AnnotatedPdfPreview({
       cancelled = true
       if (task) void task.destroy()
     }
-  }, [fileUrl])
+  }, [fileUrl, single])
 
   /* ---------------------- 容器尺寸与缩放计算 ---------------------- */
 
@@ -210,7 +236,7 @@ export default function AnnotatedPdfPreview({
       const target = scaleRef.current
       if (renderedRef.current.get(index) === target) return
       try {
-        const p = await d.getPage(index + 1)
+        const p = await d.getPage(pageNos[index] ?? index + 1)
         if (scaleRef.current !== target) return
         const dpr = window.devicePixelRatio || 1
         const vp = p.getViewport({ scale: target * dpr })
@@ -225,7 +251,7 @@ export default function AnnotatedPdfPreview({
         /* 渲染被取消（缩放/卸载）：下一次进入视口或缩放后会重试 */
       }
     },
-    [doc],
+    [doc, pageNos],
   )
 
   /* ---------------------- 懒渲染 + 当前页跟踪 ---------------------- */
@@ -242,7 +268,27 @@ export default function AnnotatedPdfPreview({
           visible.push(idx)
           void renderPage(idx)
         }
-        if (visible.length) setCurrentPage(Math.min(...visible) + 1)
+        /*
+         * 页码指示取「**可见面积最大**的那一页」：
+         * rootMargin 为了预渲染放宽了 400px，若直接取 `min(visible) + 1`，
+         * 会把视口外的上一页算进来（表现为「明明在第 3 页却显示 2 / 9」）。
+         */
+        if (pageElRefs.current.length) {
+          const rootRect = root.getBoundingClientRect()
+          let bestIdx = Math.min(...visible)
+          let bestOverlap = -1
+          for (let i = 0; i < pageElRefs.current.length; i++) {
+            const el = pageElRefs.current[i]
+            if (!el) continue
+            const r = el.getBoundingClientRect()
+            const overlap = Math.min(r.bottom, rootRect.bottom) - Math.max(r.top, rootRect.top)
+            if (overlap > bestOverlap) {
+              bestOverlap = overlap
+              bestIdx = i
+            }
+          }
+          setCurrentPage(bestIdx + 1)
+        }
       },
       { root, rootMargin: '400px 0px' },
     )
@@ -262,10 +308,52 @@ export default function AnnotatedPdfPreview({
 
   /* ---------------------- 打开时定位到指定页 ---------------------- */
 
+  /**
+   * 打开时定位到指定页。
+   *
+   * **必须等各页高度算出来再滚**：`sizes` 是逐页异步读出的，若在 `doc` 刚就绪时
+   * 就 `scrollIntoView`，目标页此刻高度为 0（尚未撑开），滚动会落在错误的页上
+   * （实测会偏到后面几页）。因此这里等到目标页元素有了真实高度再滚，
+   * 并用 rAF 重试兜住懒渲染的时序。
+   *
+   * **单页模式直接短路** —— 只有一个渲染槽位，无需滚动定位。
+   */
   useEffect(() => {
-    if (!doc || page <= 1) return
-    pageElRefs.current[page - 1]?.scrollIntoView({ block: 'start' })
-  }, [doc, page])
+    if (!doc || single || page <= 1) return
+
+    /** 直接把滚动容器滚到目标页（用 rect 差值，不依赖 offsetParent 与 scrollIntoView 的时序） */
+    const jump = (): boolean => {
+      const scroller = scrollRef.current
+      const target = pageElRefs.current[page - 1]
+      if (!scroller || !target) return false
+      if (target.getBoundingClientRect().height <= 0) return false
+      const delta = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      scroller.scrollTop += delta - PAD
+      return true
+    }
+
+    if (jump()) {
+      /*
+       * 弹窗打开动画 / 懒渲染会在随后几百毫秒内继续改变布局，
+       * 只跳一次会在动画结束后落偏（实测偏到后面几页），因此再校正两次。
+       */
+      const t1 = window.setTimeout(jump, 180)
+      const t2 = window.setTimeout(jump, 520)
+      return () => {
+        window.clearTimeout(t1)
+        window.clearTimeout(t2)
+      }
+    }
+
+    /* 目标页高度尚未算出来 → rAF 重试 */
+    let raf = 0
+    let tries = 0
+    const tick = () => {
+      if (!jump() && tries++ < 40) raf = window.requestAnimationFrame(tick)
+    }
+    raf = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(raf)
+  }, [doc, page, sizes.length, single])
 
   /* ---------------------- Ctrl + 滚轮 / 触控板捏合缩放 ---------------------- */
 
@@ -349,7 +437,7 @@ export default function AnnotatedPdfPreview({
     )
   }
 
-  const numPages = sizes.length
+  const numPages = pageNos.length
 
   return (
     <div style={{ position: 'relative', height }}>
@@ -401,7 +489,7 @@ export default function AnnotatedPdfPreview({
 
               {/* —— AI 批注叠加层（页面百分比定位，随缩放自动跟随） —— */}
               {sealBoxes
-                .filter((b) => b.page === i + 1)
+                .filter((b) => b.page === pageNos[i])
                 .map((b, k) => (
                   <div
                     key={k}
@@ -412,7 +500,7 @@ export default function AnnotatedPdfPreview({
                   </div>
                 ))}
 
-              {showRegions && i + 1 === ANNOTATION_PAGE && (
+              {showRegions && pageNos[i] === ANNOTATION_PAGE && (
                 <>
                   {regionBox('信息证明无误区')}
                   {regionBox('信息不符区')}
