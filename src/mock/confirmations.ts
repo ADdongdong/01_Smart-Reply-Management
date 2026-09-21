@@ -183,7 +183,8 @@ const SEAL_MISSING: SealResult = {
   sealName: '—',
   nameMatched: false,
   region: '未识别',
-  regionConclusion: '未在回函文件任何页检出印章 → 回函结果无法判定，需退回被询证方补盖公章',
+  regionConclusion:
+    '未在回函文件任何页检出印章 → 仅作风险提示（建议退回补盖）；银行函证的相符性由询证事项逐项核对决定，与印章无关',
   confidence: 0.88,
   boxes: [],
 }
@@ -272,11 +273,34 @@ const HANDWRITING_NORMAL: HandwritingResult = {
 /* 组装 AI 核验结果                                                    */
 /* ------------------------------------------------------------------ */
 
-function riskOf(v: { diffCount: number; seal: SealResult; bankText?: BankTextResult }): {
+/**
+ * AI 风险等级与原因 —— **按函证类型分口径**（与 replyRule 的相符性判据配套）：
+ * · 往来函证 —— 印章缺失 → 相符性「无法判定」；盖于「信息不符」区 → 不相符；
+ *   两者都是高风险原因。
+ * · 银行函证 —— 印章三项检测**只作风险提示**，不再推导「回函结果无法判定 / 不相符」；
+ *   相符性只看询证事项逐项核对（bankDiffCount）。
+ */
+function riskOf(type: ConfirmationType, v: { diffCount: number; seal: SealResult; bankDiffCount?: number }): {
   level: 'high' | 'medium' | 'low' | 'none'
   reasons: string[]
 } {
   const reasons: string[] = []
+  if (type === '银行函证') {
+    // 印章问题单列为风险提示，与相符性分开表达
+    if (!v.seal.hasSeal) reasons.push('回函未检出印章，建议退回被询证方补盖银行印章')
+    if (v.seal.sealType === '财务章' && v.seal.nameMatched === false) {
+      reasons.push('印章名称与被询证单位不一致')
+    }
+    if ((v.bankDiffCount ?? 0) > 0) {
+      reasons.push(`回函与系统内询证事项逐项核对存在 ${v.bankDiffCount} 项差异`)
+    }
+    return {
+      level: !v.seal.hasSeal ? 'high' : (v.bankDiffCount ?? 0) > 0 ? 'medium' : 'low',
+      reasons,
+    }
+  }
+
+  // 往来函证 —— 印章落章区域仍参与相符性推导（口径不变）
   if (!v.seal.hasSeal) reasons.push('未检出印章，回函结果无法判定')
   if (v.seal.region === '信息不符区') reasons.push('印章盖于「信息不符」区，回函结果为不相符')
   if (v.diffCount > 0) reasons.push(`一致性比对存在 ${v.diffCount} 项金额差异`)
@@ -297,7 +321,7 @@ const VERIFY_GD: AiVerification = (() => {
   const rows = buildConsistency({ 事项7: 284000, 事项11: null })
   const diffCount = rows.filter((r) => r.match !== 'match').length
   const seal = SEAL_ABNORMAL
-  const { level, reasons } = riskOf({ diffCount, seal })
+  const { level, reasons } = riskOf('往来函证', { diffCount, seal })
   return {
     consistency: { rows, diffCount, confidence: 0.95 },
     seal,
@@ -313,7 +337,7 @@ const VERIFY_GD: AiVerification = (() => {
 const VERIFY_ZX: AiVerification = (() => {
   const rows = buildConsistency()
   const seal = SEAL_NORMAL
-  const { level, reasons } = riskOf({ diffCount: 0, seal })
+  const { level, reasons } = riskOf('往来函证', { diffCount: 0, seal })
   return {
     consistency: { rows, diffCount: 0, confidence: 0.97 },
     seal,
@@ -325,17 +349,19 @@ const VERIFY_ZX: AiVerification = (() => {
   }
 })()
 
-/** 齐商银行：未盖章 → 高风险 */
+/** 齐商银行：未盖章（风险提示）+ 询证事项 1 项差异（判不相符）→ 高风险。
+ *  相符性只由询证事项逐项核对决定；印章缺失不改变结论，只进风险原因。 */
 const VERIFY_QS: AiVerification = (() => {
   const rows = buildConsistency()
   const seal = SEAL_MISSING
-  const { level, reasons } = riskOf({ diffCount: 0, seal })
+  const bankDiffCount = BANK_ITEMS_QS.filter((i) => !i.match).length
+  const { level, reasons } = riskOf('银行函证', { diffCount: 0, seal, bankDiffCount })
   return {
     consistency: { rows, diffCount: 0, confidence: 0.9 },
     seal,
     bankText: BANK_TEXT,
-    riskLevel: 'high',
-    riskReasons: [...reasons, '银行函证回函需加盖银行印章，建议退回补盖'],
+    riskLevel: level,
+    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }

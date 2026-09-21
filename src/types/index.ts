@@ -69,7 +69,11 @@ export interface SealResult {
   sealType: '公章' | '财务章' | '无'
   sealName: string
   nameMatched: boolean
-  /** 落章区域 —— 决定「回函结果是否相符」 */
+  /**
+   * 落章区域 —— **仅往来函证**据此判定「回函结果是否相符」；
+   * 银行函证的相符性由询证事项逐项核对决定（见 services/replyRule.ts），
+   * 印章落章区域对银行函证只作风险提示。
+   */
   region: '信息证明无误区' | '信息不符区' | '未识别'
   regionConclusion: string
   boxes: SealBox[]
@@ -156,7 +160,7 @@ export interface BankTextResult {
   assignSource?: AssignSource
 }
 
-/** 手写体识别 */
+/** 手写体识别 —— **往来函证专用**：银行函证不检测手写体（核验明细、批注层与结果填写页同步关闭） */
 export interface HandwritingResult {
   text: string
   region: '信息证明无误区' | '信息不符区'
@@ -226,6 +230,13 @@ export interface ReplyRecord {
   periodEnd?: string
   /** 询证事项逐项核对（银行函证专用，替代往来函证的科目余额分录） */
   bankItems?: BankItemEntry[]
+  /**
+   * 「AI 识别中」标记（银行函证两阶段专用）。
+   * 阶段一落库时置 true（此时只识别出四要素、归属已确认，其余检测项尚未开跑），
+   * 阶段二跑完回填核验数据后置 false。
+   * **判据必须走 `isRecognitionPending()`（services/replyRule.ts）**，不要在组件里直读本字段。
+   */
+  recognitionPending?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -273,8 +284,24 @@ export interface RecognitionTask {
    * 必须由人工「确认归属」或「指定归属」后才落库（见 AppStore 的 finalizeTask）。
    */
   assignSource?: AssignSource
+  /**
+   * 当前识别阶段（v2.28 两阶段）：
+   *   1 = 只做页面切分 + 四要素识别 + 归属匹配（「先对应」）；
+   *   2 = 归属确认后自动开跑其余检测项（「后细查」）。
+   * 往来函证恒为 1（一次性跑完，阶段一即全部检测项）。
+   */
+  phase: 1 | 2
+  /**
+   * 各检测点的结论文案种子（演示数据用）。
+   * 阶段二在归属确认时才并入任务，届时从这里取阶段二各检测点的文案。
+   */
+  detailPlan?: Partial<Record<StageKey, string>>
   /** 是否已写入回函管理列表，避免重复写入 */
   applied?: boolean
+  /** 落库后对应回函记录的 id —— 阶段二完成时按此 id 回填核验数据 */
+  recordId?: string
+  /** 阶段二核验数据是否已回填（防重复回填） */
+  verificationApplied?: boolean
   status: 'pending' | 'success' | 'failed'
   failReason?: string
   needManual?: boolean
@@ -364,7 +391,11 @@ export interface SubjectEntry {
   match: boolean
 }
 
-/** 询证事项逐项核对（银行函证，按标准《银行询证函》固定询证项） */
+/**
+ * 询证事项逐项核对（银行函证，按标准《银行询证函》固定询证项）。
+ * 数据来自**系统内已存的格式一 / 格式二**，与回函识别结果逐项比对 ——
+ * 它是银行函证「回函是否相符」判定的**唯一依据**（见 services/replyRule.ts）。
+ */
 export interface BankItemEntry {
   id: string
   /** 询证事项序号，如 "1" */

@@ -1,22 +1,86 @@
 import { useState, type ReactNode } from 'react'
-import { Alert } from 'antd'
+import { Alert, Table } from 'antd'
 import {
   AuditOutlined,
   BankOutlined,
   HighlightOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons'
-import type { ReplyRecord } from '@/types'
+import type { BankItemEntry, ReplyRecord } from '@/types'
 import type { PreviewMode } from '@/config/preview'
+import { TYPE_RULE, isRecognitionPending } from '@/services/replyRule'
+import { buildBankItemsForRecord } from '@/mock/confirmations'
 import ConsistencyDiff from '@/components/ConsistencyDiff'
 import SealRecognition from '@/components/SealRecognition'
 import BankTextRecognition from '@/components/BankTextRecognition'
 import HandwritingRecognition from '@/components/HandwritingRecognition'
 import PdfPreview from '@/components/PdfPreview'
 
-/** AI 批注图例 —— 常驻主视图下方，说明各类标注框的含义（口径与标注层一致） */
-const ANNOTATION_LEGEND =
-  'AI 批注图例：蓝框＝检出的印章位置　蓝虚线＝手写体识别区　绿框＝相符判定（印章落于「信息证明无误」）　红框＝异常印章或不相符　灰虚线＝未命中的落章区域'
+/**
+ * AI 批注图例 —— 常驻主视图下方，说明各类标注框的含义（口径与标注层一致）。
+ * **按类型区分**：银行函证不检测手写体、落章区域也不参与相符性判定，图例不得出现相应表述。
+ */
+function annotationLegend(record: ReplyRecord): string {
+  if (TYPE_RULE[record.type].matchBy === 'consistencyOnly') {
+    return 'AI 批注图例：蓝框＝检出的印章位置　绿框＝印章位于常规签章位置（仅作风险参考）　红框＝异常印章　（银行函证相符性由询证事项逐项核对决定，与印章位置无关，且不检测手写体）'
+  }
+  return 'AI 批注图例：蓝框＝检出的印章位置　蓝虚线＝手写体识别区　绿框＝相符判定（印章落于「信息证明无误」）　红框＝异常印章或不相符　灰虚线＝未命中的落章区域'
+}
+
+/**
+ * 银行函证：询证事项逐项核对明细（只读）。
+ * 回函识别结果与**系统内已存的格式一 / 格式二数据**逐项比对 —— 这是银行函证相符性的唯一依据。
+ */
+function BankItemsDiff({ items }: { items: BankItemEntry[] }) {
+  return (
+    <Table<BankItemEntry>
+      size="small"
+      rowKey="id"
+      pagination={false}
+      dataSource={items}
+      rowClassName={(r) => (!r.match ? 'row-risk-high' : '')}
+      columns={[
+        {
+          title: '询证事项',
+          dataIndex: 'item',
+          width: 180,
+          render: (t: string, r) => (
+            <span>
+              <span className="muted num" style={{ marginRight: 6 }}>
+                {r.itemNo}
+              </span>
+              {t}
+            </span>
+          ),
+        },
+        {
+          title: '系统数据（发函）',
+          dataIndex: 'sentAmount',
+          align: 'right',
+          width: 140,
+          render: (n: number | null) => <span className="num">{n?.toLocaleString() ?? '—'}</span>,
+        },
+        {
+          title: '回函金额',
+          dataIndex: 'repliedAmount',
+          align: 'right',
+          width: 140,
+          render: (n: number | null) => <span className="num">{n?.toLocaleString() ?? '—'}</span>,
+        },
+        {
+          title: '核对结论',
+          dataIndex: 'note',
+          render: (note: string | undefined, r) => (
+            <span style={{ color: r.match ? 'var(--c-risk-low-text)' : 'var(--c-risk-high-text)' }}>
+              {r.match ? '一致' : '存在差异'}
+              {note && <span className="muted"> · {note}</span>}
+            </span>
+          ),
+        },
+      ]}
+    />
+  )
+}
 
 /**
  * AI 核验只读面板 —— 左右分栏：
@@ -49,18 +113,35 @@ export default function VerificationPanel({
 
   /** 未完成识别时降级 —— 承载者（弹窗 / 内嵌）各自保留自己的框架，这里只给内容 */
   if (!v) {
+    /* 识别中（银行函证两阶段：归属已确认、其余检测项尚未回填）与非识别态分开表达 */
+    if (isRecognitionPending(record)) {
+      return (
+        <Alert
+          type="info"
+          showIcon
+          message="AI 识别中"
+          description="归属已确认，系统正在异步识别其余检测项（询证事项逐项核对 / 印章 / 快递面单），完成后本页自动刷新。"
+        />
+      )
+    }
     return (
       <Alert
         type="info"
         showIcon
         message="该函证尚未完成 AI 识别"
-        description="请先通过「上传回函文件」完成识别与归档，AI 核验将在归档后自动执行。"
+        description={`请先通过「上传${record.type}回函」入口完成识别与归档，AI 核验将在归档后自动执行。`}
       />
     )
   }
 
   /* ------------------------- 核验项（拟物图标 + 名称 + 明细） ------------------------- */
 
+  /** 本类型的业务规则 —— 检测项清单与命名一律查表（services/replyRule.ts） */
+  const rule = TYPE_RULE[record.type]
+  const isBank = rule.matchBy === 'consistencyOnly'
+  /** 询证事项逐项核对（银行函证）—— 相符性的唯一数据来源 */
+  const bankItemsForRecord = buildBankItemsForRecord(record)
+  const bankItemsDiff = bankItemsForRecord.filter((i) => !i.match).length
   const rows = v.consistency.rows
   const diffCount = v.consistency.diffCount
   const sealNormal = v.seal.hasSeal && v.seal.region !== '信息不符区'
@@ -76,10 +157,15 @@ export default function VerificationPanel({
   }[] = [
     {
       key: 'consistency',
-      title: '回函一致性检测',
+      /* 名称按类型取：往来=发函回函一致性检测；银行=询证事项逐项核对 */
+      title: rule.consistencyLabel,
       icon: <AuditOutlined />,
-      risk: diffCount > 0,
-      children: <ConsistencyDiff rows={rows} confidence={v.consistency.confidence} />,
+      risk: isBank ? bankItemsDiff > 0 : diffCount > 0,
+      children: isBank ? (
+        <BankItemsDiff items={bankItemsForRecord} />
+      ) : (
+        <ConsistencyDiff rows={rows} confidence={v.consistency.confidence} />
+      ),
     },
     {
       key: 'seal',
@@ -88,7 +174,7 @@ export default function VerificationPanel({
       risk: !sealNormal,
       children: <SealRecognition seal={v.seal} entity={record.entity} />,
     },
-    ...(v.bankText
+    ...(rule.detectBankText && v.bankText
       ? [
           {
             key: 'bank',
@@ -99,7 +185,8 @@ export default function VerificationPanel({
           },
         ]
       : []),
-    ...(v.handwriting
+    /* 手写体仅往来函证检测 —— 按**类型**而非数据有无决定，银行侧即使有残留数据也不展示 */
+    ...(rule.detectHandwriting && v.handwriting
       ? [
           {
             key: 'handwriting',
@@ -129,13 +216,13 @@ export default function VerificationPanel({
           showRegions
           activeRegion={v.seal.region}
           sealBoxes={v.seal.boxes}
-          handwriting={v.handwriting?.text}
+          handwriting={rule.detectHandwriting ? v.handwriting?.text : undefined}
           height={previewHeight}
           viewMode={previewMode}
           onViewModeChange={setPreviewMode}
         />
         <div style={{ fontSize: 12, color: 'var(--c-text-3)', lineHeight: 1.9, marginTop: 8 }}>
-          {ANNOTATION_LEGEND}
+          {annotationLegend(record)}
         </div>
       </div>
 

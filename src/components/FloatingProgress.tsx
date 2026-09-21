@@ -21,6 +21,13 @@ export default function FloatingProgress() {
     (t) => t.status === 'pending' && t.stages.some((s) => s.status === 'running' || s.status === 'waiting'),
   )
   const allDone = done === allTasks.length
+  /** 两阶段计数（v2.28）：对应通道（四要素与归属）与细查通道（其余检测项）各有多少份在跑 */
+  const matching = allTasks.filter(
+    (t) => t.phase === 1 && t.status === 'pending' && t.stages.some((s) => s.status === 'running' || s.status === 'waiting'),
+  ).length
+  const checking = allTasks.filter(
+    (t) => t.phase === 2 && t.status === 'pending' && t.stages.some((s) => s.status === 'running' || s.status === 'waiting'),
+  ).length
 
   return (
     <div
@@ -69,12 +76,25 @@ export default function FloatingProgress() {
           <span>已归档 {done} 封函证，结果已写入回函管理列表</span>
         ) : (
           <>
-            <div>
-              正在处理：<b>{running?.confirmationNo ?? '—'}</b>
-              {running?.pageRange ? ` · ${running.pageRange}` : ''}
-            </div>
+            {/* 两阶段分开表达（v2.28）：正在对应（四要素与归属）/ 正在细查（其余检测项） */}
+            {matching > 0 && (
+              <div>
+                正在对应：<b>{matching}</b> 份（识别四要素与归属）
+              </div>
+            )}
+            {checking > 0 && (
+              <div>
+                正在细查：<b>{checking}</b> 份（其余检测项）
+              </div>
+            )}
+            {matching === 0 && checking === 0 && (
+              <div>
+                正在处理：<b>{running?.confirmationNo ?? '—'}</b>
+                {running?.pageRange ? ` · ${running.pageRange}` : ''}
+              </div>
+            )}
             <div style={{ color: 'var(--c-text-3)' }}>
-              已完成 {done}/{allTasks.length} · 识别过程约需 30 秒，可继续浏览列表
+              已完成 {done}/{allTasks.length} · 可继续浏览列表
             </div>
           </>
         )}

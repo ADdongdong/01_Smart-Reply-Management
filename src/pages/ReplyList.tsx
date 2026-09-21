@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { EXPRESS_IMPORT_RESULT } from '@/mock/expressImport'
-import { buildBankItemsForRecord } from '@/mock/confirmations'
+import { TYPE_RULE, consistencyOf, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
 import ExpressImportDrawer from '@/components/ExpressImportDrawer'
 import type { ConfirmationType, ReplyProgress, ReplyRecord, RiskLevel } from '@/types'
 import VerificationModal from '@/components/VerificationModal'
@@ -102,19 +102,21 @@ function groupByConfirmation(records: ReplyRecord[]): ConfirmationRow[] {
   })
 }
 
-/** 单次回函的结论摘要（用于历次回函列表） */
+/** 单次回函的结论摘要（用于历次回函列表）—— 与列表列共用 evaluateMatch 唯一出口 */
 function conclusionOf(r: ReplyRecord): { text: string; danger: boolean } {
-  const v = r.verification
-  if (!v) return { text: '未核验', danger: false }
-  if (!v.seal.hasSeal) return { text: '未检出印章', danger: true }
-  if (v.seal.region === '信息不符区') return { text: '不相符', danger: true }
-  // 银行函证的差异体现在「询证事项逐项核对」上，而非往来科目的一致性比对
-  if (r.type === '银行函证') {
-    const diff = buildBankItemsForRecord(r).filter((i) => !i.match).length
-    return diff > 0 ? { text: `询证事项 ${diff} 项差异`, danger: true } : { text: '相符', danger: false }
+  if (isRecognitionPending(r)) return { text: '识别中', danger: false }
+  if (!r.verification && r.resultInfo?.matched === undefined) return { text: '未核验', danger: false }
+  const m = evaluateMatch(r)
+  if (m.matched === null) return { text: '无法判定', danger: true }
+  if (m.matched) return { text: '相符', danger: false }
+  // 不相符的摘要：银行侧给出差异计数（询证事项逐项核对），往来侧为印章落章区域结论
+  if (TYPE_RULE[r.type].source === 'bankItems') {
+    const c = consistencyOf(r)
+    return c.diffCount > 0
+      ? { text: `询证事项 ${c.diffCount} 项差异`, danger: true }
+      : { text: '不相符', danger: true }
   }
-  if (v.consistency.diffCount > 0) return { text: `${v.consistency.diffCount} 项差异`, danger: true }
-  return { text: '相符', danger: false }
+  return { text: '不相符', danger: true }
 }
 
 /** 展开区的字段块 —— 浅灰底小方块，label 灰字在上、value 墨字在下，按网格排列 */
@@ -254,7 +256,9 @@ export default function ReplyList() {
     setFilter(EMPTY_FILTER)
   }
 
-  const recognizing = state.batches.some((b) => b.status !== 'done')
+  /** 有批次在跑，或已有银行回函处于「识别中」（阶段二尚未回填）—— 两种都意味着列表还会自动刷新 */
+  const recognizing =
+    state.batches.some((b) => b.status !== 'done') || state.records.some((r) => isRecognitionPending(r))
   const activeRecord = state.records.find((r) => r.id === activeModal?.recordId)
   /** 关闭时把 key 切回 idle，内容组件随之卸载，避免下一条记录残留上一条的编辑状态 */
   const modalKey = (kind: ModalKind) =>
@@ -284,59 +288,18 @@ export default function ReplyList() {
     })
 
   /* ------------------------------------------------------------------ */
-  /* 「回函是否相符」取值 —— 列表列用（v2.25）                            */
+  /* 「回函是否相符」取值 —— 列表列用                                     */
   /* ------------------------------------------------------------------ */
 
   /**
-   * 相符性判定（业务硬规则，不可违背）：
-   * · **人工填写过回函结果 → 以人工值为准**（`resultInfo.matched`）；
-   * · 否则用 AI 建议值 —— **印章落章区域**：落「信息证明无误」区 → 相符；落「信息不符」区 → 不相符；
-   * · **银行函证再叠加「询证事项逐项核对」：有差异即判不相符**；
-   * · 印章区域未识别且无差异 → **无法判定**（`null`）。
-   *
+   * 相符性判定已收敛到 `evaluateMatch`（`services/replyRule.ts`）单一出口：
+   * · 人工填写过回函结果 → 以人工值为准；
+   * · 银行函证 → 只看「回函 × 系统内询证事项逐项核对」（印章不作相符性依据）；
+   * · 往来函证 → 印章落章区域判定（口径不变）。
    * 返回 `byAi` 让标签能区分「AI 建议」与「已人工确认」——
    * 这是「AI 只出建议、人工确认才算数」这条底线在列表上的表达。
    */
-  const matchOf = (
-    rec: ReplyRecord,
-  ): { matched: boolean | null; byAi: boolean; basis?: string; reasons?: string[] } => {
-    // ① 人工已确认 → 以人工值为准
-    if (rec.resultInfo?.matched !== undefined) {
-      return {
-        matched: rec.resultInfo.matched,
-        byAi: false,
-        reasons: rec.resultInfo.diffDesc ? [rec.resultInfo.diffDesc] : undefined,
-      }
-    }
-
-    // ② 银行函证：逐项核对有差异 → 不相符（覆盖印章区域的判定）
-    const bankDiff = rec.bankItems?.filter((i) => !i.match) ?? []
-    if (bankDiff.length) {
-      return {
-        matched: false,
-        byAi: true,
-        basis: `询证事项逐项核对有 ${bankDiff.length} 项差异`,
-        reasons: rec.verification?.riskReasons,
-      }
-    }
-
-    // ③ 印章落章区域
-    const region = rec.verification?.seal.region
-    if (region === '信息证明无误区') {
-      return { matched: true, byAi: true, basis: '印章落于「信息证明无误」区' }
-    }
-    if (region === '信息不符区') {
-      return {
-        matched: false,
-        byAi: true,
-        basis: '印章落于「信息不符」区',
-        reasons: rec.verification?.riskReasons,
-      }
-    }
-
-    // ④ 未识别 → 无法判定
-    return { matched: null, byAi: true }
-  }
+  const matchOf = evaluateMatch
 
   /* ------------------------- 列定义 ------------------------- */
   /* 说明：不使用组间竖分隔线 —— 分组信息由列顺序与表头文字承担 */
@@ -386,7 +349,14 @@ export default function ReplyList() {
       render: (_, row) => {
         const m = matchOf(row.main)
         return (
-          <MatchTag matched={m.matched} byAi={m.byAi} basis={m.basis} reasons={m.reasons} />
+          <MatchTag
+            matched={m.matched}
+            byAi={m.byAi}
+            basis={m.basis}
+            reasons={m.reasons}
+            type={row.main.type}
+            pending={isRecognitionPending(row.main)}
+          />
         )
       },
     },
@@ -395,7 +365,11 @@ export default function ReplyList() {
       key: 'risk',
       width: 84,
       render: (_, row) => (
-        <RiskTag level={row.main.risk as RiskLevel} reasons={row.main.verification?.riskReasons} />
+        <RiskTag
+          level={row.main.risk as RiskLevel}
+          reasons={row.main.verification?.riskReasons}
+          pending={isRecognitionPending(row.main)}
+        />
       ),
     },
     /*
@@ -637,6 +611,8 @@ export default function ReplyList() {
   const expandedRowRender = (row: ConfirmationRow) => {
     const { main, history } = row
     const v = main.verification
+    /** 一致性摘要 —— 按类型取数据源（银行=询证事项逐项核对，往来=发函回函一致性比对） */
+    const consistency = consistencyOf(main)
     /** 回函总次数（含本次）—— 用于「第 N 次」的表达 */
     const times = history.length
     /** 历史回函 = 除当前有效之外的那些 */
@@ -696,7 +672,21 @@ export default function ReplyList() {
             </div>
           )}
 
-          {/* AI 核验结论 */}
+          {/* AI 核验结论 —— 银行函证两阶段：识别中先给提示行，阶段二完成后自动刷新出下方字段 */}
+          {isRecognitionPending(main) && (
+            <div
+              style={{
+                fontSize: 13,
+                color: 'var(--c-text-3)',
+                padding: '8px 10px',
+                background: 'var(--c-neutral-bg)',
+                borderRadius: 8,
+                marginBottom: 8,
+              }}
+            >
+              AI 识别中 —— 归属已确认，其余检测项（询证事项逐项核对 / 印章 / 快递面单）完成后自动刷新结论。
+            </div>
+          )}
           {v && (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -714,12 +704,12 @@ export default function ReplyList() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
                 <FieldCell
-                  label="回函一致性"
+                  label={consistency.label}
                   value={
-                    v.consistency.diffCount > 0 ? (
-                      <b style={{ fontWeight: 600 }}>{v.consistency.diffCount} 项差异</b>
+                    consistency.diffCount > 0 ? (
+                      <b style={{ fontWeight: 600 }}>{consistency.diffCount} 项差异</b>
                     ) : (
-                      '全部相符'
+                      '全部一致'
                     )
                   }
                 />
@@ -731,7 +721,7 @@ export default function ReplyList() {
                       : '未检出印章'
                   }
                 />
-                {v.bankText && (
+                {TYPE_RULE[main.type].detectBankText && v.bankText && (
                   <FieldCell
                     label="银行四要素"
                     value={
@@ -743,7 +733,7 @@ export default function ReplyList() {
                     }
                   />
                 )}
-                {v.handwriting && (
+                {TYPE_RULE[main.type].detectHandwriting && v.handwriting && (
                   <FieldCell label="手写体" value={`已转录（位于${v.handwriting.region}）`} />
                 )}
               </div>
@@ -840,14 +830,21 @@ export default function ReplyList() {
           <div style={{ fontSize: 14, color: 'var(--c-text-2)', lineHeight: 2.2 }}>
             <div style={{ fontWeight: 500, color: 'var(--c-text-1)' }}>还没有回函数据</div>
             <div>上传回函文件后，匹配成功的函证会自动进入本列表</div>
-            <Button
-              type="primary"
-              icon={<CloudUploadOutlined />}
-              style={{ marginTop: 8 }}
-              onClick={() => dispatch({ type: 'OPEN_RECOGNITION' })}
-            >
-              上传第一份回函文件
-            </Button>
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <Button
+                type="primary"
+                icon={<CloudUploadOutlined />}
+                onClick={() => dispatch({ type: 'OPEN_RECOGNITION', uploadType: '往来函证' })}
+              >
+                上传往来函证回函
+              </Button>
+              <Button
+                icon={<CloudUploadOutlined />}
+                onClick={() => dispatch({ type: 'OPEN_RECOGNITION', uploadType: '银行函证' })}
+              >
+                上传银行函证回函
+              </Button>
+            </div>
           </div>
         }
       />
@@ -962,13 +959,45 @@ export default function ReplyList() {
             marginTop: 24,
           }}
         >
-        <Tooltip title="往来函证与银行函证已合并为同一入口，系统自动判定类型；此处不再需要先做「回函登记」">
+        {/*
+         * 两个上传入口（v2.27）—— 往来函证与银行函证的智能检测事项差别很大，
+         * 从入口就分开：点哪个按钮，工作台就按哪套检测项、上传提示与演示数据呈现，
+         * 上传时类型即已确定，不再由系统事后判类型。
+         */}
+        <Tooltip
+          title={
+            <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+              <div style={{ fontWeight: 500, marginBottom: 2 }}>接收带二维码的往来函证回函</div>
+              <div>· 检测：发函回函一致性 / 印章 / 手写体 / 快递面单</div>
+              <div>· 按右上角二维码自动切分并归属，无需先做「回函登记」</div>
+            </div>
+          }
+        >
           <Button
             type="primary"
             icon={<CloudUploadOutlined />}
-            onClick={() => dispatch({ type: 'OPEN_RECOGNITION' })}
+            onClick={() => dispatch({ type: 'OPEN_RECOGNITION', uploadType: '往来函证' })}
           >
-            上传回函文件
+            上传往来函证回函
+          </Button>
+        </Tooltip>
+
+        <Tooltip
+          title={
+            <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+              <div style={{ fontWeight: 500, marginBottom: 2 }}>接收银行函证回函（只需回函件）</div>
+              <div>· 格式一 / 格式二数据已存于函证系统，识别回函后直接与系统数据逐项核对</div>
+              <div>· 检测：询证事项逐项核对 / 印章 / 银行函证文本识别（不检测手写体）</div>
+              <div>· 无二维码，按「银行名称 + 被审计单位 + 函证起止日期」四要素归属</div>
+            </div>
+          }
+        >
+          <Button
+            type="primary"
+            icon={<CloudUploadOutlined />}
+            onClick={() => dispatch({ type: 'OPEN_RECOGNITION', uploadType: '银行函证' })}
+          >
+            上传银行函证回函
           </Button>
         </Tooltip>
 

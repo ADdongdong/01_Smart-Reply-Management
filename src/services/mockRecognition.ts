@@ -42,19 +42,31 @@ export function advanceTask(task: RecognitionTask): { task: RecognitionTask; cha
   return { task: { ...task, stages }, changed: true }
 }
 
-/** 推进整个批次，返回新批次与是否仍在进行中 */
+/**
+ * 推进整个批次 —— **双通道并行**（v2.28 两阶段识别）。
+ *
+ * 每个 TICK 在两条通道上各推进一个任务，以兑现「逐份确认、逐份开跑、互不阻塞」：
+ *   · **对应通道**（`phase === 1`）：仍在识别四要素与归属的份；
+ *   · **细查通道**（`phase === 2`）：归属已确认、正在跑其余检测项的份。
+ * 每条通道内部仍**串行推进**（保证「正在处理哪一封」清晰可见）。
+ *
+ * 单阶段类型（往来函证）任务恒为 `phase === 1`，行为与改造前完全一致（零回归）。
+ */
 export function advanceBatch(batch: UploadBatch): { batch: UploadBatch; running: boolean } {
-  const activeIdx = batch.tasks.findIndex(
-    (t) => t.status === 'pending' && t.stages.some((s) => s.status !== 'failed' && s.status !== 'done'),
-  )
-  // 失败任务不再推进；串行推进，保证「正在处理哪一封」清晰可见
-  const targetIdx = activeIdx >= 0 ? activeIdx : batch.tasks.findIndex((t) => t.status === 'pending')
+  const canAdvance = (t: RecognitionTask) =>
+    t.status === 'pending' && t.stages.some((s) => s.status !== 'failed' && s.status !== 'done')
 
-  if (targetIdx === -1) {
+  const targets = new Set<number>()
+  const matchIdx = batch.tasks.findIndex((t) => t.phase === 1 && canAdvance(t))
+  if (matchIdx >= 0) targets.add(matchIdx)
+  const detailIdx = batch.tasks.findIndex((t) => t.phase === 2 && canAdvance(t))
+  if (detailIdx >= 0) targets.add(detailIdx)
+
+  if (!targets.size) {
     return { batch: { ...batch, status: 'done' }, running: false }
   }
 
-  const tasks = batch.tasks.map((t, i) => (i === targetIdx ? advanceTask(t).task : t))
+  const tasks = batch.tasks.map((t, i) => (targets.has(i) ? advanceTask(t).task : t))
   const stillRunning = tasks.some(
     (t) => t.status === 'pending' && t.stages.some((s) => s.status !== 'done' && s.status !== 'failed'),
   )
@@ -83,13 +95,13 @@ export const RECOVERY_ACTIONS: Record<StageKey, string[]> = {
   crossPageSeal: ['重新检测骑缝章', '人工确认骑缝章'],
   sealNameMatch: ['重新比对印章名称', '人工核对印章名称'],
   handwriting: ['重新执行手写体识别', '转人工转录'],
-  bankText: ['重新执行文本识别', '按四要素重新匹配归属'],
+  bankText: ['重新执行四要素文本识别', '按四要素重新匹配归属'],
   expressSheet: ['重新识别面单', '手动填写快递单号'],
 }
 
-/** 文件扩展名 → 业务提示 */
-export const UPLOAD_TIPS = [
-  '支持往来函证「回函文件 + 快递面单」拼接 PDF（系统按右上角二维码自动切分）',
-  '支持银行函证回函 PDF（无二维码，按「银行名称 + 被审计单位 + 函证起止日期」四要素匹配归属，匹配不足时转人工确认）',
-  '支持多份文件批量拖入，识别过程异步执行，可边识别边浏览列表',
-]
+/**
+ * 上传提示**不再出现在识别工作台内**（v2.30 删除）——
+ * 文件形态（往来=带二维码的拼接 PDF；银行=只需回函件，格式一/格式二数据已存于系统）、
+ * 归属方式与检测项，统一由**列表页两个上传入口的悬停说明**表达一次即可，
+ * 工作台里再铺三行属重复且分散注意力。
+ */

@@ -10,9 +10,11 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
-import { PRESET_BATCHES } from '@/mock/recognition'
+import { PRESET_BATCHES, stagesOf } from '@/mock/recognition'
 import { EXPRESS_IMPORT_RESULT } from '@/mock/expressImport'
-import { RECOVERY_ACTIONS, UPLOAD_TIPS, taskPercent } from '@/services/mockRecognition'
+import { RECOVERY_ACTIONS, taskPercent } from '@/services/mockRecognition'
+import { TYPE_RULE } from '@/services/replyRule'
+import { MATCH_LEVEL_LABEL } from '@/components/BankTextRecognition'
 import { CANDIDATE_RECORDS } from '@/mock/confirmations'
 import BankTextRecognition from '@/components/BankTextRecognition'
 import type { RecognitionStage, RecognitionTask } from '@/types'
@@ -43,9 +45,19 @@ function StageIcon({ status }: { status: RecognitionStage['status'] }) {
 /**
  * 识别进度：
  *   ① 归属匹配 —— 只展示结果（归到哪封函证），不加进度条
- *   ② AI 智能核验 —— 每个检测点独立进度条 + 结论
+ *   ② 检测点逐项进度 —— 标题按阶段取：银行阶段一为「识别四要素」，其余为「AI 智能核验」
  */
-function StagePipeline({ stages }: { stages: RecognitionStage[] }) {
+function StagePipeline({
+  stages,
+  /** 阶段标题（缺省「AI 智能核验」；银行函证阶段一传「识别四要素」） */
+  verifyTitle,
+  /** 归属已跑出结论但**尚未确认**（建议归属 / 待指定）—— 归属行改用主色圆点，提示「待你处理」 */
+  matchNeedsAction,
+}: {
+  stages: RecognitionStage[]
+  verifyTitle?: string
+  matchNeedsAction?: boolean
+}) {
   const matchStage = stages.find((s) => s.key === 'match')
   const verifyStages = stages.filter((s) => s.key !== 'match')
   const verifyDone = verifyStages.filter((s) => s.status === 'done').length
@@ -56,7 +68,20 @@ function StagePipeline({ stages }: { stages: RecognitionStage[] }) {
       {matchStage && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
           <span style={{ flexShrink: 0 }}>
-            <StageIcon status={matchStage.status} />
+            {matchNeedsAction ? (
+              /* 待人工确认归属 —— 主色实心圆点（区别于「已完成」的绿勾，提示这里需要动作） */
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  background: 'var(--c-primary)',
+                }}
+              />
+            ) : (
+              <StageIcon status={matchStage.status} />
+            )}
           </span>
           <span
             style={{
@@ -87,7 +112,7 @@ function StagePipeline({ stages }: { stages: RecognitionStage[] }) {
         <div style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--c-text-2)' }}>
-              AI 智能核验
+              {verifyTitle ?? 'AI 智能核验'}
             </span>
             <span
               className="num"
@@ -158,10 +183,29 @@ function TaskCard({ task }: { task: RecognitionTask }) {
   const matchStage = task.stages.find((s) => s.key === 'match')
   const percent = taskPercent(task)
 
+  /** 本类型的业务规则（两阶段与否 / 检测项）—— 一律查表 */
+  const rule = TYPE_RULE[task.type]
+  /** 阶段一是否已完成（阶段一的全部检测点都 done）——银行函证 = 四要素识别完成，可开始「对应」 */
+  const phase1Done = stagesOf(task.type, 1).every((k) => task.stages.find((s) => s.key === k)?.status === 'done')
+
   /** 银行函证的归属匹配看板 —— 归属匹配阶段出结果后展示 */
   const showMatchBoard = task.type === '银行函证' && !!task.bankMatch && matchStage?.status === 'done'
-  /** 识别已完成，但归属尚未确定 —— 此时不会写入回函列表 */
-  const awaitingAssign = task.status === 'success' && !task.assignSource
+  /**
+   * 归属看板是否**可操作**（v2.28 两阶段）：阶段一（四要素）完成即可确认 / 改派，
+   * **不再等其余检测项跑完** —— 先把回函与系统函证对应起来，再细查。
+   * 四要素识别进行中仍保持只读预览（避免四要素还没识别完就能确认）。
+   */
+  const canAssign = showMatchBoard && phase1Done && !task.assignSource
+  /** 归属是否已确定（auto 自动归属 / 人工确认 / 人工指定） */
+  const assigned = !!task.assignSource
+  /**
+   * 未确定归属时的标题词（v2.29 精简）：按档位区分「建议归属 / 待指定归属」，
+   * **不再把回函落款单位名显示出来** —— 否则未确认归属就出现单位名，看着像"已经归好了"。
+   */
+  const unassignedTitle =
+    task.type === '银行函证'
+      ? MATCH_LEVEL_LABEL[task.bankMatch?.level ?? 'manual']
+      : '待指定归属'
 
   return (
     <div
@@ -174,23 +218,10 @@ function TaskCard({ task }: { task: RecognitionTask }) {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 14, fontWeight: 600 }}>
-          {task.confirmationNo === '待指定' ? '待指定归属' : task.confirmationNo}
+          {assigned ? task.confirmationNo : unassignedTitle}
         </span>
-        {awaitingAssign && (
-          <Tag
-            style={{
-              marginInlineEnd: 0,
-              fontSize: 12,
-              lineHeight: '16px',
-              padding: '0 4px',
-              border: 'none',
-              color: 'var(--c-primary)',
-              background: 'var(--c-primary-bg)',
-            }}
-          >
-            未写入列表
-          </Tag>
-        )}
+        {/* 「未写入列表」标签已去掉（v2.29）—— 该信息由底栏「N 份待对应（确认后自动继续识别）」
+            与完成提示各表达一次，卡片上再挂一次属重复（用户要求减少提醒） */}
         {/* 函证类型属于分类信息而非状态 —— 用中性标签，两类型靠文字区分 */}
         <Tag
           style={{
@@ -205,7 +236,8 @@ function TaskCard({ task }: { task: RecognitionTask }) {
         >
           {task.type}
         </Tag>
-        {task.matchedEntity && task.matchedEntity !== '—' && (
+        {/* 被询证单位只在归属确定后显示 —— 未确认前它是回函落款识别值，提前显示会造成「已归属」的错觉 */}
+        {assigned && task.matchedEntity && task.matchedEntity !== '—' && (
           <span style={{ fontSize: 13, color: 'var(--c-text-2)' }}>{task.matchedEntity}</span>
         )}
         <span style={{ fontSize: 12, color: 'var(--c-text-3)' }}>{task.pageRange}</span>
@@ -225,14 +257,22 @@ function TaskCard({ task }: { task: RecognitionTask }) {
         )}
       </div>
 
-      <StagePipeline stages={task.stages} />
+      {/* 阶段一（银行=四要素与归属；往来=全部检测项）—— 阶段二在归属确认后才追加进来 */}
+      <StagePipeline
+        stages={task.stages}
+        verifyTitle={rule.twoPhase && task.phase === 1 ? '识别四要素' : undefined}
+        matchNeedsAction={canAssign}
+      />
 
       {showMatchBoard && (
         <div style={{ marginTop: 10 }}>
           <BankTextRecognition
             result={task.bankMatch!}
-            /* 识别进行中先只读预览归属结论；等整体核验跑完再开放确认 / 指定，避免核验结果未齐就落库 */
-            mode={task.status === 'success' ? 'assign' : 'verify'}
+            /*
+             * v2.28 两阶段：阶段一（四要素）完成即可确认 / 指定 —— **不再等其余检测项跑完**；
+             * 四要素识别进行中保持只读预览（避免四要素还没识别完就能确认）。
+             */
+            mode={canAssign ? 'assign' : 'verify'}
             onConfirm={() => dispatch({ type: 'CONFIRM_ASSIGN', taskId: task.id })}
             onAssign={(c) =>
               dispatch({
@@ -244,6 +284,8 @@ function TaskCard({ task }: { task: RecognitionTask }) {
             }
             onReject={() => dispatch({ type: 'SKIP_TASK', taskId: task.id })}
           />
+          {/* 「确认对应后自动继续识别」的说明不再逐卡重复（用户反馈 v2.28）——
+              底栏「N 份待对应（确认后自动继续识别）」与完成 Alert 已全局表达一次 */}
         </div>
       )}
 
@@ -295,15 +337,16 @@ function TaskCard({ task }: { task: RecognitionTask }) {
 
 /* ------------------------- 主抽屉 ------------------------- */
 
-function resolveBatch(fileName: string) {
-  if (/银行|齐商|工商|建设|农业|中国银行/i.test(fileName)) return PRESET_BATCHES.B()
-  return PRESET_BATCHES.A()
-}
-
 export default function RecognitionDrawer() {
   const { state, dispatch, pendingAssignCount } = useApp()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+
+  /**
+   * 入口类型由打开工作台的上传入口指定（AppStore.recognitionType）——
+   * 上传时类型即已确定，演示批次也只给本类型那一批，不再按文件名猜测类型。
+   */
+  const rule = TYPE_RULE[state.recognitionType]
 
   const hasBatch = state.batches.length > 0
   const allDone = hasBatch && state.batches.every((b) => b.status === 'done')
@@ -327,7 +370,8 @@ export default function RecognitionDrawer() {
       dispatch({ type: 'CLOSE_RECOGNITION' })
       return
     }
-    const batch = resolveBatch(file.name)
+    /* 类型由入口决定 —— 不再按文件名猜测 */
+    const batch = PRESET_BATCHES[rule.presetBatchId]()
     dispatch({
       type: 'START_BATCH',
       batch: { ...batch, fileName: file.name, fileSize: `${(file.size / 1024).toFixed(0)} KB` },
@@ -335,13 +379,26 @@ export default function RecognitionDrawer() {
   }
 
   const pending = state.batches.some((b) => b.status !== 'done')
+  /** 对应通道：正在识别四要素与归属的份 */
   const currentTask = state.batches
     .flatMap((b) => b.tasks)
-    .find((t) => t.status === 'pending' && t.stages.some((s) => s.status === 'running' || s.status === 'waiting'))
+    .find(
+      (t) => t.phase === 1 && t.status === 'pending' && t.stages.some((s) => s.status === 'running' || s.status === 'waiting'),
+    )
+  /** 细查通道：归属已确认、正在跑其余检测项的份（v2.28 两阶段） */
+  const detailTask = state.batches
+    .flatMap((b) => b.tasks)
+    .find(
+      (t) => t.phase === 2 && t.status === 'pending' && t.stages.some((s) => s.status === 'running' || s.status === 'waiting'),
+    )
+  /** 待人工对应的份数（含建议归属与待指定） */
+  const awaitingAssignCount = state.batches
+    .flatMap((b) => b.tasks)
+    .filter((t) => t.phase === 1 && t.status === 'success' && !t.assignSource).length
 
   return (
     <Drawer
-      title="智能识别工作台"
+      title={`智能识别工作台 · ${state.recognitionType}`}
       width={920}
       open={state.recognitionOpen}
       onClose={() => dispatch({ type: 'CLOSE_RECOGNITION' })}
@@ -361,23 +418,31 @@ export default function RecognitionDrawer() {
             {hasBatch ? (
               <>
                 识别进度 <b className="num">{doneTasks}/{totalTasks}</b>
-                {pending && (
+                {currentTask && (
                   <>
-                    {' '}· 正在处理：
+                    {' '}· 正在对应：
                     <b style={{ color: 'var(--c-primary)', fontWeight: 600 }}>
-                      {currentTask?.confirmationNo ?? '—'}
+                      {currentTask.confirmationNo === '待指定' ? '四要素识别中' : currentTask.confirmationNo}
                     </b>
+                  </>
+                )}
+                {detailTask && (
+                  <>
+                    {' '}· 正在细查：
+                    <b style={{ color: 'var(--c-primary)', fontWeight: 600 }}>{detailTask.confirmationNo}</b>
                   </>
                 )}
                 {allDone && pendingAssignCount === 0 && (
                   <span style={{ color: 'var(--c-risk-low)' }}> · 全部完成</span>
                 )}
-                {pendingAssignCount > 0 && (
-                  <span style={{ color: 'var(--c-text-2)' }}> · 待确定归属 {pendingAssignCount}</span>
+                {awaitingAssignCount > 0 && (
+                  <span style={{ color: 'var(--c-text-2)' }}>
+                    {' '}· {awaitingAssignCount} 份待对应（确认后自动继续识别）
+                  </span>
                 )}
               </>
             ) : (
-              '等待上传回函文件'
+              `等待上传${state.recognitionType}回函文件`
             )}
           </span>
           <span style={{ marginLeft: 'auto' }} />
@@ -395,7 +460,7 @@ export default function RecognitionDrawer() {
             disabled={!allDone || pendingAssignCount > 0}
             onClick={() => dispatch({ type: 'CLOSE_RECOGNITION' })}
           >
-            {pendingAssignCount > 0 ? `还有 ${pendingAssignCount} 份待确定归属` : '完成并查看结果'}
+            {pendingAssignCount > 0 ? `还有 ${pendingAssignCount} 份待对应` : '完成并查看结果'}
           </Button>
         </div>
       }
@@ -411,7 +476,7 @@ export default function RecognitionDrawer() {
         className={`dropzone${dragging ? ' dragging' : ''}`}
         role="button"
         tabIndex={0}
-        aria-label="上传回函文件：点击选择文件，或将文件拖到此处"
+        aria-label={`上传${state.recognitionType}回函文件：点击选择文件，或将文件拖到此处`}
         onClick={() => fileInputRef.current?.click()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -432,30 +497,26 @@ export default function RecognitionDrawer() {
       >
         <CloudUploadOutlined style={{ fontSize: 26, color: 'var(--c-primary)' }} />
         <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600 }}>
-          将回函文件拖到此处，或点击上传
+          将{state.recognitionType}回函文件拖到此处，或点击上传
         </div>
-        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--c-text-3)', lineHeight: 1.9 }}>
-          {UPLOAD_TIPS.map((t) => (
-            <div key={t}>· {t}</div>
-          ))}
-        </div>
+        {/*
+         * 上传提示整块已删除（v2.30，用户：「不需要这一堆内容」）——
+         * 文件形态（银行只需回函件）、归属方式（四要素）、检测项，已在列表页两个上传入口的
+         * 悬停说明里各讲过一次，工作台内再铺三行属重复且分散注意力。
+         */}
       </div>
 
       <Space size={8} style={{ marginTop: 10 }} wrap>
         <span style={{ fontSize: 13, color: 'var(--c-text-3)' }}>没有文件？用演示数据体验：</span>
+        {/* 演示批次按入口类型只给本类型那一批 —— 与「上传时类型已确定」的口径一致 */}
         <Button
           size="small"
           icon={<ThunderboltOutlined />}
-          onClick={() => dispatch({ type: 'START_BATCH', batch: PRESET_BATCHES.A() })}
+          onClick={() =>
+            dispatch({ type: 'START_BATCH', batch: PRESET_BATCHES[rule.presetBatchId]() })
+          }
         >
-          往来函证拼接回函（9 页 / 5 封）
-        </Button>
-        <Button
-          size="small"
-          icon={<ThunderboltOutlined />}
-          onClick={() => dispatch({ type: 'START_BATCH', batch: PRESET_BATCHES.B() })}
-        >
-          银行函证回函（11 页 / 3 封 · 三档归属）
+          {rule.presetBatchId === 'A' ? '往来函证拼接回函（9 页 / 5 封）' : '银行函证回函（11 页 / 3 封 · 三档归属）'}
         </Button>
       </Space>
 
@@ -516,13 +577,13 @@ export default function RecognitionDrawer() {
           type={pendingAssignCount > 0 ? 'warning' : 'success'}
           showIcon
           style={{ marginTop: 14 }}
-          message={pendingAssignCount > 0 ? '识别完成，仍有回函待确定归属' : '识别完成'}
+          message={pendingAssignCount > 0 ? '四要素识别完成，仍有回函待对应' : '识别完成'}
           description={
             <span style={{ fontSize: 13 }}>
               {pendingAssignCount > 0 ? (
                 <>
-                  还有 <b>{pendingAssignCount}</b> 份银行函证回函未确定归属，
-                  <b>确认归属后才会写入回函管理列表</b>，请在上方逐份处理。
+                  还有 <b>{pendingAssignCount}</b> 份银行函证回函未与系统内函证对应，
+                  <b>确认对应后才会写入回函管理列表并自动继续识别其余检测项</b>，请在上方逐份处理。
                 </>
               ) : (
                 <>

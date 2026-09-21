@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { Tooltip } from 'antd'
 import { CheckCircleFilled, ExclamationCircleFilled, InfoCircleFilled } from '@ant-design/icons'
-import type { RiskLevel, VerifyStatus } from '@/types'
+import type { ConfirmationType, RiskLevel, VerifyStatus } from '@/types'
+import { TYPE_RULE } from '@/services/replyRule'
 
 /* ------------------- AI 来源标识 ------------------- */
 
@@ -60,8 +61,26 @@ const RISK_MAP: Record<RiskLevel, { text: string; color: string; bg: string }> =
   none: { text: '未核验', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' },
 }
 
-export function RiskTag({ level, reasons }: { level: RiskLevel; reasons?: string[] }) {
-  const cfg = RISK_MAP[level]
+/**
+ * 「识别中」标签的中性样式（v2.28 两阶段）—— 与「无法判定 / 未核验」同一灰阶：
+ * 它表达的是「**数据还没就绪**」，不是任何业务结论。
+ */
+const PENDING_CFG = { text: '识别中', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' } as const
+
+/** 「识别中」的悬停说明 —— 与「无法判定」的「待人工判定」区分开 */
+export const RECOGNIZING_HINT = 'AI 识别中 —— 归属已确认，其余检测项完成后自动刷新结论'
+
+export function RiskTag({
+  level,
+  reasons,
+  pending,
+}: {
+  level: RiskLevel
+  reasons?: string[]
+  /** AI 识别中（银行函证阶段二尚未回填）—— 渲染中性「识别中」，不表达风险结论 */
+  pending?: boolean
+}) {
+  const cfg = pending ? PENDING_CFG : RISK_MAP[level]
   const tag = (
     <span
       style={{
@@ -81,12 +100,13 @@ export function RiskTag({ level, reasons }: { level: RiskLevel; reasons?: string
       {cfg.text}
     </span>
   )
-  if (!reasons?.length) return tag
+  const tips = pending ? [RECOGNIZING_HINT] : (reasons ?? [])
+  if (!tips.length) return tag
   return (
     <Tooltip
       title={
         <div style={{ fontSize: 13, lineHeight: 1.8 }}>
-          {reasons.map((r) => (
+          {tips.map((r) => (
             <div key={r}>· {r}</div>
           ))}
         </div>
@@ -102,9 +122,10 @@ export function RiskTag({ level, reasons }: { level: RiskLevel; reasons?: string
 /**
  * 「回函是否相符」标签 —— 列表列专用（v2.25）。
  *
- * **判定口径（业务硬规则，不可违背）**：
- * · 印章落「信息证明无误」区 → **相符**；落「信息不符」区 → **不相符**；未识别 → 无法判定；
- * · 银行函证再叠加「询证事项逐项核对」—— **有差异即判不相符**；
+ * **判定口径（业务硬规则，不可违背）**：判定本身已收敛到
+ * `services/replyRule.ts` 的 `evaluateMatch` 单一出口，本组件只负责展示：
+ * · 往来函证 —— 印章落「信息证明无误」区 → **相符**；落「信息不符」区 → **不相符**；未识别 → 无法判定；
+ * · 银行函证 —— **只看询证事项逐项核对**（有差异即判不相符），印章不作相符性依据；
  * · 人工填写过回函结果后（`resultInfo.matched`），**以人工值为准**。
  *
  * **为什么必须区分来源**：项目底线是「AI 只出建议、人工确认才算数」。
@@ -118,6 +139,8 @@ export function MatchTag({
   byAi,
   basis,
   reasons,
+  type,
+  pending,
 }: {
   /** 相符 = true；不相符 = false；无法判定 = null */
   matched: boolean | null
@@ -127,9 +150,18 @@ export function MatchTag({
   basis?: string
   /** 不相符时的原因 / 差异说明（与「AI 风险」列一致：只用悬停，不加图标） */
   reasons?: string[]
+  /** 函证类型 —— 用于「无法判定」时给出与类型相符的归因（不得把银行函证归因到印章区域） */
+  type?: ConfirmationType
+  /**
+   * AI 识别中（v2.28 银行函证两阶段）—— 渲染中性「识别中」。
+   * 与「无法判定」的区分：识别中是「数据还没就绪」，无法判定是「结论是未知、待人工」。
+   * 本入参**不改变** `{ matched, byAi, basis, reasons }` 的语义契约。
+   */
+  pending?: boolean
 }) {
-  const cfg =
-    matched === true
+  const cfg = pending
+    ? PENDING_CFG
+    : matched === true
       ? { text: '相符', color: 'var(--c-risk-low-text)', bg: 'var(--c-risk-low-bg)' }
       : matched === false
         ? { text: '不相符', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' }
@@ -157,8 +189,15 @@ export function MatchTag({
   )
 
   const tips: string[] = []
-  if (matched === null) {
-    tips.push('AI 未能识别印章落章区域，无法自动判定 —— 待人工判定')
+  if (pending) {
+    tips.push(RECOGNIZING_HINT)
+  } else if (matched === null) {
+    /* 无法判定的归因必须与该类型的相符性判据一致 —— 银行函证不得归因到印章落章区域 */
+    tips.push(
+      type && TYPE_RULE[type].matchBy === 'consistencyOnly'
+        ? 'AI 未能完成询证事项逐项核对，无法自动判定 —— 待人工判定'
+        : 'AI 未能识别印章落章区域，无法自动判定 —— 待人工判定',
+    )
   } else if (byAi) {
     tips.push('✦ AI 建议 —— 尚未经人工确认，以「填写回函结果」时确认的结论为准')
   } else {

@@ -27,7 +27,16 @@ export const STAGE_LABELS: Record<StageKey, string> = {
   expressSheet: '快递面单识别',
 }
 
-/** 往来函证的 AI 检测点 */
+/**
+ * 检测点展示名**按函证类型取**：银行函证的一致性来源是「回函 × 系统内格式一/二数据」，
+ * 展示为「询证事项逐项核对」，与往来函证的「发函回函一致性检测」区分开。
+ */
+export function stageLabelOf(type: ConfirmationType, key: StageKey): string {
+  if (type === '银行函证' && key === 'consistency') return '询证事项逐项核对'
+  return STAGE_LABELS[key]
+}
+
+/** 往来函证的 AI 检测点（一次性跑完，无阶段之分） */
 const STAGES_TRADE: StageKey[] = [
   'match',
   'consistency',
@@ -38,24 +47,47 @@ const STAGES_TRADE: StageKey[] = [
   'expressSheet',
 ]
 
-/** 银行函证的 AI 检测点（手写体换成银行函证文本识别） */
-const STAGES_BANK: StageKey[] = [
-  'match',
+/**
+ * 银行函证的**阶段一**：只做页面切分 + 四要素识别（`match` + `bankText`）。
+ * 目的是让用户**先把回函与系统内函证对应起来**，不必等六项检测跑完。
+ */
+const STAGES_BANK_P1: StageKey[] = ['match', 'bankText']
+
+/** 银行函证的**阶段二**：归属确认后自动开跑（手写体换成银行函证文本识别，故无 handwriting） */
+const STAGES_BANK_P2: StageKey[] = [
   'consistency',
   'sealExists',
   'crossPageSeal',
   'sealNameMatch',
-  'bankText',
   'expressSheet',
 ]
 
-function makeStages(type: ConfirmationType): RecognitionStage[] {
-  const order = type === '银行函证' ? STAGES_BANK : STAGES_TRADE
-  return order.map((key) => ({
+/**
+ * 取某类型在某阶段的检测点 —— **阶段划分的单一事实来源**。
+ * · 银行函证（两阶段）：阶段一 = 四要素与归属；阶段二 = 其余检测项；
+ * · 往来函证（单阶段）：阶段一即全部检测点，阶段二为空数组。
+ */
+export function stagesOf(type: ConfirmationType, phase: 1 | 2): StageKey[] {
+  if (type === '银行函证') return phase === 1 ? STAGES_BANK_P1 : STAGES_BANK_P2
+  return phase === 1 ? STAGES_TRADE : []
+}
+
+/**
+ * 生成某类型某阶段的检测点列表。
+ * `detailPlan` 为各检测点的结论文案种子 —— 阶段二在归属确认时才并入任务，
+ * 届时从任务的 `detailPlan` 里取，因此这里要支持传入。
+ */
+export function makeStages(
+  type: ConfirmationType,
+  phase: 1 | 2,
+  detailPlan?: Partial<Record<StageKey, string>>,
+): RecognitionStage[] {
+  return stagesOf(type, phase).map((key) => ({
     key,
-    label: STAGE_LABELS[key],
+    label: stageLabelOf(type, key),
     status: 'waiting' as const,
     percent: 0,
+    detail: detailPlan?.[key],
   }))
 }
 
@@ -84,16 +116,21 @@ function createTask(seed: TaskSeed, fileName: string, index: number): Recognitio
    * 建议归属（confirm）与待人工指定（manual）都必须人工确认后才落库 —— 见 AppStore 的 finalizeTask。
    */
   const autoAssigned = seed.type === '往来函证' ? true : bankMatch?.level === 'auto'
-  /** 归属是否已确定 —— 「待指定」表示尚未确定，此时不得写入回函列表 */
-  const resolved = seed.confirmationNo !== '待指定'
+  /**
+   * 归属是否已确定 —— 以**任务最终拿到的函证编号**判断（v2.28 修正）：
+   * 银行 auto 档的任务在四要素全匹配时会被改写为命中的函证编号，归属即已确定；
+   * 此前用 `seed.confirmationNo !== '待指定'` 判断，导致银行 auto 任务永远拿不到
+   * `assignSource`，卡在「未写入列表」、也不会自动进入阶段二。
+   */
+  const finalConfirmationNo = autoAssigned && best ? best.confirmationNo : seed.confirmationNo
+  const resolved = finalConfirmationNo !== '待指定'
 
-  const matchDetail = bankMatch
-    ? `${bankMatch.conclusion}${bankMatch.reason ? `（${bankMatch.reason}）` : ''}`
-    : seed.stageDetails?.match
+  /* 归属行只给**一句话结论**（匹配到哪封 / 需人工指定）—— 不再追加 reason 等细节（v2.29 精简） */
+  const matchDetail = bankMatch ? bankMatch.conclusion : seed.stageDetails?.match
 
   return {
     id: `${fileName}-${index}`,
-    confirmationNo: autoAssigned && best ? best.confirmationNo : seed.confirmationNo,
+    confirmationNo: finalConfirmationNo,
     fileName,
     pageRange: seed.pageRange,
     type: seed.type,
@@ -101,12 +138,15 @@ function createTask(seed: TaskSeed, fileName: string, index: number): Recognitio
     bankMatch,
     assignSource: autoAssigned && resolved ? 'auto' : undefined,
     status: 'pending',
+    /* v2.28：任务从阶段一开始；阶段二在归属确认时由 store 追加（见 extendToPhase2） */
+    phase: 1,
+    detailPlan: seed.stageDetails,
     plannedFailure: seed.plannedFailure,
     failReason: seed.failReason,
     needManual: seed.needManual,
-    stages: makeStages(seed.type).map((s) => ({
+    stages: makeStages(seed.type, 1, seed.stageDetails).map((s) => ({
       ...s,
-      detail: s.key === 'match' && matchDetail ? matchDetail : seed.stageDetails?.[s.key],
+      detail: s.key === 'match' && matchDetail ? matchDetail : s.detail,
     })),
   }
 }
@@ -214,11 +254,11 @@ export function buildBatchB(): UploadBatch {
         periodEnd: '2024/03/31',
       },
       stageDetails: {
-        consistency: '银行存款 1,258.03 万元与账面一致',
-        sealExists: '已盖章 · 公章',
-        crossPageSeal: '检出 2 处骑缝章',
-        sealNameMatch: '印章名称与被询证单位一致',
-        bankText: '按标准《银行询证函》6 项询证事项逐项核对完成',
+        consistency: '回函与系统内格式一/二数据逐项核对完成 · 1 项差异（担保事项）',
+        sealExists: '未检出印章 · 建议退回补盖（仅作风险提示）',
+        crossPageSeal: '未检出骑缝章',
+        sealNameMatch: '未检出印章，无法比对名称',
+        bankText: '四要素识别完成 · 与发函底稿一致',
         expressSheet: '运单号 EMS1122334455667 已识别并关联',
       },
     },
@@ -235,11 +275,11 @@ export function buildBatchB(): UploadBatch {
         periodEnd: '2024年3月31日',
       },
       stageDetails: {
-        consistency: '银行存款 842.15 万元与账面一致',
+        consistency: '回函与系统内格式一/二数据逐项核对完成 · 全部一致',
         sealExists: '已盖章 · 业务专用章',
         crossPageSeal: '检出 1 处骑缝章',
         sealNameMatch: '印章名称为「齐商银行张店支行」，与发函的被询证单位不一致',
-        bankText: '按标准《银行询证函》6 项询证事项逐项核对完成',
+        bankText: '四要素识别完成 · 银行名称与发函底稿有差异',
         expressSheet: '运单号 EMS1122334455781 已识别并关联',
       },
     },
@@ -256,11 +296,11 @@ export function buildBatchB(): UploadBatch {
         periodEnd: '2024-03-31',
       },
       stageDetails: {
-        consistency: '银行存款 76.40 万元，未匹配到对应发函底稿',
+        consistency: '未匹配到系统内函证数据，待确定归属后核对',
         sealExists: '已盖章 · 公章',
         crossPageSeal: '未检出骑缝章',
         sealNameMatch: '无法比对（未匹配到被询证单位）',
-        bankText: '被询证银行不在本期函证控制表内，请确认该回函是否属于本期范围',
+        bankText: '四要素识别完成 · 不在本期函证控制表内',
         expressSheet: '运单号 EMS1122334455902 已识别并关联',
       },
     },

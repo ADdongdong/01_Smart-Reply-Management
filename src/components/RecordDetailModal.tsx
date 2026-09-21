@@ -1,6 +1,7 @@
 import { Button, Descriptions, Tabs } from 'antd'
 import type { ReactNode } from 'react'
 import type { ReplyRecord } from '@/types'
+import { TYPE_RULE } from '@/services/replyRule'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
 import { AiMark } from '@/components/Marks'
@@ -54,7 +55,12 @@ export default function RecordDetailModal({
           showRegions
           activeRegion={record.verification?.seal.region}
           sealBoxes={record.verification?.seal.boxes ?? []}
-          handwriting={record.verification?.handwriting?.text}
+          /* 银行函证不检测手写体 —— 按类型查表关闭，即使存在残留数据也不绘制标注 */
+          handwriting={
+            TYPE_RULE[record.type].detectHandwriting
+              ? record.verification?.handwriting?.text
+              : undefined
+          }
           height={600}
         />
       </div>

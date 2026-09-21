@@ -1,7 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from 'react'
-import type { ExpressImportResult, RecognitionTask, ReplyRecord, UploadBatch } from '@/types'
+import type {
+  ConfirmationType,
+  ExpressImportResult,
+  RecognitionTask,
+  ReplyRecord,
+  UploadBatch,
+} from '@/types'
 import { BANK_ITEMS_QS, REPLY_RECORDS } from '@/mock/confirmations'
+import { makeStages } from '@/mock/recognition'
 import { advanceBatch } from '@/services/mockRecognition'
+import { TYPE_RULE } from '@/services/replyRule'
 import dayjs from 'dayjs'
 
 /** 演示用当前用户 —— 所有人工核验留痕都记在他名下 */
@@ -12,6 +20,12 @@ interface AppState {
   batches: UploadBatch[]
   /** 识别工作台抽屉是否展开 */
   recognitionOpen: boolean
+  /**
+   * 当前识别工作台的**入口类型**（往来函证 / 银行函证）。
+   * 由列表页的两个上传入口在打开时指定 —— 上传时类型即已确定，
+   * 工作台据此渲染标题 / 上传提示 / 演示数据，不再靠系统事后判类型。
+   */
+  recognitionType: ConfirmationType
   /** 悬浮进度卡是否显示 */
   floatingVisible: boolean
   /** 识别完成后需要高亮闪烁的函证（按函证编号） */
@@ -28,7 +42,11 @@ interface AppState {
 type Action =
   | { type: 'START_BATCH'; batch: UploadBatch }
   | { type: 'TICK' }
-  | { type: 'OPEN_RECOGNITION' }
+  /**
+   * 打开识别工作台。`uploadType` 由上传入口指定（缺省按「往来函证」处理，
+   * 保证 WorkbenchLayout / FloatingProgress 等未带类型的调用点行为不变）。
+   */
+  | { type: 'OPEN_RECOGNITION'; uploadType?: ConfirmationType }
   /**
    * 关闭识别工作台抽屉。
    *
@@ -63,6 +81,7 @@ const initialState: AppState = {
   records: REPLY_RECORDS,
   batches: [],
   recognitionOpen: false,
+  recognitionType: '往来函证',
   floatingVisible: false,
   flashRowId: null,
   /**
@@ -91,14 +110,19 @@ function lookupVerification(confirmationNo: string) {
  * 「最终有效」由列表按回函时间推导（见 ReplyList 的函证归并），
  * 因此新回函进来后自动成为最终有效，历史回函自动降级为已被覆盖。
  */
-function applyRecognizedReply(records: ReplyRecord[], task: RecognitionTask): ReplyRecord[] {
+function applyRecognizedReply(
+  records: ReplyRecord[],
+  task: RecognitionTask,
+): { records: ReplyRecord[]; recordId: string } {
   const now = dayjs().format('YYYY-MM-DD HH:mm:ss')
   const same = records.filter((r) => r.confirmationNo === task.confirmationNo)
   const base = same[same.length - 1]
   const best = task.bankMatch?.candidates?.[0]
+  const twoPhase = TYPE_RULE[task.type].twoPhase
+  const recordId = `${task.confirmationNo}-${same.length + 1}`
 
   const created: ReplyRecord = {
-    id: `${task.confirmationNo}-${same.length + 1}`,
+    id: recordId,
     sendSeq: same.length + 1,
     sendRecordNo: `待登记-${task.confirmationNo}-${same.length + 1}`,
     confirmationNo: task.confirmationNo,
@@ -110,15 +134,21 @@ function applyRecognizedReply(records: ReplyRecord[], task: RecognitionTask): Re
     replyFile: task.fileName,
     replyProgress: '待确认快递信息',
     hasReplied: true,
-    risk: base?.risk ?? 'none',
+    /*
+     * 两阶段类型（银行函证）此刻**只落库四要素与状态**，核验数据等阶段二回填 ——
+     * 刻意**不继承** `base?.verification`：否则同一函证的第二次回函在阶段一会
+     * 立刻显示上一份回函的结论，「识别中」态就无法成立（本改造最容易踩的坑）。
+     */
+    risk: twoPhase ? 'none' : (base?.risk ?? 'none'),
     verifyStatus: 'pending',
     aiFilled: true,
     periodStart: base?.periodStart ?? best?.periodStart,
     periodEnd: base?.periodEnd ?? best?.periodEnd,
-    bankItems: task.type === '银行函证' ? (base?.bankItems ?? BANK_ITEMS_QS) : undefined,
-    verification: base?.verification ?? lookupVerification(task.confirmationNo),
+    recognitionPending: twoPhase,
+    /* `bankItems`（询证事项逐项核对）由阶段二回填，两种类型在落库时都不写 */
+    verification: twoPhase ? undefined : (base?.verification ?? lookupVerification(task.confirmationNo)),
   }
-  return [...records, created]
+  return { records: [...records, created], recordId }
 }
 
 function findTask(state: AppState, taskId: string): RecognitionTask | undefined {
@@ -137,10 +167,80 @@ function finalizeTask(state: AppState, taskId: string): AppState {
   if (!task || task.applied || !task.assignSource) return state
   if (!task.confirmationNo || task.confirmationNo === '待指定') return state
 
-  const records = applyRecognizedReply(state.records, task)
+  const { records, recordId } = applyRecognizedReply(state.records, task)
   const batches = state.batches.map((b) => ({
     ...b,
-    tasks: b.tasks.map((t) => (t.id === taskId ? { ...t, applied: true } : t)),
+    tasks: b.tasks.map((t) => (t.id === taskId ? { ...t, applied: true, recordId } : t)),
+  }))
+  return { ...state, records, batches, flashRowId: task.confirmationNo }
+}
+
+/**
+ * 把任务推进到**阶段二**（v2.28）：追加阶段二的检测点、状态打回 `pending`。
+ *
+ * 用「追加 stages」而不是给同一份 stages 加阶段标记 —— 因为
+ * `advanceTask` / `taskPercent` / `StagePipeline` 全都只认 `task.stages` 数组，
+ * 追加式改造让这三处**零改动**就得到「阶段二进度」。幂等：已在阶段二则原样返回。
+ */
+function extendToPhase2(task: RecognitionTask): RecognitionTask {
+  if (!TYPE_RULE[task.type].twoPhase || task.phase === 2) return task
+  return {
+    ...task,
+    phase: 2,
+    status: 'pending',
+    stages: [...task.stages, ...makeStages(task.type, 2, task.detailPlan)],
+  }
+}
+
+/**
+ * 启动阶段二 —— 归属一确定（auto 自动归属 / 人工确认 / 人工指定）就立即调用，
+ * 兑现用户要的「这一步完成以后，再自动异步识别别的内容」，无需再点任何按钮。
+ * 同时把批次状态打回 `running`，让 TICK 定时器重新接管推进。
+ */
+function startDetailPhase(state: AppState, taskId: string): AppState {
+  const task = findTask(state, taskId)
+  if (!task || !TYPE_RULE[task.type].twoPhase || task.phase === 2) return state
+
+  const batches = state.batches.map((b) =>
+    b.tasks.some((t) => t.id === taskId)
+      ? {
+          ...b,
+          status: 'running' as const,
+          tasks: b.tasks.map((t) => (t.id === taskId ? extendToPhase2(t) : t)),
+        }
+      : b,
+  )
+  return { ...state, batches, floatingVisible: true }
+}
+
+/**
+ * 阶段二跑完 → 把核验数据**回填**到该任务对应的回函记录，并清掉「识别中」标记。
+ * 幂等：`verificationApplied` 保证只回填一次。
+ */
+function applyVerification(state: AppState, taskId: string): AppState {
+  const task = findTask(state, taskId)
+  if (!task || task.verificationApplied || !task.recordId) return state
+
+  const v = lookupVerification(task.confirmationNo)
+  /** 同一函证的历史回函（询证事项沿用，与落库时的口径一致） */
+  const prior = state.records
+    .filter((r) => r.confirmationNo === task.confirmationNo && r.id !== task.recordId)
+    .pop()
+
+  const records = state.records.map((r) =>
+    r.id === task.recordId
+      ? {
+          ...r,
+          verification: v,
+          bankItems: prior?.bankItems ?? BANK_ITEMS_QS,
+          risk: v?.riskLevel ?? r.risk,
+          recognitionPending: false,
+        }
+      : r,
+  )
+  const batches = state.batches.map((b) => ({
+    ...b,
+    tasks: b.tasks.map((t) => (t.id === taskId ? { ...t, verificationApplied: true } : t)),
   }))
   return { ...state, records, batches, flashRowId: task.confirmationNo }
 }
@@ -166,26 +266,48 @@ function reducer(state: AppState, action: Action): AppState {
     case 'TICK': {
       if (!state.batches.some((b) => b.status === 'queued' || b.status === 'running')) return state
 
-      const before = new Map<string, RecognitionTask['status']>()
-      state.batches.forEach((b) => b.tasks.forEach((t) => before.set(t.id, t.status)))
-
       const batches = state.batches.map((batch) => (batch.status === 'done' ? batch : advanceBatch(batch).batch))
-
       let next: AppState = { ...state, batches }
-      // 归属已确定的成功任务自动落库；待确认 / 待指定的任务停在队列里等人工操作
-      batches
-        .flatMap((b) => b.tasks)
-        .filter((t) => before.get(t.id) !== 'success' && t.status === 'success')
+
+      const allTasks = batches.flatMap((b) => b.tasks)
+
+      /*
+       * 三遍**幂等**处理 —— 顺序即语义，全部按类型规则查表判分支，不写内联类型判断：
+       *   ① 归属已确定的成功任务 → **先落库**（`applied` 门控保证只写一次）——
+       *      必须在启动阶段二**之前**执行：银行回函在阶段一完成时就该出现在列表上
+       *      并显示「识别中」，若先 `extendToPhase2` 会把状态打回 pending、落库被推迟到
+       *      阶段二完成，「识别中」态就不存在了；
+       *   ② 阶段一完成且归属已确定 → 银行函证**再启动阶段二**（「先对应、后细查」的自动衔接）；
+       *   ③ 阶段二完成 → 回填核验数据并清「识别中」（`verificationApplied` 门控）。
+       */
+      allTasks
+        .filter((t) => t.status === 'success' && !!t.assignSource)
         .forEach((t) => {
           next = finalizeTask(next, t.id)
         })
 
-      const anyRunning = batches.some((b) => b.status !== 'done')
+      allTasks
+        .filter((t) => TYPE_RULE[t.type].twoPhase && t.phase === 1 && t.status === 'success' && !!t.assignSource)
+        .forEach((t) => {
+          next = startDetailPhase(next, t.id)
+        })
+
+      allTasks
+        .filter((t) => TYPE_RULE[t.type].twoPhase && t.phase === 2 && t.status === 'success' && !!t.assignSource)
+        .forEach((t) => {
+          next = applyVerification(next, t.id)
+        })
+
+      const anyRunning = next.batches.some((b) => b.status !== 'done')
       return { ...next, floatingVisible: anyRunning ? true : next.floatingVisible }
     }
 
     case 'OPEN_RECOGNITION':
-      return { ...state, recognitionOpen: true }
+      return {
+        ...state,
+        recognitionOpen: true,
+        recognitionType: action.uploadType ?? '往来函证',
+      }
     case 'CLOSE_RECOGNITION':
       return {
         ...state,
@@ -228,17 +350,22 @@ function reducer(state: AppState, action: Action): AppState {
                     ? {
                         ...t.bankMatch,
                         assignSource: 'manual-confirm' as const,
-                        conclusion: `已人工确认归属函证 ${suggested.confirmationNo}（系统建议，匹配度 ${Math.round(suggested.score * 100)}%）`,
+                        /* 归属结论只回答「匹配到哪封」——不带匹配度等内部指标（v2.29 文案精简） */
+                        conclusion: `已确认归属函证 ${suggested.confirmationNo}`,
                       }
                     : t.bankMatch,
                 },
-                `人工确认采纳系统建议 → 归属函证 ${suggested.confirmationNo}（匹配度 ${Math.round(suggested.score * 100)}%）`,
+                `已确认归属函证 ${suggested.confirmationNo}`,
               )
             : t,
         ),
       }))
 
-      return finalizeTask({ ...state, batches }, action.taskId)
+      /*
+       * 归属确认 → 先落库，再**立即启动阶段二**（v2.28「先对应、后细查」：
+       * 用户点完「确认归属」不用再做任何事，其余检测项自动异步开跑）。
+       */
+      return startDetailPhase(finalizeTask({ ...state, batches }, action.taskId), action.taskId)
     }
 
     /**
@@ -269,18 +396,20 @@ function reducer(state: AppState, action: Action): AppState {
                     ? {
                         ...t.bankMatch,
                         assignSource: 'manual-assign' as const,
-                        conclusion: `已人工指定归属函证 ${action.confirmationNo}`,
+                        conclusion: `已指定归属函证 ${action.confirmationNo}`,
                       }
                     : t.bankMatch,
                 },
-                `人工指定 → 归属函证 ${action.confirmationNo}`,
+                `已指定归属函证 ${action.confirmationNo}`,
               )
             : t,
         ),
       }))
 
-      const next = finalizeTask({ ...state, batches }, action.taskId)
-      return finished ? next : { ...next, floatingVisible: true }
+      /* 归属指定 → 先落库，再**立即启动阶段二**（与 CONFIRM_ASSIGN 同一衔接） */
+      const assigned = finalizeTask({ ...state, batches }, action.taskId)
+      const started = startDetailPhase(assigned, action.taskId)
+      return finished ? started : { ...started, floatingVisible: true }
     }
 
     case 'RETRY_TASK': {

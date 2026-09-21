@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Button, Input, Progress, Table, Tag, Tooltip } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import type { AssignSource, BankCandidate, BankTextResult, BankTextField, MatchLevel } from '@/types'
-import { AiChip, ResultBar } from '@/components/Marks'
+import { AiChip } from '@/components/Marks'
 import { ASSIGN_SOURCE_LABEL } from '@/services/bankMatch'
 
 /**
@@ -13,20 +13,16 @@ import { ASSIGN_SOURCE_LABEL } from '@/services/bankMatch'
  *   · mode='assign' —— 识别队列内，可确认系统建议的归属、或从候选中改派/指定
  *   · mode='verify' —— AI 核验页内，只读回看当时的匹配结论
  *
- * 结构与其余三项统一：「结论条 → 事实清单（四要素对照 / 候选函证）→ 处理动作」。
+ * **展示口径（v2.29 精简）**：本组件**不再出现归属结论文案与任何内部指标**
+ * （得分 / 阈值 / 相似度 / 命中数）—— 一句话结论统一由识别进度的「归属匹配」行表达
+ * （同一件事只出现一次），本组件只负责「归属来源标签 + 动作按钮 + 四要素事实 + 候选」。
  */
 
-/** 档位 → 结论条语义（绿＝已完成归属 / 主色＝流程提示 / 红＝需人工介入） */
-const LEVEL_STATUS: Record<MatchLevel, 'ok' | 'info' | 'risk'> = {
-  auto: 'ok',
-  confirm: 'info',
-  manual: 'risk',
-}
-
-const LEVEL_TEXT: Record<MatchLevel, string> = {
+/** 档位 → 用户可读的归属状态词（识别队列卡片标题与本组件共用，避免各自造词） */
+export const MATCH_LEVEL_LABEL: Record<MatchLevel, string> = {
   auto: '自动归属',
   confirm: '建议归属',
-  manual: '待人工指定',
+  manual: '待指定归属',
 }
 
 /** 归属来源留痕徽标 —— 两种人工操作同走主色，靠标签文字区分；自动归属为中性灰 */
@@ -130,20 +126,14 @@ export default function BankTextRecognition({
 
   return (
     <div>
-      {/* ① 结论条 —— 只讲归属结论与判定依据，不复述加权算法 */}
-      <ResultBar
-        status={LEVEL_STATUS[level]}
-        statusText={LEVEL_TEXT[level]}
-        message={result.conclusion}
-        detail={[
-          `匹配得分 ${Math.round((result.score ?? 0) * 100)}%`,
-          result.reason ? `判定依据：${result.reason}` : '',
-        ]
-          .filter(Boolean)
-          .join(' · ')}
-        extra={
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            {result.assignSource && <AssignBadge source={result.assignSource} />}
+      {/*
+       * ① 顶部动作栏（v2.29）—— 只放「归属来源标签 + 动作按钮」，**不再复述结论文案**：
+       * 归属结论（匹配到哪封 / 需人工指定）已在识别进度的「归属匹配」行表达过一次。
+       */}
+      {(result.assignSource || canOperate) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          {result.assignSource && <AssignBadge source={result.assignSource} />}
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
             {canOperate && level === 'confirm' && (
               <>
                 <Button size="small" type="primary" ghost onClick={onConfirm}>
@@ -160,8 +150,8 @@ export default function BankTextRecognition({
               </Button>
             )}
           </span>
-        }
-      />
+        </div>
+      )}
 
       {/* ② 事实清单 · 四要素对照 */}
       <Table<BankTextField>
@@ -173,24 +163,24 @@ export default function BankTextRecognition({
         columns={[
           { title: '要素', dataIndex: 'label', width: 130 },
           {
+            /* v2.28 精简（用户反馈）：回函识别值只留原值，归一化过程不展示（内部细节不暴露原则） */
             title: '回函识别值',
             dataIndex: 'value',
-            render: (v: string, f) => (
-              <span>
-                <b style={{ fontSize: 13 }}>{v}</b>
-                {f.repliedNorm && f.repliedNorm !== v && (
-                  <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>
-                    ↗ 归一化：{f.repliedNorm}
-                  </span>
-                )}
-              </span>
+            render: (v: string) => (
+              <b style={{ fontSize: 13 }}>{v}</b>
             ),
           },
           {
+            /* 未匹配到系统函证时并没有对应底稿 —— 不给候选名称（否则会被当成「已比对的底稿」） */
             title: '发函底稿值',
             dataIndex: 'sentValue',
             width: 200,
-            render: (v: string) => <span className="muted num">{v}</span>,
+            render: (v: string) =>
+              level === 'manual' ? (
+                <span className="muted">—</span>
+              ) : (
+                <span className="muted num">{v}</span>
+              ),
           },
           {
             title: '匹配方式',
@@ -198,13 +188,7 @@ export default function BankTextRecognition({
             width: 100,
             render: (_: boolean, f) => <HitTag field={f} />,
           },
-          {
-            title: '权重',
-            dataIndex: 'weight',
-            width: 70,
-            align: 'right' as const,
-            render: (w?: number) => <span className="muted num">{w ? `${Math.round(w * 100)}%` : '—'}</span>,
-          },
+          /* 权重列已按用户反馈移除（v2.28）—— 加权细节属系统内部指标，结论只看「匹配方式 + 置信度」 */
           {
             title: '置信度',
             dataIndex: 'confidence',

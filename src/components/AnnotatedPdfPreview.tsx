@@ -72,7 +72,9 @@ const REGION_BOX: Record<
   信息不符区: { left: '48.5%', top: '75.5%', width: '38%', height: '14%' },
 }
 
-/** 手写差异说明通常写在「信息不符」栏内 —— 演示坐标取该栏内圈 */
+/** 手写差异说明通常写在「信息不符」栏内 —— 演示坐标取该栏内圈。
+ *  仅当 `handwriting` 文案传入时才绘制该标注框；**银行函证不检测手写体，
+ *  调用方（按 TYPE_RULE[record.type].detectHandwriting 查表）不传该 prop，此处即不会出现手写区框。 */
 const HANDWRITING_BOX = { left: '50%', top: '77%', width: '35%', height: '11.5%' }
 
 const PRESET_SCALES = [0.5, 0.75, 1, 1.25, 1.5, 2]

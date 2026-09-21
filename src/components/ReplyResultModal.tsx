@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { buildBankItemsForRecord, buildSubjectEntriesForRecord } from '@/mock/confirmations'
+import { TYPE_RULE, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
 import VerificationPanel from '@/components/VerificationPanel'
@@ -29,23 +30,27 @@ export default function ReplyResultModal({
   const record = state.records.find((r) => r.id === recordId)
   const v = record?.verification
   const isBank = record?.type === '银行函证'
+  /** 本类型的业务规则（检测项 / 文案 / 判据）—— 一律查表，不写内联类型分支 */
+  const rule = record ? TYPE_RULE[record.type] : undefined
+  /**
+   * AI 识别中（v2.28 银行函证两阶段）：归属已确认、阶段二尚未回填。
+   * 此时 AI 建议块整体不出现（`v` 为空），改为一条说明；
+   * **询证事项表也不能展示** —— `buildBankItemsForRecord` 会回退到内置演示数据，展示出来是误导。
+   */
+  const recognizing = !!record && isRecognitionPending(record)
 
   const entries = useMemo(() => (record ? buildSubjectEntriesForRecord(record) : []), [record])
   const bankItems = useMemo(() => (record ? buildBankItemsForRecord(record) : []), [record])
   const bankDiffCount = bankItems.filter((b) => !b.match).length
 
   /**
-   * AI 推导「函证结果是否相符」：
+   * AI 推导「函证结果是否相符」—— 调用 `evaluateMatch` **唯一出口**（services/replyRule.ts）：
    *   往来函证 —— 由印章落章区域判定；
-   *   银行函证 —— 印章落章区域 + 询证事项逐项核对结果，存在差异即判不相符。
+   *   银行函证 —— **只看询证事项逐项核对**（回函 × 系统内格式一/二数据），印章不作相符性依据，
+   *   印章缺失 / 异常仅进入 AI 风险提示，两者分开表达。
    */
-  const aiMatched = useMemo(() => {
-    if (!v) return undefined
-    if (!v.seal.hasSeal) return undefined
-    const bySeal = v.seal.region === '信息证明无误区'
-    if (record?.type === '银行函证') return bySeal && bankDiffCount === 0
-    return bySeal
-  }, [v, record?.type, bankDiffCount])
+  const suggestion = useMemo(() => (record ? evaluateMatch(record) : undefined), [record])
+  const aiMatched = suggestion?.matched ?? null
 
   /** AI 推导「是否为公章」—— 未检出印章时无法判定 */
   const aiOfficialSeal = useMemo(
@@ -179,7 +184,7 @@ export default function ReplyResultModal({
               showRegions
               activeRegion={v?.seal.region}
               sealBoxes={v?.seal.boxes ?? []}
-              handwriting={v?.handwriting?.text}
+              handwriting={rule?.detectHandwriting ? v?.handwriting?.text : undefined}
               height={620}
             />
           </div>
@@ -192,6 +197,15 @@ export default function ReplyResultModal({
            * 三项统一为「结论条 → 依据 → 采纳动作」骨架（与核验页明细同一套），
            * 区块命名与「AI 核验」入口对齐 —— 让用户知道这些结论就是 AI 核验出来的。
            */}
+          {recognizing && (
+            <Alert
+              type="info"
+              showIcon
+              message="AI 识别中"
+              description="归属已确认，系统正在异步识别其余检测项（询证事项逐项核对 / 印章 / 快递面单），完成后本页会自动刷新 AI 建议；当前可先人工填写，也可稍后再采纳。"
+            />
+          )}
+
           {v && (
             <div className="panel" style={{ padding: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -203,35 +217,25 @@ export default function ReplyResultModal({
                 </span>
               </div>
 
-              {/* 相符性 —— 由印章位置决定 */}
+              {/* 相符性 —— 往来按印章落章区域；银行按询证事项逐项核对（依据见 evaluateMatch） */}
               <ResultBar
-                status={aiMatched === undefined ? 'info' : aiMatched ? 'ok' : 'risk'}
-                message={
-                  aiMatched === undefined ? '无法判定（未检出印章）' : aiMatched ? '相符' : '不相符'
-                }
+                status={aiMatched === null ? 'info' : aiMatched ? 'ok' : 'risk'}
+                message={aiMatched === null ? '无法判定' : aiMatched ? '相符' : '不相符'}
                 detail={
-                  aiMatched === undefined
-                    ? '未在回函文件任何页检出印章，建议退回被询证方补盖后再归档'
-                    : `依据：印章盖于「${v.seal.region}」${
-                        isBank
-                          ? bankDiffCount > 0
-                            ? ` + 询证事项逐项核对 ${bankDiffCount} 项差异`
-                            : ' + 询证事项逐项核对全部相符'
-                          : v.consistency.diffCount > 0
-                            ? ` + 一致性比对 ${v.consistency.diffCount} 项金额差异`
-                            : ''
-                      }`
+                  suggestion?.basis
+                    ? `依据：${suggestion.basis}`
+                    : '识别数据尚未齐备，暂无法给出建议'
                 }
                 extra={
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <AiChip confidence={v.seal.confidence} />
+                    <AiChip confidence={isBank ? 0.96 : v.seal.confidence} />
                     <Button
                       size="small"
                       type={adopted.matched ? 'default' : 'primary'}
                       ghost={!adopted.matched}
-                      disabled={aiMatched === undefined}
+                      disabled={aiMatched === null}
                       onClick={() => {
-                        setMatched(aiMatched)
+                        setMatched(aiMatched ?? undefined)
                         markAdopt('matched')
                       }}
                     >
@@ -334,8 +338,8 @@ export default function ReplyResultModal({
                 }
               />
 
-              {/* 不相符描述 —— 手写体转录全文可见（要看内容才能决定是否采纳） */}
-              {v.handwriting && (
+              {/* 不相符描述 —— 手写体转录全文可见（要看内容才能决定是否采纳）；银行函证不检测手写体 */}
+              {rule?.detectHandwriting && v.handwriting && (
                 <ResultBar
                   status="info"
                   message="不相符处描述"
@@ -369,7 +373,7 @@ export default function ReplyResultModal({
                   color: 'var(--c-text-3)',
                 }}
               >
-                <span>完整核验明细（一致性比对 / 印章 / 手写体 / 银行文本）</span>
+                <span>完整核验明细（{rule?.verifyItemsLabel ?? '一致性比对 / 印章'}）</span>
                 <Button
                   type="link"
                   size="small"
@@ -413,7 +417,7 @@ export default function ReplyResultModal({
                     { label: '不相符', value: false },
                   ]}
                 />
-                <Tooltip title="依据函证业务规则：印章盖在「信息证明无误」区判定为相符；盖在「信息不符」区判定为不相符">
+                <Tooltip title={rule?.matchRuleHint}>
                   <span className="muted" style={{ fontSize: 12 }}>
                     ⓘ 建议值见上方 AI 核验结论，采纳后仍可修改
                   </span>
@@ -428,7 +432,7 @@ export default function ReplyResultModal({
                   rows={3}
                   value={diffDesc}
                   onChange={(e) => setDiffDesc(e.target.value)}
-                  placeholder="请描述不符项目及差异缘由，可由上方「手写体识别」一键带入"
+                  placeholder={rule?.diffPlaceholder}
                   style={{ flex: 1 }}
                 />
               </div>
@@ -560,8 +564,13 @@ export default function ReplyResultModal({
             </div>
           </div>
 
-          {/* 银行函证：询证事项逐项核对（替代往来函证的科目余额分录） */}
-          {isBank && (
+          {/* 银行函证：询证事项逐项核对（替代往来函证的科目余额分录）—— 识别中不展示（数据尚未识别，回退展示会误导） */}
+          {isBank && recognizing && (
+            <div className="panel" style={{ padding: 12, fontSize: 13, color: 'var(--c-text-3)' }}>
+              询证事项逐项核对将在 AI 识别完成后自动带入（回函识别结果 × 系统内格式一 / 格式二数据）。
+            </div>
+          )}
+          {isBank && !recognizing && (
             <div className="panel" style={{ padding: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span className="section-title">询证事项逐项核对</span>

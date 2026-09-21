@@ -249,15 +249,15 @@ function compareName(repliedRaw: string, sentRaw: string, label: string): HitRes
 
   // 一方包含另一方 —— 常见于回函落款为分支行，或使用简称
   if (rn.length >= 2 && sn.length >= 2) {
-    if (rn.includes(sn)) return { kind: 'fuzzy', reason: `回函落款包含发函名称，疑为分支机构（${repliedRaw}）` }
-    if (sn.includes(rn)) return { kind: 'fuzzy', reason: `发函名称包含回函名称，疑为简称（${repliedRaw}）` }
+    if (rn.includes(sn)) return { kind: 'fuzzy', reason: '回函落款疑为分支机构' }
+    if (sn.includes(rn)) return { kind: 'fuzzy', reason: '发函名称疑为简称' }
   }
 
   const sim = similarity(rc, sc)
   if (sim >= FUZZY_SIMILARITY) {
-    return { kind: 'fuzzy', reason: `文字存在轻微差异，相似度 ${Math.round(sim * 100)}%` }
+    return { kind: 'fuzzy', reason: '文字存在轻微差异' }
   }
-  return { kind: 'miss', reason: `与发函底稿不一致，相似度 ${Math.round(sim * 100)}%` }
+  return { kind: 'miss', reason: '与发函底稿不一致' }
 }
 
 /** 日期类要素比对 */
@@ -271,7 +271,7 @@ function compareDate(repliedRaw: string, sentRaw: string): HitResult {
       reason: toHalfWidth(repliedRaw).trim() === toHalfWidth(sentRaw).trim() ? '与发函底稿一致' : '日期写法归一后一致',
     }
   }
-  return { kind: 'miss', reason: `识别为 ${r}，与发函底稿 ${s} 不一致` }
+  return { kind: 'miss', reason: '与发函底稿不一致' }
 }
 
 /* ------------------------------------------------------------------ */
@@ -385,7 +385,7 @@ export function scoreBankMatch(input: BankFieldInput, sources: BankCandidateSour
   if (!best) {
     return {
       fields: [],
-      conclusion: '未在本期函证控制表中找到可比对的函证，需人工指定归属',
+      conclusion: '不在本期函证控制表内，需人工指定',
       confidence: 0,
       level: 'manual',
       score: 0,
@@ -397,21 +397,24 @@ export function scoreBankMatch(input: BankFieldInput, sources: BankCandidateSour
   const { fields } = best
   const level = decideLevel(fields, best.candidate.score)
   const bankField = fields.find((f) => f.key === 'bankName')
-  const hitCount = best.candidate.hitKeys.length
-  const percent = Math.round(best.candidate.score * 100)
 
+  /*
+   * 结论文案只回答用户关心的两件事：**匹配上了没 / 匹配到哪封系统函证**。
+   * 得分、阈值、命中数、相似度等内部指标一律不进文案（v2.25 原则：
+   * 界面上不出现「没有解释就无法理解」的数字），它们仍保留在结构里供逻辑使用。
+   */
   let conclusion: string
   let reason: string | undefined
 
   if (level === 'auto') {
-    conclusion = `四要素全部匹配，得分 ${percent}%，已自动归属函证 ${best.candidate.confirmationNo}`
+    conclusion = `已匹配到系统函证 ${best.candidate.confirmationNo}`
   } else if (level === 'confirm') {
-    conclusion = `四要素 ${hitCount}/4 命中，得分 ${percent}%，建议归属函证 ${best.candidate.confirmationNo}，请人工确认`
+    conclusion = `建议匹配到系统函证 ${best.candidate.confirmationNo}，请确认`
     reason = bankField?.fuzzy
       ? bankField.reason
       : `未完全匹配的要素：${fields.filter((f) => !f.matched).map((f) => f.label).join('、')}`
   } else {
-    conclusion = `银行名称未命中，得分 ${percent}%，低于 ${Math.round(CONFIRM_SCORE * 100)}% 阈值，需人工指定归属`
+    conclusion = '未匹配到系统函证，需人工指定'
     reason = bankField?.reason ?? '未匹配到可信的函证'
   }
 
