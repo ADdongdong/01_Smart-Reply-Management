@@ -1,4 +1,5 @@
-import { Button, Input, Table, Tooltip } from 'antd'
+import { useState } from 'react'
+import { Button, Input, Modal, Table, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { DownOutlined, ReloadOutlined, RightOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import type { BankItemGroup, BankItemRow } from '@/types'
@@ -45,6 +46,20 @@ export default function BankItemsTable({
 }) {
   const editable = mode === 'edit'
 
+  /**
+   * 「应用 AI 识别值」的**变更预览**（v2.49）—— 记的是正在预览的分组 id。
+   *
+   * 原来点按钮**直接就改**（只弹一句 toast）。但这里是审计场景：
+   * 「AI 把哪些值改成了什么」必须先看得见再落盘 —— 所以改为**先预览、再确认**，
+   * 并在预览里明确标出「哪几行不会被改」（人工核对过的行）。
+   */
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const previewGroup = groups.find((g) => g.id === previewId)
+
+  /** 本次会被改的行：有 AI 值、且回函值 ≠ AI 值（与父级 `handleApplyGroup` 的判据严格一致） */
+  const pendingRows = (g: BankItemGroup) =>
+    g.rows.filter((r) => r.aiAmount != null && r.replyAmount !== r.aiAmount)
+
   return (
     <div>
       {groups.map((g) => (
@@ -55,8 +70,71 @@ export default function BankItemsTable({
           onReplyChange={onReplyChange}
           onApplyGroup={onApplyGroup}
           onRerunGroup={onRerunGroup}
+          onPreviewApply={setPreviewId}
         />
       ))}
+
+      <Modal
+        open={!!previewGroup}
+        title="应用 AI 识别值 —— 变更预览"
+        width={640}
+        okText="确认应用"
+        cancelText="取消"
+        onCancel={() => setPreviewId(null)}
+        onOk={() => {
+          if (previewGroup) onApplyGroup?.(previewGroup.id)
+          setPreviewId(null)
+        }}
+      >
+        {previewGroup && (
+          <>
+            <div style={{ fontSize: 13, color: 'var(--c-text-2)', marginBottom: 10 }}>
+              将更新 <b>{pendingRows(previewGroup).length}</b> 行的「回函值」
+              {previewGroup.rows.length - pendingRows(previewGroup).length > 0 && (
+                <span className="muted">
+                  　·　{previewGroup.rows.length - pendingRows(previewGroup).length} 行保持不变（你已人工核对过）
+                </span>
+              )}
+            </div>
+
+            {pendingRows(previewGroup).length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--c-text-3)' }}>
+                本组的「回函值」已与 AI 识别值一致，无需更新。
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ color: 'var(--c-text-3)', fontSize: 12 }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 500 }}>记录</th>
+                    <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 500 }}>当前回函值</th>
+                    <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 500 }}>将改为（AI 值）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingRows(previewGroup).map((r) => (
+                    <tr key={r.id} style={{ borderTop: '1px solid var(--c-hairline)' }}>
+                      <td style={{ padding: '6px 8px', color: 'var(--c-text-1)' }}>{r.keys.join(' · ')}</td>
+                      <td className="num" style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--c-text-3)' }}>
+                        {r.replyAmount != null ? r.replyAmount.toLocaleString('zh-CN') : '—'}
+                      </td>
+                      <td
+                        className="num"
+                        style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: 'var(--c-text-1)' }}
+                      >
+                        {r.aiAmount != null ? r.aiAmount.toLocaleString('zh-CN') : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div style={{ marginTop: 10, fontSize: 12, color: 'var(--c-text-3)' }}>
+              应用后「差异」与「结论」会按新值重新计算。
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -94,12 +172,15 @@ function GroupCard({
   onReplyChange,
   onApplyGroup,
   onRerunGroup,
+  onPreviewApply,
 }: {
   group: BankItemGroup
   editable: boolean
   onReplyChange?: (groupId: string, rowId: string, value: number | null) => void
   onApplyGroup?: (groupId: string) => void
   onRerunGroup?: (groupId: string) => void
+  /** 请求预览变更（v2.49）—— 由顶层持有预览弹窗 */
+  onPreviewApply?: (groupId: string) => void
 }) {
   const diffCount = g.rows.filter((r) => r.match === false).length
   /** 有 AI 值且尚未人工改过（回函值 == AI 值）才允许一键应用，避免"应用了但什么都没变" */
@@ -261,7 +342,8 @@ function GroupCard({
             type="link"
             icon={<ThunderboltOutlined />}
             style={{ padding: 0, height: 'auto', fontSize: 12 }}
-            onClick={() => onApplyGroup(g.id)}
+            /* v2.49：**不直接应用**，先弹差异预览 —— 审计场景里「改了什么」必须先看得见 */
+            onClick={() => onPreviewApply?.(g.id)}
           >
             应用 AI 识别值
           </Button>

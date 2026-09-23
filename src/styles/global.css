@@ -23,52 +23,70 @@
   /* 标签底统一档位（比静态底略深） */
   --c-tag-bg: rgba(16, 24, 40, 0.05);
 
-  /* 文字层级 —— 同一色相靠透明度拉开层次，而不是换色相。
-     这样整页只有一种「墨色」，不会出现蓝灰混排的浑浊感。
-     对比度：0.72 → 6.4:1；0.60 → 4.6:1，均达 WCAG AA */
+  /* 文字层级 —— **实色阶**（v2.49 改口径）。
+     此前用 `rgba(29,33,41,0.72 / 0.6)` 拉层次，理由是「整页只有一种墨色」；
+     但在浅色底上渲染时字会与背景**混色**，观感发虚发灰，且 0.6 已是最深的三级、
+     没有继续加深的余地。既然注释里自己写着「等效 #777A80」，就直接用实色 ——
+     同等对比度下**更锐利、更干净**（这是「界面发灰、没有质感」的首要来源）。
+     三级都保持 ≥ 4.5:1（WCAG AA）。 */
   --c-text-1: #1d2129;
-  --c-text-2: rgba(29, 33, 41, 0.72);
-  --c-text-3: rgba(29, 33, 41, 0.6);
+  /* 等效原 rgba(29,33,41,.72) → 6.3:1 */
+  --c-text-2: #5b6270;
+  /* 等效原 rgba(29,33,41,.60) → 4.7:1 */
+  --c-text-3: #7a808c;
 
-  /* 线条体系 —— 只保留三级且都极淡。
-     层次感由留白与阴影承担，线条仅在必须分隔处出现一次 */
-  --c-hairline: rgba(16, 24, 40, 0.06);
-  --c-border: #e4e8f0;
-  --c-border-light: #f0f2f7;
+  /* 线条体系 —— 三级，量级整体上调一档（v2.49）。
+     此前发丝线 0.06 / 边框 #e4e8f0 都过淡，与同样极淡的卡片阴影叠加后
+     「什么都在、什么都看不清」，卡片失去边界感。 */
+  --c-hairline: rgba(16, 24, 40, 0.09);
+  --c-border: #dfe3ec;
+  --c-border-light: #eaedf4;
 
   --c-fill-light: #f7f9fc;
-  --c-bg-layout: #f5f7fb;
+  /*
+   * 页面底 —— **纯白**（v2.54，用户反馈「这个灰/蓝色太丑了」）。
+   *
+   * 此前是 `#eef1f7`（v2.49 为「让白卡片浮起来」而加深一档的冷蓝灰），
+   * 用户直接点名反馈，故改白。
+   *
+   * **连带处理了卡片边界**：页面底变白后，白卡片不再有底色差可依，
+   * 边界改由 `--shadow-card` 的第 1 层（`0 0 0 1px` 描边）承担 —— 见其注释。
+   */
+  --c-bg-layout: #ffffff;
   /* 文件预览区底 —— 中性蓝灰，让「纸」浮起来（结构性底色，不承载语义） */
   --c-preview-bg: #e6eaf3;
 
-  /* 圆角三级 —— 卡片 / 控件 / 标签 */
-  --radius-card: 8px;
-  --radius-control: 6px;
-  --radius-tag: 4px;
+  /* 圆角三级 —— 容器 / 控件 / 标签（v2.49 整体上调一档，让界面更柔和）
+     层次原则：容器圆角 > 内部元素圆角，嵌套时不出现「内圆角大于外圆角」的视觉错误 */
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-tag: 6px;
 
   /* 标签高度 —— 只有两档。此前 6 处小标签各写一遍 inline style，
      高度出现了 16 / 20 两种（同一种信息形态不该有多种尺度） */
   --h-tag: 20px;
   --h-tag-sm: 16px;
 
-  /* 阴影 —— 多层叠加而非单层硬投影。
-     每层偏移与模糊成比例递减，堆出接近真实光照的柔和过渡 */
+  /* 阴影 —— 多层叠加而非单层硬投影（沿用），但**改带色相、并提高对比**（v2.49）。
+     此前是纯黑低透明度（rgba(0,0,0,.05~.06)），而页面底是蓝灰 —— 黑影蒙在冷色上
+     会显得灰扑扑，且 0.05 的量级不足以形成边界。现在统一用**深蓝灰**（20,28,45），
+     阴影成为「环境的一部分」而不是「盖了一层灰」；量级提到 .06~.14。 */
   --shadow-card:
-    0 0 0 1px rgba(25, 28, 33, 0.05),
-    0 1px 1px -0.5px rgba(0, 0, 0, 0.05),
-    0 2px 3px -1px rgba(0, 0, 0, 0.06);
+    0 0 0 1px rgba(20, 28, 45, 0.06),
+    0 1px 2px -1px rgba(20, 28, 45, 0.1),
+    0 2px 4px -1px rgba(20, 28, 45, 0.06);
   --shadow-hover:
-    0 0 0 1px rgba(25, 28, 33, 0.06),
-    0 1px 1px -0.5px rgba(0, 0, 0, 0.05),
-    0 3px 3px -1.5px rgba(0, 0, 0, 0.05),
-    0 6px 6px -3px rgba(0, 0, 0, 0.05);
+    0 0 0 1px rgba(20, 28, 45, 0.08),
+    0 1px 2px -1px rgba(20, 28, 45, 0.1),
+    0 4px 8px -2px rgba(20, 28, 45, 0.1),
+    0 8px 16px -4px rgba(20, 28, 45, 0.07);
   --shadow-pop:
-    0 0 0 1px rgba(0, 0, 0, 0.04),
-    0 1px 1px -0.5px rgba(0, 0, 0, 0.04),
-    0 3px 3px -1.5px rgba(0, 0, 0, 0.04),
-    0 6px 6px -3px rgba(0, 0, 0, 0.05),
-    0 12px 12px -6px rgba(0, 0, 0, 0.06),
-    0 24px 24px -12px rgba(0, 0, 0, 0.07);
+    0 0 0 1px rgba(20, 28, 45, 0.06),
+    0 1px 2px -1px rgba(20, 28, 45, 0.08),
+    0 4px 8px -2px rgba(20, 28, 45, 0.08),
+    0 8px 16px -4px rgba(20, 28, 45, 0.08),
+    0 16px 24px -8px rgba(20, 28, 45, 0.1),
+    0 32px 48px -16px rgba(20, 28, 45, 0.12);
 
   /* 小字号文字专用的深色语义色 —— 在浅色底上对比度 ≥ 4.5:1（WCAG AA）
      注：图形/色块仍使用上面鲜亮的语义色，二者分工不同 */
@@ -648,12 +666,25 @@ body {
   overflow: hidden;
   padding: 0;
 }
+/*
+ * 桌面端的内容区宽度（v2.50）—— 由 `max-width: 100%`（放开限宽、撑满全屏）
+ * 改为 **1320px + 居中**。
+ *
+ * 原因是比例失衡：左栏固定 400px 时，1680 屏的右栏会被拉到 1280px，而详情内容
+ * （归属一行 + 4 个检测点 + 人工核验）本身并不宽 —— 于是右栏右侧空出三四百像素
+ * （用户反馈「左边内容多，右边空荡荡」）。
+ *
+ * 收到 1320px（常见阅读宽度上限）后，右栏 = 1320 − 400 = **920px**，与内容量相称；
+ * 屏宽超出部分变成**左右对称**的留白（`margin: 0 auto`），比单边空旷自然得多。
+ * 注意 `width: 100%` 必须保留 —— 它让内容区在窄屏（< 1320px）仍随窗口收缩。
+ */
 .fs-modal .ant-modal-body:has(.recognition-workspace) > .fs-body-inner {
   flex: 1;
   min-height: 0;
   min-width: 0;
   width: 100%;
-  max-width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
 }
@@ -672,11 +703,22 @@ body {
   padding: 12px 24px;
   border-bottom: 1px solid var(--c-hairline);
 }
+/*
+ * 两栏比例（v2.50）—— 由 `320px : 1fr` 改为 `400px : 1fr`。
+ *
+ * 原 320px 对左栏内容偏窄：一个批次组里含「文件组标题 + 若干任务卡」，每张卡有两行
+ * （函证编号 + 被询证单位 + 页码 / 状态 + 风险 + 检测点计数），实测文件名与被询证单位
+ * 都被省略号截断（用户反馈「左边内容多」）。加宽到 400px 后两行信息基本可直接读完。
+ *
+ * 与之配套：`.fs-body-inner` 的内容区上限从 1600px 收到 1320px（见下方同块注释）——
+ * 右栏宽度 = 1320 − 400 = **920px**，恰与详情内容的阅读宽度相称，不再出现
+ * 「左栏拥挤、右栏空旷」的失衡。
+ */
 .recognition-bench {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 400px minmax(0, 1fr);
 }
 
 /* 左栏 —— 识别队列 */
@@ -783,9 +825,11 @@ body {
     overflow: auto;
     padding: 0;
   }
+  /* 窄屏：整页滚动，宽度随窗口（桌面端的 1320px 上限此处不适用） */
   .fs-modal .ant-modal-body:has(.recognition-workspace) > .fs-body-inner {
     display: block;
-    max-width: 1600px;
+    max-width: 100%;
+    margin: 0;
   }
   .recognition-workspace {
     display: block;
@@ -832,4 +876,349 @@ body {
 .ant-table-wrapper .ant-table-container,
 .ant-table-wrapper .ant-table {
   border-radius: 0;
+}
+
+/* ------------------------------------------------------------------
+   AI 来源卡（v2.49）—— ✦ 悬停时的结构化来源信息
+   信息结构参照「上下文卡片」：标题 → 字段区 → 结论行
+   ------------------------------------------------------------------ */
+.ai-card {
+  min-width: 208px;
+}
+.ai-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ai-card__badge {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: var(--radius-tag);
+  background: var(--c-ai-bg);
+  color: var(--c-primary);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ai-card__rows {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ai-card__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+.ai-card__k {
+  flex: none;
+  width: 42px;
+  opacity: 0.7;
+}
+.ai-card__v {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.ai-card__pct {
+  font-weight: 600;
+}
+.ai-card__pct.is-low {
+  color: var(--c-risk-high-text);
+}
+/* 迷你置信度计量条 —— 让「92%」与「63%」在视觉上立刻分得开 */
+.ai-card__meter {
+  display: inline-block;
+  width: 54px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+.ai-card__meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: currentColor;
+}
+.ai-card__meter > i.is-low {
+  background: var(--c-risk-high-text);
+}
+.ai-card__foot {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------
+   检测点证据链（v2.49）—— 检测点可展开看「AI 是怎么得出结论的」
+   ------------------------------------------------------------------ */
+/* 可展开的行给一点可点的暗示：cursor + hover 底色 */
+.recognition-stage.is-expandable {
+  cursor: pointer;
+  border-radius: var(--radius-control);
+}
+.recognition-stage.is-expandable:hover {
+  background: var(--c-fill-light);
+}
+.recognition-stage__more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding-left: 2px;
+}
+/* 依据明细 —— 缩进 + 左侧竖线，视觉上「挂」在该检测点之下 */
+.recognition-evidence {
+  margin: 2px 0 6px 22px;
+  padding: 8px 10px 8px 12px;
+  border-left: 2px solid var(--c-primary-bg);
+  background: var(--c-fill-light);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  animation: rise-in 200ms var(--ease-out) both;
+}
+.recognition-evidence__line {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--c-text-2);
+}
+.recognition-evidence__idx {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--c-primary-bg);
+  color: var(--c-primary);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.recognition-evidence__foot {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--c-hairline);
+  font-size: 11px;
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==================================================================
+   第二档视觉增强（v2.49）—— 有条件放开「氛围渐变 / 微动效 / 浮层玻璃」
+   ==================================================================
+   **放开的**：氛围性渐变（页面底、主按钮、hover 面）、交互微动效
+   （hover 抬升 / 按压下压 / 进场淡入）、浮层玻璃（**仅限浮在内容之上的元素**）。
+   **仍然禁止**：炫技式大渐变（45° 彩虹、紫蓝 AI 渐变）、装饰性循环动画、
+   全站玻璃拟态、把渐变用在数据/状态色上（风险红、相符绿）。
+   所有动效只动 `transform` / `opacity`，并统一受 `prefers-reduced-motion` 约束。
+   ================================================================== */
+
+/*
+ * ① 页面底 —— 纯白（v2.54）。
+ *
+ * 原为「`--c-bg-layout` 冷蓝灰 + 顶部一抹主色径向高光」：那层高光在 `#eef1f7` 上
+ * 起「消除死平的纯色底」的作用，但底色改白之后，它会把页面顶部染成淡蓝 ——
+ * 用户要的是干净的白，故高光一并去掉。
+ */
+.ant-layout {
+  background: var(--c-bg-layout);
+}
+
+/* ② 主按钮 —— 纵向微渐变（上亮下深）+ 内侧高光，比纯色更有实体感。
+   **必须排除 `ghost` 变体**（`type="primary" ghost`）：它是「**透明底 + 主色文字**」
+   （列表页操作列的行内主操作就是这种），若一并铺上实心蓝渐变，
+   会变成「蓝字压蓝底」——文字彻底看不见（2026-09-23 用户报「这些按钮看不清了」即此）。
+   `.ant-btn-background-ghost` 是 antd 给 ghost 变体打的类。 */
+.ant-btn-primary:not(.ant-btn-background-ghost):not(:disabled) {
+  background-image: linear-gradient(180deg, #4a68e0 0%, #3b5bdb 100%);
+  box-shadow:
+    0 1px 2px rgba(20, 28, 45, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* ③ 悬停抬升 —— 极轻的 1px 位移 + 面色微渐变，让「可点」有物理反馈 */
+.recognition-task,
+.recognition-queue__group {
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+.recognition-task:hover {
+  transform: translateY(-1px);
+  background-image: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+}
+
+/* ④ 按压反馈 —— 模拟物理下压（时长要短，否则显得黏） */
+.ant-btn {
+  transition:
+    transform 90ms var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+.ant-btn:not(:disabled):active {
+  transform: translateY(0.5px) scale(0.99);
+}
+
+/* ⑤ 浮层玻璃 —— **仅浮在内容之上的元素**（遮罩、悬浮卡）；不做全站玻璃。
+   用 `backdrop-filter` + 半透明底 + 1px 内描边，模拟边缘折射感 */
+.ant-modal-mask,
+.ant-drawer-mask {
+  background: rgba(20, 28, 45, 0.3) !important;
+  backdrop-filter: blur(3px);
+}
+
+/* ⑥ 进场 —— 首屏区块阶梯淡入（只播一次，不做循环动画） */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.page-head,
+.panel,
+.card {
+  animation: rise-in 260ms var(--ease-out) both;
+}
+/* 阶梯：同屏多个区块依次进场，而非齐刷刷一起出现 */
+.panel:nth-of-type(2) {
+  animation-delay: 40ms;
+}
+.panel:nth-of-type(3) {
+  animation-delay: 80ms;
+}
+
+/* ------------------------- 归属页（v2.56） ------------------------- */
+
+/*
+ * 识别工作台的「归属页」—— 银行函证在**归属尚未确定**时的全部内容：
+ * 左 = 原始回函预览（整份铺出、本段描边），右 = 切分结果表 + 归属操作。
+ *
+ * 为何左右分栏而非上下堆叠：归属这一步要做的判断是「**这份文件的每一页归得对不对**」，
+ * 依据在左（原件）、结论在右（切分与归属），两栏并排才能对着原件核对；
+ * 上下堆叠时看完原件要滚回去看结论，来回翻。
+ *
+ * 高度：左栏定型（预览是独立滚动区，高度不能随内容涨），故给整块一个下限，
+ * 窄屏时（见下方媒体查询）退回上下堆叠。
+ */
+.assign-pane {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 560px;
+  margin-top: 12px;
+}
+.assign-pane__left {
+  /*
+   * 预览取**固定宽**而非比例（实测：按 1.15 分配时两栏各约 290px，
+   * 表格的「被询证单位」被压成三行、「归属状态」直接被裁掉）。
+   * 400px 足够看清 A4 扫描件的版式与印章，余下的宽度全给表格 ——
+   * 这一步要判断的是「切得对不对」，表格比预览更缺宽度。
+   */
+  flex: none;
+  width: 400px;
+  /* 预览内部自适应父高（`AnnotatedPdfPreview` 的 ResizeObserver 会跟随） */
+  height: 560px;
+}
+.assign-pane__right {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ------------------------- 回函进度步骤条（v2.51） ------------------------- */
+
+/*
+ * 形态：`[圆点] 快递信息 › | [圆点] 回函结果 ›`
+ * · 圆点 —— 未完成是空心灰圈，完成是**绿色实心 + 白勾**（绿只取 `--c-risk-low` 一个源，
+ *   与「相符」标签同色，避免列表里出现第二种绿）；
+ * · 步骤名 —— 主色，可点，点击打开对应弹窗；无回调时退灰且不响应（`.progress-steps__step:disabled`）；
+ * · `›` —— 步骤自身的「进入下一步」箭头；`|` —— 两步之间的分隔，取发丝线色（最弱的一档）。
+ * 所有颜色取自既有令牌，不新增色值。
+ */
+.progress-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.progress-steps__sep {
+  color: var(--c-hairline);
+}
+.progress-steps__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--c-primary);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.progress-steps__step:disabled {
+  cursor: default;
+  color: var(--c-text-3);
+}
+.progress-steps__step:not(:disabled):hover {
+  text-decoration: underline;
+}
+/*
+ * 当前该做的那一步（v2.52）—— 操作列的主按钮移除后，「下一步是什么」的引导
+ * 全落到步骤条上，故给未完成的第一步 / 第二步加字重（**只加字重、不加色块**：
+ * 蓝色已经够显眼，底色会与「已完成」的绿勾抢注意力）。
+ */
+.progress-steps__step.is-current {
+  font-weight: 500;
+}
+.progress-steps__dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--c-text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: #fff;
+}
+.progress-steps__dot.is-done {
+  border-color: var(--c-risk-low);
+  background: var(--c-risk-low);
+}
+.progress-steps__arrow {
+  color: var(--c-text-3);
+  font-size: 12px;
+}
+
+/* ⑦ 无障碍降级 —— 用户开启「减少动态效果」时全部退回静态 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

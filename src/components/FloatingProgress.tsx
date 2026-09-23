@@ -1,6 +1,7 @@
 import { Button } from 'antd'
 import { CloseOutlined, LoadingOutlined, UpOutlined } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
+import { pageRangeOf } from '@/utils/pageRange'
 
 /**
  * 右下角悬浮进度卡 —— 识别过程中不阻塞浏览列表。
@@ -9,8 +10,11 @@ import { useApp } from '@/store/AppStore'
 export default function FloatingProgress() {
   const { state, dispatch } = useApp()
 
-  // 抽屉已展开时不再显示悬浮卡
-  if (state.recognitionOpen) return null
+  /*
+   * 两个全屏界面展开时都不显示悬浮卡（v2.57）——
+   * 它们各自已经完整交代了进度，右下角再挂一张卡是重复信息，也会叠在底栏按钮上。
+   */
+  if (state.assignOpen || state.insightOpen) return null
   if (!state.floatingVisible) return null
 
   const allTasks = state.batches.flatMap((b) => b.tasks)
@@ -57,9 +61,9 @@ export default function FloatingProgress() {
           type="link"
           size="small"
           style={{ marginLeft: 'auto', padding: 0, height: 'auto', fontSize: 13 }}
-          onClick={() => dispatch({ type: 'OPEN_RECOGNITION' })}
+          onClick={() => dispatch({ type: 'OPEN_INSIGHT' })}
         >
-          展开 <UpOutlined style={{ fontSize: 11 }} />
+          看识别过程 <UpOutlined style={{ fontSize: 11 }} />
         </Button>
         <Button
           type="text"
@@ -90,7 +94,7 @@ export default function FloatingProgress() {
             {matching === 0 && checking === 0 && (
               <div>
                 正在处理：<b>{running?.confirmationNo ?? '—'}</b>
-                {running?.pageRange ? ` · ${running.pageRange}` : ''}
+                {running ? ` · ${pageRangeOf(running)}` : ''}
               </div>
             )}
             <div style={{ color: 'var(--c-text-3)' }}>
@@ -106,7 +110,7 @@ export default function FloatingProgress() {
           size="small"
           block
           style={{ marginTop: 8 }}
-          onClick={() => dispatch({ type: 'OPEN_RECOGNITION' })}
+          onClick={() => dispatch({ type: 'OPEN_INSIGHT' })}
         >
           查看识别结果
         </Button>

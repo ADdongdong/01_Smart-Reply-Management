@@ -41,6 +41,7 @@ export default function PdfPreview({
   hideViewToggle = false,
   viewMode,
   onViewModeChange,
+  markRange,
 }: {
   confirmationNo: string
   /**
@@ -75,6 +76,11 @@ export default function PdfPreview({
   /** 受控视图（配合 `onViewModeChange` 使用；不传则内部自管理） */
   viewMode?: PreviewMode
   onViewModeChange?: (mode: PreviewMode) => void
+  /**
+   * 标出「本段」页区间（v2.56）—— 归属匹配里预览**整份回函**时用：
+   * 整份铺出来、当前段描边打角标。不传 = 不标记。详见 `AnnotatedPdfPreview`。
+   */
+  markRange?: { start: number; end: number }
 }) {
   const [internalMode, setInternalMode] = useState<PreviewMode>(DEFAULT_PREVIEW_MODE)
   const pref = forceAnnotated ? 'annotated' : (viewMode ?? internalMode)
@@ -141,6 +147,7 @@ export default function PdfPreview({
         showRegions={annotated && showRegions}
         activeRegion={annotated ? activeRegion : undefined}
         handwriting={annotated ? handwriting : undefined}
+        markRange={markRange}
       />
       {switcher}
     </div>

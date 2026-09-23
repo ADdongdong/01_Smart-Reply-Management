@@ -6,7 +6,7 @@ import type {
   ReplyRecord,
   UploadBatch,
 } from '@/types'
-import { BANK_ITEMS_QS, REPLY_RECORDS } from '@/mock/confirmations'
+import { BANK_ITEMS_QS, BANK_VERIFY_FALLBACK, REPLY_RECORDS, fallbackVerification } from '@/mock/confirmations'
 import { makeStages } from '@/mock/recognition'
 import { advanceBatch } from '@/services/mockRecognition'
 import { TYPE_RULE } from '@/services/replyRule'
@@ -18,12 +18,24 @@ const CURRENT_USER = '张审计'
 interface AppState {
   records: ReplyRecord[]
   batches: UploadBatch[]
-  /** 识别工作台抽屉是否展开 */
-  recognitionOpen: boolean
   /**
-   * 当前识别工作台的**入口类型**（往来函证 / 银行函证）。
+   * **归属界面**是否展开（v2.57）。
+   *
+   * 与 `insightOpen` 是**两个互斥的独立界面**，不再共用一个"工作台"开关 ——
+   * 用户的要求是「界面的解耦，匹配单独的界面」，且
+   * 「识别的界面点击确定后，就回到主界面，智能识别放在右下角，用户需要主动点击，
+   * 才会去到智能识别的界面查看」。
+   */
+  assignOpen: boolean
+  /**
+   * **智能识别界面**是否展开（v2.57）—— 由主界面右下角的进度卡主动点入。
+   * 与 `assignOpen` 互斥（同一时刻只挂载一个全屏界面，省内存、也避免两层遮罩叠加）。
+   */
+  insightOpen: boolean
+  /**
+   * 当前识别的**入口类型**（往来函证 / 银行函证）。
    * 由列表页的两个上传入口在打开时指定 —— 上传时类型即已确定，
-   * 工作台据此渲染标题 / 上传提示 / 演示数据，不再靠系统事后判类型。
+   * 两个界面据此渲染标题 / 演示数据，不再靠系统事后判类型。
    */
   recognitionType: ConfirmationType
   /** 悬浮进度卡是否显示 */
@@ -41,25 +53,27 @@ interface AppState {
 
 type Action =
   /**
-   * 启动一个识别批次（`recognitionOpen` 一并置 true → 自动进入工作台）。
+   * 启动一个识别批次（v2.57：一并置 `assignOpen = true` → 自动进入**归属界面**）。
    * `uploadType` 由**上传弹窗**给出 —— 类型在上传那一刻就已确定（v2.47 起），
    * 不必再另外发一次 `OPEN_RECOGNITION`（分两次 dispatch 会让工作台先按旧类型渲染一帧）。
    */
   | { type: 'START_BATCH'; batch: UploadBatch; uploadType?: ConfirmationType }
   | { type: 'TICK' }
   /**
-   * 打开识别工作台。`uploadType` 由上传入口指定（缺省按「往来函证」处理，
-   * 保证 WorkbenchLayout / FloatingProgress 等未带类型的调用点行为不变）。
+   * 打开**归属界面**（v2.57）。`uploadType` 由上传入口指定（缺省按「往来函证」处理）。
    */
-  | { type: 'OPEN_RECOGNITION'; uploadType?: ConfirmationType }
+  | { type: 'OPEN_ASSIGN'; uploadType?: ConfirmationType }
   /**
-   * 关闭识别工作台抽屉。
+   * 关闭**归属界面** —— 即用户点「确定」或右上角 ×。
    *
-   * **用户语义是「最小化」而不是「取消」** —— 它只收起抽屉，识别任务照常继续，
-   * 并由右下角的悬浮进度卡接管（`FloatingProgress`，可再点「展开」召回）。
-   * 底栏「最小化」按钮、点抽屉外部、标题栏 `×`、`Esc` 四条入口都走这里。
+   * 关闭后**不自动打开识别界面**：识别在后台继续，由右下角进度卡接管；
+   * 要不要去看由用户主动点（用户明确要求「用户需要主动点击，才会去到智能识别的界面查看」）。
    */
-  | { type: 'CLOSE_RECOGNITION' }
+  | { type: 'CLOSE_ASSIGN' }
+  /** 打开**智能识别界面**（由右下角进度卡点入） */
+  | { type: 'OPEN_INSIGHT' }
+  /** 关闭**智能识别界面** —— 回到主界面，识别任务不受影响 */
+  | { type: 'CLOSE_INSIGHT' }
   | { type: 'SET_FLOATING'; visible: boolean }
   | { type: 'CLEAR_FLASH' }
   | { type: 'OPEN_ONBOARDING' }
@@ -85,7 +99,9 @@ type Action =
 const initialState: AppState = {
   records: REPLY_RECORDS,
   batches: [],
-  recognitionOpen: false,
+  /* 两个界面都不在初始态 —— 归属界面由上传/有段待归属时打开，识别界面由右下角主动点入 */
+  assignOpen: false,
+  insightOpen: false,
   recognitionType: '往来函证',
   floatingVisible: false,
   flashRowId: null,
@@ -100,9 +116,28 @@ const initialState: AppState = {
   expressOpen: false,
 }
 
-/** 从原始 mock 中取回某个函证的核验结果 */
-function lookupVerification(confirmationNo: string) {
-  return REPLY_RECORDS.find((r) => r.confirmationNo === confirmationNo)?.verification
+/**
+ * 取某个函证的核验结果 —— **两级来源**（v2.55）。
+ *
+ * · `REPLY_RECORDS` —— 预置演示数据自带（如齐商银行的 `VERIFY_QS`）；
+ * · `BANK_VERIFY_FALLBACK` / `fallbackVerification` —— **候选函证的兜底**。
+ *
+ * **为什么必须有兜底**：银行函证是两阶段类型，落库时 `verification` 刻意留空
+ * （否则第二次回函会在阶段一就显示上一份的结论，「识别中」态无法成立），
+ * 由阶段二回填，而回填走的正是本函数。若这封函证不在演示数据里
+ * （**「上传后才归属」的函证全都属于这类**），就会回填 `undefined`，
+ * 表现为「回函结果填写」页里 **「AI 核验结论」整块不渲染** ——
+ * 用户反馈「为什么中国建设银行没有 AI 识别的是否采用的内容」即此。
+ * 齐商银行有，只因它恰好带着 `VERIFY_QS` 预置在演示数据里，**不是它特殊**。
+ *
+ * `type` 参与兜底：银行函证要有 `bankText`、往来函证要有 `handwriting`（两者形状不同）。
+ */
+function lookupVerification(confirmationNo: string, type: ConfirmationType) {
+  return (
+    REPLY_RECORDS.find((r) => r.confirmationNo === confirmationNo)?.verification ??
+    BANK_VERIFY_FALLBACK[confirmationNo] ??
+    fallbackVerification(type)
+  )
 }
 
 /**
@@ -151,7 +186,7 @@ function applyRecognizedReply(
     periodEnd: base?.periodEnd ?? best?.periodEnd,
     recognitionPending: twoPhase,
     /* `bankItems`（询证事项逐项核对）由阶段二回填，两种类型在落库时都不写 */
-    verification: twoPhase ? undefined : (base?.verification ?? lookupVerification(task.confirmationNo)),
+    verification: twoPhase ? undefined : (base?.verification ?? lookupVerification(task.confirmationNo, task.type)),
   }
   return { records: [...records, created], recordId }
 }
@@ -226,7 +261,7 @@ function applyVerification(state: AppState, taskId: string): AppState {
   const task = findTask(state, taskId)
   if (!task || task.verificationApplied || !task.recordId) return state
 
-  const v = lookupVerification(task.confirmationNo)
+  const v = lookupVerification(task.confirmationNo, task.type)
   /** 同一函证的历史回函（询证事项沿用，与落库时的口径一致） */
   const prior = state.records
     .filter((r) => r.confirmationNo === task.confirmationNo && r.id !== task.recordId)
@@ -264,7 +299,8 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         batches: [...state.batches, action.batch],
-        recognitionOpen: true,
+        /* 上传即进**归属界面**（v2.57）：识别在后台照跑，但用户先做"把回函对应到函证"这一步 */
+        assignOpen: true,
         /* 入口类型随批次一起定 —— 上传弹窗知道自己是哪一类，避免工作台先按旧类型渲染一帧 */
         recognitionType: action.uploadType ?? state.recognitionType,
         floatingVisible: true,
@@ -309,18 +345,28 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...next, floatingVisible: anyRunning ? true : next.floatingVisible }
     }
 
-    case 'OPEN_RECOGNITION':
+    case 'OPEN_ASSIGN':
       return {
         ...state,
-        recognitionOpen: true,
-        recognitionType: action.uploadType ?? '往来函证',
+        assignOpen: true,
+        /* 两个全屏界面互斥 —— 打开归属界面时收掉识别界面（省一层遮罩、也省 pdf.js 实例） */
+        insightOpen: false,
+        recognitionType: action.uploadType ?? state.recognitionType,
       }
-    case 'CLOSE_RECOGNITION':
+    case 'CLOSE_ASSIGN':
+      /*
+       * 关闭归属界面 → 回主界面。**不自动打开识别界面**：
+       * 识别在后台继续，由右下角进度卡接管，要不要去看由用户主动点（v2.57 用户要求）。
+       */
       return {
         ...state,
-        recognitionOpen: false,
-        floatingVisible: state.batches.some((b) => b.status !== 'done'),
+        assignOpen: false,
+        floatingVisible: state.batches.some((b) => b.status !== 'done') || state.floatingVisible,
       }
+    case 'OPEN_INSIGHT':
+      return { ...state, insightOpen: true, assignOpen: false }
+    case 'CLOSE_INSIGHT':
+      return { ...state, insightOpen: false }
     case 'SET_FLOATING':
       return { ...state, floatingVisible: action.visible }
     case 'CLEAR_FLASH':
@@ -372,6 +418,7 @@ function reducer(state: AppState, action: Action): AppState {
        * 归属确认 → 先落库，再**立即启动阶段二**（v2.28「先对应、后细查」：
        * 用户点完「确认归属」不用再做任何事，其余检测项自动异步开跑）。
        */
+      /* 归属已定 → 落库并立即启动阶段二（识别在后台继续，界面由用户点「确定」关闭） */
       return startDetailPhase(finalizeTask({ ...state, batches }, action.taskId), action.taskId)
     }
 
@@ -416,6 +463,7 @@ function reducer(state: AppState, action: Action): AppState {
       /* 归属指定 → 先落库，再**立即启动阶段二**（与 CONFIRM_ASSIGN 同一衔接） */
       const assigned = finalizeTask({ ...state, batches }, action.taskId)
       const started = startDetailPhase(assigned, action.taskId)
+      /* 界面是否关闭由用户点「确定」决定（v2.57），此处只推进数据 */
       return finished ? started : { ...started, floatingVisible: true }
     }
 
@@ -450,6 +498,7 @@ function reducer(state: AppState, action: Action): AppState {
           status: tasks.every((t) => t.status === 'success' || t.status === 'failed') ? ('done' as const) : b.status,
         }
       })
+      /* 跳过也是「这一段处理完了」—— 界面是否关闭仍由用户点「确定」决定（v2.57） */
       return { ...state, batches }
     }
 

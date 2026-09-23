@@ -368,6 +368,66 @@ const VERIFY_QS: AiVerification = (() => {
   }
 })()
 
+/** 中国建设银行（QS2024-019）：印章正常 + 询证事项 1 项差异（判不相符）→ 中风险。
+ *  它与齐商银行的区别是**印章齐全**（齐商是未盖章），用于演示「有章但金额不符」这一组合。 */
+const VERIFY_JH: AiVerification = (() => {
+  const rows = buildConsistency()
+  const seal = SEAL_NORMAL
+  const bankDiffCount = BANK_ITEMS_QS.filter((i) => !i.match).length
+  const { level, reasons } = riskOf('银行函证', { diffCount: 0, seal, bankDiffCount })
+  return {
+    consistency: { rows, diffCount: 0, confidence: 0.92 },
+    seal,
+    bankText: BANK_TEXT,
+    riskLevel: level,
+    riskReasons: reasons,
+    completedModules: 6,
+    totalModules: 6,
+  }
+})()
+
+/**
+ * 候选函证的**核验兜底**（v2.55）。
+ *
+ * ## 为什么需要它
+ *
+ * 银行函证是**两阶段**类型：落库时 `verification` 刻意留空（否则第二次回函会在阶段一
+ * 就显示上一份的结论，「识别中」态无法成立），等阶段二跑完由 `applyVerification` 回填。
+ * 而回填走的是 `lookupVerification`，它原先**只查 `REPLY_RECORDS` 演示数据** ——
+ * 于是**任何「上传后才归属」的函证**（它们本来就不在演示数据里）都会回填 `undefined`，
+ * 表现为「回函结果填写」页里 **「AI 核验结论」整块消失**。
+ *
+ * 用户反馈：「为什么中国建设银行没有 AI 识别的是否采用的内容」—— 就是这个。
+ * 齐商银行有，只是因为它恰好带着 `VERIFY_QS` 预置在演示数据里，**不是它特殊**。
+ *
+ * 真实实现里核验结果来自识别流水；本兜底只为让演示环境里**每条候选函证都出得了结论**。
+ */
+export const BANK_VERIFY_FALLBACK: Record<string, AiVerification> = {
+  'QS2024-019': VERIFY_JH,
+  /* 其余候选函证（齐商 2023 年度、东方财富 / 中金财富 / 平安证券）共用一份「全部相符」结论：
+     演示重点在「不同函证都能出结论」，不在逐份造差异。 */
+}
+
+/** 兜底结论的工具函数 —— 给未单列配比的候选函证一份中性「全部相符、印章正常」结果 */
+export function fallbackVerification(type: ConfirmationType): AiVerification {
+  const bank = type === '银行函证'
+  const seal = SEAL_NORMAL
+  const { level, reasons } = riskOf(type, {
+    diffCount: 0,
+    seal,
+    bankDiffCount: bank ? BANK_ITEMS_QS.filter((i) => !i.match).length : undefined,
+  })
+  return {
+    consistency: { rows: buildConsistency(), diffCount: 0, confidence: 0.95 },
+    seal,
+    ...(bank ? { bankText: BANK_TEXT } : { handwriting: HANDWRITING_NORMAL }),
+    riskLevel: level,
+    riskReasons: reasons,
+    completedModules: 6,
+    totalModules: 6,
+  }
+}
+
 /**
  * 海通证券：加盖**财务章**（非公章）+ 缺骑缝章 + 1 项差异 → 中风险。
  * 印章类型专设为财务章，用于演示「是否为公章 = 否」这一分支。
@@ -813,7 +873,9 @@ const BANK_ITEM_GROUPS_QS: BankItemGroup[] = [
     stat: 'done',
     rows: [
       { id: 'g1-1', keys: ['西安西点信息技术有限公司', '58491750', '人民币'], sentAmount: 5367, aiAmount: 5367, replyAmount: 5367, diff: 0, match: true },
-      { id: 'g1-2', keys: ['西安西点信息技术有限公司', '58491749', '人民币'], sentAmount: 25368, aiAmount: 25368, replyAmount: 25368, diff: 0, match: true },
+      /* 第 2 行刻意让**回函值 ≠ AI 识别值**（表示 AI 读数被人工改过）：既能演示「AI 识别值」
+         这一列的意义，也让「应用 AI 识别值」的变更预览有内容可看 */
+      { id: 'g1-2', keys: ['西安西点信息技术有限公司', '58491749', '人民币'], sentAmount: 25368, aiAmount: 25368, replyAmount: 25000, diff: -368, match: false },
       { id: 'g1-3', keys: ['西安西点信息技术有限公司', '58491751', '人民币'], sentAmount: 5371, aiAmount: 5900, replyAmount: 5900, diff: 529, match: false },
     ],
   },

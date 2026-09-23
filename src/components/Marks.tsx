@@ -1,21 +1,59 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { Tooltip } from 'antd'
-import { CheckCircleFilled, ExclamationCircleFilled, InfoCircleFilled } from '@ant-design/icons'
-import type { ConfirmationType, RiskLevel, VerifyStatus } from '@/types'
+import {
+  CheckCircleFilled,
+  CheckOutlined,
+  ExclamationCircleFilled,
+  InfoCircleFilled,
+} from '@ant-design/icons'
+import type { ConfirmationType, ReplyProgress, RiskLevel, VerifyStatus } from '@/types'
 import { TYPE_RULE } from '@/services/replyRule'
 import { StatusTag, type TagTone } from '@/components/StatusTag'
 
 /* ------------------- AI 来源标识 ------------------- */
 
+/**
+ * AI 来源标识 ✦ —— 悬停给出**来源卡**（v2.49 由纯文字改为结构化卡片）。
+ *
+ * 依据结构参考了「上下文卡片」的做法：**标题（这是什么）→ 字段区（来源 / 置信度）→ 结论行**。
+ * 对审计场景来说，「这个值从哪来」是证据链的一部分，值得比一行小字更清楚；
+ * 置信度也从数字升级为「数字 + 迷你计量条」，低置信度一眼可见。
+ */
 export function AiMark({ source, confidence }: { source?: string; confidence?: number }) {
+  const low = confidence != null && confidence < 0.9
   return (
     <Tooltip
       title={
-        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-          <div style={{ fontWeight: 500 }}>由 AI 自动识别</div>
-          {source && <div>来源：{source}</div>}
-          {confidence != null && <div>置信度：{Math.round(confidence * 100)}%</div>}
-          <div style={{ opacity: 0.8 }}>需人工确认后方可生效</div>
+        <div className="ai-card">
+          <div className="ai-card__head">
+            <span className="ai-card__badge">✦ AI</span>
+            <span>自动识别</span>
+          </div>
+          <div className="ai-card__rows">
+            {source && (
+              <div className="ai-card__row">
+                <span className="ai-card__k">来源</span>
+                <span className="ai-card__v">{source}</span>
+              </div>
+            )}
+            {confidence != null && (
+              <div className="ai-card__row">
+                <span className="ai-card__k">置信度</span>
+                <span className="ai-card__v">
+                  <span className={low ? 'ai-card__pct is-low' : 'ai-card__pct'}>
+                    {Math.round(confidence * 100)}%
+                  </span>
+                  <span className="ai-card__meter">
+                    <i
+                      className={low ? 'is-low' : undefined}
+                      style={{ width: `${Math.round(confidence * 100)}%` }}
+                    />
+                  </span>
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="ai-card__foot">需人工确认后方可生效</div>
         </div>
       }
     >
@@ -93,6 +131,80 @@ export function RiskTag({
     >
       {cfg.text}
     </StatusTag>
+  )
+}
+
+/* ------------------- 回函进度步骤条 ------------------- */
+
+/**
+ * 回函进度步骤条（v2.51）—— 列表「回函进度」列的呈现。
+ *
+ * 形态取自用户提供的参考界面：`✓ 快递信息 › | ○ 回函结果 ›`。
+ * 现有的三个进度值与它天然对应 —— **两个步骤的三种完成组合**：
+ * · `待确认快递信息` → 两个都空圈；
+ * · `待填写回函结果` → 第一个实心打勾；
+ * · `已完成`         → 两个都实心打勾。
+ *
+ * 相比原来的两行文字（状态 + 「下一步：xxx」），步骤条的收益是**一眼看出走到了哪一步、
+ * 还剩几步**，而不必读两行字再自己折算。
+ *
+ * **步骤名可点**（参考界面里它是主色的，确有道理）：操作列只有「下一步」一个主按钮，
+ * 而步骤条把**两个入口都摆在行内** —— 已完成的步骤用于回看，未完成的用于推进。
+ * 点击回调由调用方注入，本组件不碰 store（`Marks` 是纯展示层）。
+ */
+export function ProgressSteps({
+  progress,
+  onOpenExpress,
+  onOpenResult,
+}: {
+  progress: ReplyProgress
+  /** 点「快递信息」—— 打开回函快递信息弹窗 */
+  onOpenExpress?: () => void
+  /** 点「回函结果」—— 打开回函结果填写弹窗 */
+  onOpenResult?: () => void
+}) {
+  const steps = [
+    {
+      label: '快递信息',
+      done: progress !== '待确认快递信息',
+      /* 「当前该做的那一步」—— 未完成的第一个步骤。操作列的主按钮已于 v2.52 移除，
+         引导职责全部落在这里，故给当前步骤加字重提示（`.is-current`）。 */
+      current: progress === '待确认快递信息',
+      onClick: onOpenExpress,
+    },
+    {
+      label: '回函结果',
+      done: progress === '已完成',
+      current: progress === '待填写回函结果',
+      onClick: onOpenResult,
+    },
+  ]
+  return (
+    <span className="progress-steps">
+      {steps.map((s, i) => (
+        <Fragment key={s.label}>
+          {i > 0 && (
+            <span className="progress-steps__sep" aria-hidden="true">
+              |
+            </span>
+          )}
+          <button
+            type="button"
+            className={s.current ? 'progress-steps__step is-current' : 'progress-steps__step'}
+            disabled={!s.onClick}
+            onClick={s.onClick}
+          >
+            <span className={s.done ? 'progress-steps__dot is-done' : 'progress-steps__dot'}>
+              {s.done && <CheckOutlined />}
+            </span>
+            <span>{s.label}</span>
+            <span className="progress-steps__arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        </Fragment>
+      ))}
+    </span>
   )
 }
 

@@ -106,6 +106,7 @@ export default function AnnotatedPdfPreview({
   activeRegion,
   handwriting,
   singlePage,
+  markRange,
 }: {
   fileUrl: string
   /** 打开时定位到的页（默认第 1 页） */
@@ -128,6 +129,14 @@ export default function AnnotatedPdfPreview({
    * 面单在回函拼接件里只是一页，不该把整份回函铺出来）。不传 = 渲染全部页。
    */
   singlePage?: number
+  /**
+   * 待**标记为「本段」**的页区间（v2.56）。
+   *
+   * 用于「归属匹配」里预览**整份回函**：整份都铺出来（能看到上下文 —— 这一封是从哪几页
+   * 切出来的、前后还有什么），同时把属于当前这一段的页**描主色边 + 打角标**。
+   * 不传 = 不做任何标记（如 AI 核验页的预览，那里没有"段"的概念）。
+   */
+  markRange?: { start: number; end: number }
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const pageElRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -328,14 +337,44 @@ export default function AnnotatedPdfPreview({
   useEffect(() => {
     if (!doc || single || page <= 1) return
 
+    /**
+     * 目标页 —— **钳到文件的实际页数**（v2.56）。
+     *
+     * 演示环境里样例文件与演示数据的页数**并不一致**：银行样例
+     * `bank-qishang-20240331.pdf` 只有 4 页，而演示数据把它当 11 页用
+     * （切分成 1-4 / 5-8 / 9-11）。此时若照 `page` 定位，「第 5 页」永远不存在 ——
+     * 表现为「传了页码却停在第 1 页」，且**不会报错**，只有对着截图才发现。
+     * 钳到末页至少让用户停在文件末尾（看得见"文件就是这么长"），
+     * 比停在第 1 页误导性小。真实文件不会出现越界。
+     */
+    const targetPage = sizes.length ? Math.min(page, sizes.length) : page
+
     /** 直接把滚动容器滚到目标页（用 rect 差值，不依赖 offsetParent 与 scrollIntoView 的时序） */
     const jump = (): boolean => {
       const scroller = scrollRef.current
-      const target = pageElRefs.current[page - 1]
-      if (!scroller || !target) return false
-      if (target.getBoundingClientRect().height <= 0) return false
-      const delta = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-      scroller.scrollTop += delta - PAD
+      if (!scroller) return false
+
+      const target = pageElRefs.current[targetPage - 1]
+      if (target && target.getBoundingClientRect().height > 0) {
+        const delta = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+        scroller.scrollTop += delta - PAD
+        return true
+      }
+
+      /*
+       * 目标页**尚未挂载** —— 懒渲染只为可视区附近的页创建元素，滚动之前
+       * `pageElRefs[targetPage-1]` 是 `null`。原实现此时直接 `return false` 并靠 rAF 重试，
+       * 但**不滚就永远不会渲染、不渲染就永远滚不到**，重试到放弃。
+       *
+       * 改法：没有元素可测时，用 `sizes`（各页 PDF 点尺寸，**全量**、与页数等长）
+       * 累加出目标页的 Y 偏移 —— 页高 × 缩放 + 页间距，与列表的垂直排布一致。
+       * 滚到位后懒渲染自然会把该页渲染出来。
+       */
+      const idx = targetPage - 1
+      if (sizes.length <= idx) return false
+      let y = PAD
+      for (let i = 0; i < idx; i++) y += sizes[i].h * scale + PAGE_GAP
+      scroller.scrollTop = y
       return true
     }
 
@@ -360,7 +399,7 @@ export default function AnnotatedPdfPreview({
     }
     raf = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(raf)
-  }, [doc, page, sizes.length, single])
+  }, [doc, page, sizes, single, scale])
 
   /* ---------------------- Ctrl + 滚轮 / 触控板捏合缩放 ---------------------- */
 
@@ -446,6 +485,13 @@ export default function AnnotatedPdfPreview({
 
   const numPages = pageNos.length
 
+  /** 该渲染槽位是否落在待标记的页区间内（单页模式下槽位对应单页，同样适用） */
+  const isMarked = (i: number) => {
+    if (!markRange) return false
+    const p = pageNos[i]
+    return p >= markRange.start && p <= markRange.end
+  }
+
   return (
     <div style={{ position: 'relative', height }}>
       {/* 滚动容器 —— 多页垂直排列，缩放时用 CSS 拉伸已渲染页撑住视觉 */}
@@ -484,9 +530,33 @@ export default function AnnotatedPdfPreview({
                 width: Math.round(s.w * scale),
                 height: Math.round(s.h * scale),
                 background: '#fff',
-                boxShadow: 'var(--shadow-card)',
+                /* 本段页描主色边（v2.56）—— 与阴影叠加，既标出范围又不破坏"纸"的观感 */
+                boxShadow: isMarked(i) ? `0 0 0 2px var(--c-primary), var(--shadow-card)` : 'var(--shadow-card)',
               }}
             >
+              {/*
+               * 本段角标（v2.56）—— 贴**页外上方**、靠左。
+               * 与页内既有标注错开：落章区域框贴页内右上、印章框贴页内左上、
+               * 手写区贴页内左上，本角标在**页框之外**，互不遮挡。
+               */}
+              {isMarked(i) && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -20,
+                    left: 0,
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    padding: '0 6px',
+                    borderRadius: 3,
+                    whiteSpace: 'nowrap',
+                    color: '#fff',
+                    background: 'var(--c-primary)',
+                  }}
+                >
+                  本段 · 第 {pageNos[i]} 页
+                </span>
+              )}
               <canvas
                 ref={(el) => {
                   canvasRefs.current[i] = el

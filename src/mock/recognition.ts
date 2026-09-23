@@ -9,6 +9,7 @@ import type {
 } from '@/types'
 import { AUDITED_ENTITY, CANDIDATE_SOURCES } from '@/mock/confirmations'
 import { scoreBankMatch } from '@/services/bankMatch'
+import { parsePageRange } from '@/utils/pageRange'
 
 /**
  * 识别阶段：
@@ -97,6 +98,46 @@ export function stagesOf(type: ConfirmationType, phase: 1 | 2): StageKey[] {
 }
 
 /**
+ * 检测点的**依据明细**（v2.49）—— 展开该检测点时逐条显示「AI 是怎么得出结论的」：
+ * 读了哪几页、用了哪个引擎、比对了什么、命中或差异在哪。
+ *
+ * **演示用模板**：真实实现应由识别服务按接口契约返回（批一 / 批二各带自己的过程记录）。
+ * 这里按检测点给通用过程，文案里出现的单位名与演示批次一致，便于对照。
+ *
+ * 与 `detail` 的分工：`detail` 是**结论**（折叠态显示），`evidence` 是**过程与依据**（展开才显示）。
+ * 折叠给结论、展开给过程 —— 既守住「AI 的核查内容必须全暴露」，
+ * 也让 MinerU 这类慢环节的等待有东西可看。
+ */
+const EVIDENCE_BY_KEY: Partial<Record<StageKey, string[]>> = {
+  bankText: [
+    'OCR 读取回函抬头与落款，定位四要素所在区域（第 1 页页眉 / 页脚）',
+    '识别结果：银行名称「齐商银行股份有限公司」· 被审计单位「山东某某科技股份有限公司」· 期间 2024-01-01 ~ 2024-12-31',
+    '按加权规则与系统内本期函证控制表逐封比对（银行名称 50% / 被审计单位 20% / 起止日期各 15%），名称精确命中',
+  ],
+  consistency: [
+    'MinerU 整表识别回函第 3–6 页的询证事项表，共 14 组、27 行',
+    '与系统内格式一 / 格式二逐项比对「系统数据 → 回函值」',
+    '3 处差异：银行存款第 3 个账户（+529）、已贴现商业汇票第 4 张（+400）',
+  ],
+  sealExists: ['扫描回函全部页面，检测色块与轮廓', '在落款处检出印章 1 枚，类型判为「公章」'],
+  sealNameMatch: ['OCR 读出印章内文字', '与系统内那封函证的被询证单位名称逐字比对', '名称一致'],
+  crossPageSeal: ['逐页检测页边位置是否有残留印痕', '回函共 3 页，页边未检出骑缝章'],
+  handwriting: ['检测「信息不符」栏位是否存在手写笔迹', '转录文本已带入回函结果填写页'],
+  expressSheet: ['读取面单页条形码', '解析快递公司「顺丰」与运单号', '按运单号与函证建立对应'],
+}
+
+/** 各检测点的典型耗时（演示值）—— 用于展开区的「用时 x.xs」 */
+const ELAPSED_BY_KEY: Partial<Record<StageKey, number>> = {
+  bankText: 1200,
+  consistency: 18600,
+  sealExists: 3400,
+  sealNameMatch: 1500,
+  crossPageSeal: 2100,
+  handwriting: 4300,
+  expressSheet: 900,
+}
+
+/**
  * 生成某类型某阶段的检测点列表。
  * `detailPlan` 为各检测点的结论文案种子 —— 阶段二在归属确认时才并入任务，
  * 届时从任务的 `detailPlan` 里取，因此这里要支持传入。
@@ -112,6 +153,8 @@ export function makeStages(
     status: 'waiting' as const,
     percent: 0,
     detail: detailPlan?.[key],
+    evidence: EVIDENCE_BY_KEY[key],
+    elapsedMs: ELAPSED_BY_KEY[key],
   }))
 }
 
@@ -152,11 +195,19 @@ function createTask(seed: TaskSeed, fileName: string, index: number): Recognitio
   /* 归属行只给**一句话结论**（匹配到哪封 / 需人工指定）—— 不再追加 reason 等细节（v2.29 精简） */
   const matchDetail = bankMatch ? bankMatch.conclusion : seed.stageDetails?.match
 
+  /*
+   * 页码区间入库（v2.56）：种子按人读习惯写字符串，这里转成**数值**——
+   * 「归属匹配展示切分结果」与「预览定位到本段」都要拿页码做计算，字符串不行。
+   * 见 `utils/pageRange.ts`。
+   */
+  const span = parsePageRange(seed.pageRange)
+
   return {
     id: `${fileName}-${index}`,
     confirmationNo: finalConfirmationNo,
     fileName,
-    pageRange: seed.pageRange,
+    pageStart: span?.start,
+    pageEnd: span?.end,
     type: seed.type,
     matchedEntity: autoAssigned && best ? best.entity : seed.entity,
     bankMatch,

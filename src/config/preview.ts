@@ -140,6 +140,25 @@ export function browserSampleUrlOf(confirmationNo: string): string {
   return `/samples/${sampleFileOf(confirmationNo)}`
 }
 
+/**
+ * 按**上传文件名**取样例地址（v2.56）。
+ *
+ * 为何需要它：识别工作台的「归属匹配」要在**归属尚未确定**时就预览原始回函 ——
+ * 而那一刻任务还没有 `confirmationNo`（值为「待指定」），走不了按编号取件的老路。
+ * 银行函证的回函本就是**银行自行出具的扫描件**、与系统内函证无编号关联，
+ * 「按上传文件名」才是它天然的取件方式（同一份上传件切出的各段共用同一个文件名）。
+ */
+const SAMPLE_BY_UPLOAD_NAME: Record<string, string> = {
+  /* 银行批次的上传件 —— 样例就是齐商银行那份扫描回函（11 页） */
+  '银行函证回函-20240913.pdf': BANK_QISHANG,
+  '银行回函_20240913.pdf': BANK_QISHANG,
+}
+
+/** 按文件名取浏览器可用的样例地址；未登记的文件退回通用样例 */
+export function browserSampleUrlByFileName(fileName: string): string {
+  return `/samples/${SAMPLE_BY_UPLOAD_NAME[fileName] ?? DEFAULT_SAMPLE_FILE}`
+}
+
 /** 某封函证的真实预览地址 */
 export function kkPreviewUrlOf(confirmationNo: string): string {
   return buildKkPreviewUrl(sampleFileUrlOf(confirmationNo))

@@ -277,15 +277,38 @@ export interface RecognitionStage {
   label: string
   status: StageStatus
   percent: number
+  /** 一行结论（折叠态显示） */
   detail?: string
+  /**
+   * **依据明细**（v2.49）—— 展开该检测点时逐条显示「AI 是怎么得出结论的」：
+   * 读了哪几页、用了哪个引擎、比对了什么、命中/差异在哪。
+   *
+   * 与 `detail` 的分工：`detail` 是**结论**（"识别完成，与发函底稿一致"），
+   * `evidence` 是**过程与依据**（"OCR 读取回函抬头 → 银行名称 = 齐商银行…"）。
+   * 折叠态只给结论、展开才给过程 —— 既是「AI 的核查内容必须全暴露」的落点，
+   * 也让「MinerU 慢」这种等待有东西可看。
+   */
+  evidence?: string[]
+  /** 该检测点耗时（毫秒），用于在展开区显示「用时 3.2s」——慢环节的安抚信息 */
+  elapsedMs?: number
 }
 
 export interface RecognitionTask {
   id: string
   /** 归属到的函证编号；尚未确定时为「待指定」 */
   confirmationNo: string
+  /** 本段所出自的**上传文件**名 —— 一个文件按归属切成多段，各段共用它 */
   fileName: string
-  pageRange?: string
+  /**
+   * 本段在原始上传文件里对应的**页码区间**（v2.56）。
+   *
+   * 此前只有一个展示用字符串 `pageRange`（如「第 1-4 页」），**无法参与计算** ——
+   * 而「归属匹配要展示切分结果 + 原文件预览并定位到本段」这两件事都需要**数值**：
+   * 预览要按页区间滚动/高亮，切分表要能排序与校验连续性（如 1-4 / 5-8 / 9-11 无重叠无断档）。
+   * 展示字符串改由这两个数派生，见 `@/utils/pageRange` 的 `pageRangeOf`。
+   */
+  pageStart?: number
+  pageEnd?: number
   type: ConfirmationType
   stages: RecognitionStage[]
   /** 被询证单位名称（匹配结果或人工指定时回填） */

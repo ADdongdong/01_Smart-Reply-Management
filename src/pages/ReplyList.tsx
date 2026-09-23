@@ -33,15 +33,13 @@ import SplitEntryModal from '@/components/SplitEntryModal'
 import type { SplitFileInfo } from '@/components/SplitEntryModal'
 import BankUploadModal from '@/components/BankUploadModal'
 import type { BankUploadFile } from '@/components/BankUploadModal'
-import SplitCheckModal from '@/components/SplitCheckModal'
-import type { SplitSegment } from '@/components/SplitCheckModal'
 import ExpressImportDrawer from '@/components/ExpressImportDrawer'
 import type { ConfirmationType, ReplyProgress, ReplyRecord, RiskLevel } from '@/types'
 import VerificationModal from '@/components/VerificationModal'
 import RecordDetailModal from '@/components/RecordDetailModal'
 import ReplyDocEntryModal from '@/components/ReplyDocEntryModal'
 import ReplyResultModal from '@/components/ReplyResultModal'
-import { MatchTag, RiskTag } from '@/components/Marks'
+import { MatchTag, ProgressSteps, RiskTag } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
 import { afterPaint } from '@/utils/afterPaint'
 
@@ -52,32 +50,11 @@ type ModalKind = 'view' | 'verify' | 'doc' | 'result'
 /* 回函进度 —— 用户视角的「下一步要做什么」                              */
 /* ------------------------------------------------------------------ */
 
-/** 进度文字统一墨色（颜色只走底色），已完成退灰 */
-const PROGRESS_COLOR: Record<ReplyProgress, string> = {
-  待确认快递信息: 'var(--c-text-1)',
-  待填写回函结果: 'var(--c-text-1)',
-  已完成: 'var(--c-text-3)',
-}
-
-/**
- * 「下一步该做什么」—— **直写在进度列里**，不靠悬停。
- *
- * 这是本轮针对「第一次使用不知道该点哪个」的核心改动：原先进度列只写状态
- * （`待确认快递信息`），用户还得自己把它翻译成一个动作；现在把动作直接写出来，
- * 且**与操作列主按钮文案严格同词** —— 用户在同一行里就能对上「说的就是这个按钮」。
- */
-const NEXT_STEP: Record<ReplyProgress, string | null> = {
-  待确认快递信息: '确认回函快递信息',
-  待填写回函结果: '填写回函结果',
-  /** 已完成没有「下一步」—— 修正已填内容走「更多」，不占用主按钮位 */
-  已完成: null,
-}
-
 /**
  * 进度列的悬停说明 —— **只补一句「为什么」**，不复述按钮动作（动作已直写在操作列）。
  *
  * v2.45 精简：原文案每段都是一整句流程描述（如「这一步同时完成 AI 六项检测的人工确认与留痕
- * —— 全流程唯一的核验签字动作」），与操作列的 `primaryHint`、弹窗页脚同义重复了三处。
+ * —— 全流程唯一的核验签字动作」），与弹窗页脚同义重复了两处。
  */
 const PROGRESS_HINT: Record<ReplyProgress, string> = {
   待确认快递信息: '确认即完成核验留痕',
@@ -202,7 +179,7 @@ export default function ReplyList() {
   }
 
   /**
-   * 银行回函上传「确定」—— 直接开始识别并进入工作台（`START_BATCH` 会一并置 `recognitionOpen`）。
+   * 银行回函上传「确定」—— 直接开始识别并进入**归属界面**（`START_BATCH` 会一并置 `assignOpen`）。
    * 不再多一次「确认归属」：银行回函无需切分，上传弹窗的「确定」即用户的一次明确表态，
    * 与该类型在工作台内靠四要素算归属的机制不冲突。
    */
@@ -228,21 +205,26 @@ export default function ReplyList() {
   }
 
   /**
-   * 「数据核对」点「确定」—— 归属即定。
+   * 往来回函：① 选好文件 → 启动批次并进**归属界面**（v2.60）。
    *
-   * 启动识别批次（类型随入口确定）并随即打开工作台：归属已在切分这一步确认过，
-   * 因此识别页打开时六项检测即一起开跑，工作台内不需要再等一次确认。
+   * 此前这里是两步（① 文件识别录入 → ② 数据核对弹窗），核对点「确定」才启动识别。
+   * 现在把「数据核对」并入了**归属界面**（`AssignView`）—— 因为它与银行侧的归属
+   * 本来就是**同一件事**（用户原话：「往来函证，这一步，就是在把回函文件和函证数据
+   * 进行匹配，点了确定以后，就开始智能识别了」）。
+   *
+   * 并的收益不只是少一次弹窗：两步时用户核完切分、点确定，**又被推到一个写着
+   * 「本批回函已全部归属完成」的全屏界面**（因为往来的归属由二维码定死，那个界面
+   * 没有待办可做）—— 现在这个冗余屏没有了，核完直接点「确定」回列表。
    */
-  const onSplitConfirm = (segments: SplitSegment[]) => {
-    const file = split?.file
+  const onSplitFileConfirm = (v: { file?: SplitFileInfo }) => {
     setSplit(null)
     const batch = PRESET_BATCHES[TYPE_RULE['往来函证'].presetBatchId]()
     dispatch({
       type: 'START_BATCH',
-      batch: file ? { ...batch, fileName: file.name, fileSize: file.size } : batch,
+      batch: v.file ? { ...batch, fileName: v.file.name, fileSize: v.file.size } : batch,
+      uploadType: '往来函证',
     })
-    dispatch({ type: 'OPEN_RECOGNITION', uploadType: '往来函证' })
-    message.success(`已写入回函管理列表（${segments.length} 段）—— 已进入识别工作台，六项检测一起开跑`)
+    message.success('已开始识别 —— 请先核对切分与归属，点「确定」后回列表等结果')
   }
 
   /* ------------------------- 归并、筛选与排序 ------------------------- */
@@ -431,8 +413,10 @@ export default function ReplyList() {
     /*
      * 用户诉求（v2.26）：「还需要增加一列：是否重新发函。如果，有历史的回函记录，则就标记为重新发函。」
      *
-     * **判定口径**：该函证**存在历史回函记录**（回函次数 > 1）→ 标记「重新发函」；只有一次回函 → 「—」。
-     * 它是**客观事实标记**、不是状态结论，故走中性灰阶（不占用红 / 绿两档语义色）。
+     * **判定口径**：该函证**存在历史回函记录**（回函次数 > 1）→ 「重新发函」；只有一次回函 → 「未重新发函」。
+     * 它是**客观事实标记**、不是状态结论，故两个取值都走中性灰阶（不占用红 / 绿两档语义色），
+     * 差异由**文字**表达，而不是由色彩表达 —— 这一列回答的是「是 / 否」，不是「好 / 坏」。
+     *
      * 悬停说明「共几次回函、本次是第几次」，避免留下一个「没有解释的标记」。
      *
      * 位置（用户指定）：**倒数第二个字段** —— 前面依次是「定位（谁）→ 结论（相符 / 风险 / 核验）」，
@@ -441,23 +425,30 @@ export default function ReplyList() {
     {
       title: '是否重新发函',
       key: 'resend',
-      width: 104,
+      /* 「未重新发函」比原先的「—」宽，列宽 104 → 112 */
+      width: 112,
       render: (_, row) => {
         const times = row.history.length
-        if (times <= 1) {
-          return (
-            <span className="muted" style={{ fontSize: 13 }}>
-              —
-            </span>
-          )
-        }
+        const resent = times > 1
+        /*
+         * v2.53：**两种取值都给标识**（用户要求）。
+         *
+         * 原先「否」是破折号 `—` —— 那是表格里表示「无数据 / 不适用」的记号，
+         * 而这里它实际表达的是「**否**」：语义完全不同，用户看到 `—` 无从判断
+         * 是「没有重发」还是「这列没这个数据」。同一列里一行有标签、一行只有记号，
+         * 结构也不齐。现在两个取值都是同一种标签，**读法统一为「是 / 否」**。
+         */
         return (
           <StatusTag
             tone="neutral"
             /* v2.45 精简：去掉「已被覆盖」的重复说明（展开行的行内标记已表达） */
-            tip={`该函证共 ${times} 次回函，本行呈现最新一次；历次回函在展开行`}
+            tip={
+              resent
+                ? `该函证共 ${times} 次回函，本行呈现最新一次；历次回函在展开行`
+                : '本函证仅一次回函，未重新发函'
+            }
           >
-            重新发函
+            {resent ? '重新发函' : '未重新发函'}
           </StatusTag>
         )
       },
@@ -471,28 +462,25 @@ export default function ReplyList() {
     {
       title: '回函进度',
       key: 'progress',
-      width: 176,
+      /* v2.51：两行文字 → 步骤条（两个步骤 + 分隔 + 箭头），需要更宽一点，176 → 200 */
+      width: 200,
       render: (_, row) => {
         const p = row.main.replyProgress
         return (
           <Tooltip title={PROGRESS_HINT[p]}>
-            <span
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 0,
-                cursor: 'help',
-                lineHeight: 1.25,
-              }}
-            >
-              <span style={{ color: PROGRESS_COLOR[p], fontSize: 13 }}>{p}</span>
-              {/*
-               * 下一步动作直写在这里，且与操作列主按钮**严格同词**。
-               * 已完成没有下一步（修正走「更多」），故这一行不显示 —— 与空着的主按钮位保持一致。
-               */}
-              {NEXT_STEP[p] && (
-                <span style={{ color: 'var(--c-text-3)', fontSize: 12 }}>下一步：{NEXT_STEP[p]}</span>
-              )}
+            {/*
+             * 步骤条（v2.51）—— 三个进度值 = **两个步骤的三种完成组合**（见 `ProgressSteps`）。
+             *
+             * 步骤名可点：未完成的用于推进、已完成的用于回看，与操作列主按钮**走同一入口**
+             * （`setActiveModal`），故不新增路径、也不会出现「两处入口行为不一致」。
+             * 已完成行因此多出两个回看入口 —— 原先只能从「更多」里找。
+             */}
+            <span style={{ display: 'inline-flex', cursor: 'help' }}>
+              <ProgressSteps
+                progress={p}
+                onOpenExpress={() => setActiveModal({ kind: 'doc', recordId: row.main.id })}
+                onOpenResult={() => setActiveModal({ kind: 'result', recordId: row.main.id })}
+              />
             </span>
           </Tooltip>
         )
@@ -500,23 +488,30 @@ export default function ReplyList() {
     },
     /* ---------- 操作 ---------- */
     /*
-     * 「下一步 + 查看 + 更多」—— **每行结构完全一致**，只有主按钮文案随进度变化。
+     * 「查看 + 更多」—— **每行结构完全一致**（v2.52：主按钮已移除）。
      *
-     * 收敛的动因：此前操作列有 5 个平铺入口，高亮位置随进度移动，无风险件还会多出
-     * 一个「一键确认」——同一列里按钮因行而异，业务人员建立不起稳定记忆，
-     * 第一次使用更无从判断「该点哪个、点了会怎样」。现在每行只有三个固定位置：
-     *   ① 主按钮 = 「这一步该做什么」（文案与「回函进度」列的小字严格同词）
-     *   ② 查看   = 只读看函证
-     *   ③ 更多   = 其余入口（回函快递信息 / 回函结果 / AI 核验 / 删除）
+     * **为什么删主按钮**：它与「回函进度」列的步骤条是**同一动作的第二处入口**，
+     * 而步骤条表达得更完整（走到哪一步、还剩几步一眼可见）。同一件事在两处各给一个入口，
+     * 正是本项目一路在清理的重复（同 v2.45 的文案精简）。「下一步该做什么」的引导职责
+     * 现在**只在步骤条**：未完成的那一步加字重提示（`ProgressSteps` 的 `.is-current`）。
+     *
+     * 于是每行只剩两个固定位置：
+     *   ① 查看 —— 只读看函证；
+     *   ② 更多 —— 其余入口（回函快递信息 / 回函结果 / AI 核验 / 删除）。
      * 下拉里**不放「查看」** —— 外部已有，重复入口正是 v2.15 用户亲自否决过的问题。
+     *
+     * 下拉里**保留**「回函快递信息 / 回函结果」：它们是**补正入口** —— 已完成的行要改
+     * 已填内容属补正、不是流程推进，与步骤条「照着往下走」的职责不在同一层。
      */
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      /* v2.52：只剩两个链接按钮 —— 220 → 120（原宽度是为那个主按钮留的） */
+      width: 120,
       fixed: 'right',
       render: (_, row) => {
         const m = row.main
+        /** 待确认阶段下拉里不呈现「回函结果」（见下方注释） */
         const awaitingExpress = m.replyProgress === '待确认快递信息'
 
         /**
@@ -528,44 +523,8 @@ export default function ReplyList() {
         const needsVerifyAttention =
           m.verifyStatus === 'pending' && (m.verification?.riskReasons.length ?? 0) > 0
 
-        /**
-         * 主按钮 = 「这一步该做什么」；文案与「回函进度」列的小字严格同词。
-         *
-         * **已完成行不显示主按钮** —— 已完成没有「下一步」：修正已填内容是补正行为，
-         * 不是流程动作，从「更多」里的「回函快递信息」/「回函结果」进入即可。
-         */
-        const primary: { text: string; kind: ModalKind } | null =
-          m.replyProgress === '待确认快递信息'
-            ? { text: '确认回函快递信息', kind: 'doc' }
-            : m.replyProgress === '待填写回函结果'
-              ? { text: '填写回函结果', kind: 'result' }
-              : null
-
-        /**
-         * 悬停只补「点了会产生什么后果」，**不复述「打开哪个弹窗」** ——
-         * 按钮文案（「确认回函快递信息」）本身已经说清它开哪个界面。
-         * v2.45 精简：原文案以「点击后：打开…逐项确认；…」起头，属逐字复述操作流程。
-         */
-        const primaryHint =
-          m.replyProgress === '待确认快递信息'
-            ? '确认即记录核验人与时间，进度推进到「待填写回函结果」'
-            : '处理完必填项并保存后归档，进度变为「已完成」'
-
         return (
           <Space size={2}>
-            {primary && (
-              <Tooltip title={primaryHint}>
-                <Button
-                  size="small"
-                  type="primary"
-                  ghost
-                  onClick={() => setActiveModal({ kind: primary.kind, recordId: m.id })}
-                >
-                  {primary.text}
-                </Button>
-              </Tooltip>
-            )}
-
             <Button
               type="link"
               size="small"
@@ -1076,17 +1035,15 @@ export default function ReplyList() {
       />
       <ExpressImportDrawer />
 
-      {/* 「切分」两步弹窗（往来专属，v2.35）—— ① 文件识别录入 → ② 数据核对 → 进入识别工作台 */}
+      {/*
+        往来回函上传（v2.60 起**只剩一步**）—— 选文件即启动识别、并进「归属界面」核对切分。
+        原先的「② 数据核对」弹窗已并入归属界面：它与银行侧的归属是同一件事
+        （把回函文件与函证数据匹配），拆成两个界面反而让用户多做一次确认。
+      */}
       <SplitEntryModal
         open={split?.step === 'entry'}
         onCancel={() => setSplit(null)}
-        onNext={(v) => setSplit({ step: 'check', file: v.file })}
-      />
-      <SplitCheckModal
-        open={split?.step === 'check'}
-        file={split?.file}
-        onCancel={() => setSplit(null)}
-        onConfirm={onSplitConfirm}
+        onNext={onSplitFileConfirm}
       />
 
       {/* 「上传银行函证回函」小弹窗（v2.47）—— 银行不切分、无需额外字段，选完文件即开始识别 */}

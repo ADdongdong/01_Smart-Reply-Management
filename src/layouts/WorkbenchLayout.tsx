@@ -1,22 +1,23 @@
 import { Layout } from 'antd'
+const { Content } = Layout
 import { Outlet } from 'react-router-dom'
-import RecognitionDrawer from '@/components/RecognitionDrawer'
+import AssignView from '@/components/AssignView'
+import InsightView from '@/components/InsightView'
 import FloatingProgress from '@/components/FloatingProgress'
 import OnboardingGuide from '@/components/OnboardingGuide'
 
-const { Content } = Layout
-
 /**
- * 工作台外壳。
+ * 工作台外壳（v2.57）。
  *
- * **为什么这里没有顶部导航条**（2026-09-21，用户决定）：
- * 本原型后续要集成进真实系统，而真实系统自身已带导航与品牌区；
- * 这里的横向导航（10 项里 9 项是占位）既挤占纵向空间、又与外层重复。
- * 「我在哪」的线索改由各页面自己的**页面头**（面包屑 + 标题）承担 ——
- * 这与参照的 Ant Design Pro 详情页一致。
+ * **两个独立全屏界面并行挂载**（各自按 store 开关决定是否渲染）：
+ * · `AssignView` —— 归属界面，上传后进入，点「确定」即回主界面；
+ * · `InsightView` —— 智能识别界面，由右下角进度卡主动点入。
  *
- * 三个浮层组件挂在这里而不是挂在页面里：它们要**跨页面存活**
- * （识别过程可以离开列表页、引导与进度卡需要全站可达）。
+ * 二者在 store 层面**互斥**（`OPEN_ASSIGN` 会收掉 `insightOpen`，反之亦然），
+ * 故同一时刻最多只有一个全屏界面在 DOM 里 —— 既省内存（pdf.js 实例），
+ * 也避免两层遮罩叠在一起。
+ *
+ * 拆出两个界面前，这里挂的是单个 `RecognitionDrawer`（已删除）。
  */
 export default function WorkbenchLayout() {
   return (
@@ -25,7 +26,8 @@ export default function WorkbenchLayout() {
         <Outlet />
       </Content>
 
-      <RecognitionDrawer />
+      <AssignView />
+      <InsightView />
       <FloatingProgress />
       <OnboardingGuide />
     </Layout>

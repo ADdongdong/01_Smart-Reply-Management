@@ -8,6 +8,9 @@ import App from './App'
 import { themeConfig } from './theme'
 import { AppProvider } from './store/AppStore'
 import './styles/global.css'
+/* 智能识别界面的 AI 原生视觉（深色点阵场域 / 像素网格 / 扫过式微光）——
+   单独一份，且**只在 .insight-stage 作用域内生效**，不干扰站内浅色基调（见该文件头注释） */
+import './styles/insight.css'
 
 // 说明：原先这里挂了一个针对「第三方测量竞态」的全局静默（getBoundingClientRect of null）。
 // 它有两个问题，已在 2026-09-20 修掉：
