@@ -62,7 +62,8 @@ export default function PdfPreview({
   /** 是否展示「信息证明无误 / 信息不符」两个落章区域 */
   showRegions?: boolean
   activeRegion?: '信息证明无误区' | '信息不符区' | '未识别'
-  height?: number
+  /** 预览高度：数字＝固定像素；`'100%'`＝撑满父容器（左固定栏场景，见 AnnotatedPdfPreview） */
+  height?: number | string
   handwriting?: string
   /** 锁定为 AI 批注视图，不提供切换（需要叠加定位框时使用） */
   forceAnnotated?: boolean
@@ -123,7 +124,13 @@ export default function PdfPreview({
   )
 
   return (
-    <div style={{ position: 'relative' }}>
+    /**
+     * 根容器同样要吃满：内部 `AnnotatedPdfPreview` 的 `height` 是**相对本容器**算的
+     * （本容器原先只有 `position:relative`、没有高度，传 `'100%'` 会直接塌成 0）。
+     * `height:'100%'` 供普通容器、`flex:1` 供 flex 父级（左固定栏场景）——
+     * 两者在各自场景下生效、互不干扰（flex 下 basis 优先，height 被忽略）。
+     */
+    <div style={{ position: 'relative', height: '100%', flex: 1, minHeight: 0 }}>
       {/* 批注开关只切换叠加层，pdf.js 画布始终复用 —— 切换不重渲染、不闪动 */}
       <AnnotatedPdfPreview
         fileUrl={fileUrl ?? browserSampleUrlOf(confirmationNo)}

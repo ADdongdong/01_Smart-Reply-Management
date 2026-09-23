@@ -1,21 +1,30 @@
 import { useMemo, useState } from 'react'
-import { Button, Input, Progress, Table, Tag, Tooltip } from 'antd'
+import { Button, Input, Progress, Table, Tag } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
-import type { AssignSource, BankCandidate, BankTextResult, BankTextField, MatchLevel } from '@/types'
-import { AiChip } from '@/components/Marks'
-import { ASSIGN_SOURCE_LABEL } from '@/services/bankMatch'
+import type { BankCandidate, BankTextResult, MatchLevel } from '@/types'
 
 /**
- * 银行函证归属匹配明细。
+ * 银行函证**归属操作面板** —— 只在**需要人工介入**时出现（建议归属 / 待人工指定）。
  *
  * 银行回函由银行自行制作、文件内没有系统二维码，只能按「银行名称 + 被审计单位名称 +
- * 函证起始日期 + 函证截止日期」四要素定位唯一一封函证。本组件同时服务两处：
- *   · mode='assign' —— 识别队列内，可确认系统建议的归属、或从候选中改派/指定
- *   · mode='verify' —— AI 核验页内，只读回看当时的匹配结论
+ * 函证起始日期 + 函证截止日期」四要素定位唯一一封函证。系统算得的结果给用户选，
+ * 但**归属本身不再展示明细**（见下）。
  *
- * **展示口径（v2.29 精简）**：本组件**不再出现归属结论文案与任何内部指标**
- * （得分 / 阈值 / 相似度 / 命中数）—— 一句话结论统一由识别进度的「归属匹配」行表达
- * （同一件事只出现一次），本组件只负责「归属来源标签 + 动作按钮 + 四要素事实 + 候选」。
+ * ## 为什么不再展示四要素对照表（v2.45）
+ *
+ * 需求文档 5.1 有一条既有的呈现原则：**归属匹配属系统内部处理，不暴露内部步骤，
+ * 只给最终结果（归到哪封函证）**。往来函证一直照此执行 —— 工作台里归属只有一行结论。
+ * 而本组件此前把「要素 / 回函识别值 / 发函底稿值 / 核对」整片铺开，偏离了该原则：
+ * 用户判断「归得对不对」只需要知道**归到了哪封**，四要素的逐项比对是系统的活。
+ * 四要素的识别进度另在识别队列与任务头部可见，不缺这一处。
+ *
+ * ## 现在只负责两件事
+ * · **候选函证表**（含搜索、匹配度、命中要素）—— 这是「选择用的」，是待人工指定时
+ *   唯一的操作入口，必须保留；
+ * · **动作按钮** —— 确认归属 / 改派 / 选择归属 / 确认不属于本期。
+ *
+ * 归属来源徽标已移除：任务头部本就有「归属来源」一项（`RecognitionDrawer` 的 `Kv`），
+ * 而本组件只在归属未定时渲染，那时也还没有来源可标。
  */
 
 /** 档位 → 用户可读的归属状态词（识别队列卡片标题与本组件共用，避免各自造词） */
@@ -23,40 +32,6 @@ export const MATCH_LEVEL_LABEL: Record<MatchLevel, string> = {
   auto: '自动归属',
   confirm: '建议归属',
   manual: '待指定归属',
-}
-
-/** 归属来源留痕徽标 —— 两种人工操作同走主色，靠标签文字区分；自动归属为中性灰 */
-function AssignBadge({ source }: { source: AssignSource }) {
-  const tone =
-    source === 'auto'
-      ? { color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' }
-      : source === 'manual-confirm'
-        ? { color: 'var(--c-primary)', bg: 'var(--c-primary-bg)' }
-        : { color: 'var(--c-primary)', bg: 'var(--c-ai-bg)' }
-  return (
-    <Tag
-      style={{ marginInlineEnd: 0, fontSize: 12, lineHeight: '18px', border: 'none', color: tone.color, background: tone.bg }}
-    >
-      {ASSIGN_SOURCE_LABEL[source]}
-    </Tag>
-  )
-}
-
-/** 单要素命中方式标签 —— 只有「命中」给绿，其余（模糊/未命中）同属红档，差异由文字表达 */
-function HitTag({ field }: { field: BankTextField }) {
-  const kind = field.matched ? (field.fuzzy ? 'fuzzy' : 'exact') : 'miss'
-  const map = {
-    exact: { text: '精确命中', color: 'var(--c-text-1)', bg: 'var(--c-risk-low-bg)' },
-    fuzzy: { text: '模糊命中', color: 'var(--c-text-1)', bg: 'var(--c-risk-high-bg)' },
-    miss: { text: '未命中', color: 'var(--c-text-1)', bg: 'var(--c-risk-high-bg)' },
-  }[kind]
-  return (
-    <Tooltip title={field.reason}>
-      <Tag style={{ marginInlineEnd: 0, fontSize: 12, border: 'none', color: map.color, background: map.bg }}>
-        {map.text}
-      </Tag>
-    </Tooltip>
-  )
 }
 
 /** 匹配度配色 —— 满分给绿，部分匹配给红（存在归属错配风险），未匹配退灰 */
@@ -88,8 +63,6 @@ function HitKeys({ keys }: { keys: string[] }) {
 
 interface BankTextRecognitionProps {
   result: BankTextResult
-  /** assign：识别队列内可操作；verify：AI 核验页只读 */
-  mode?: 'assign' | 'verify'
   /** 采纳系统建议的归属 */
   onConfirm?: () => void
   /** 改派 / 指定归属 */
@@ -100,7 +73,6 @@ interface BankTextRecognitionProps {
 
 export default function BankTextRecognition({
   result,
-  mode = 'verify',
   onConfirm,
   onAssign,
   onReject,
@@ -122,83 +94,36 @@ export default function BankTextRecognition({
     )
   }, [candidates, keyword])
 
-  const canOperate = mode === 'assign' && !!result.candidates
+  /** 有候选项才需要人工操作 —— 无候选时走「确认不属于本期」出口（在候选表空态里） */
+  const canOperate = !!result.candidates
 
   return (
     <div>
       {/*
-       * ① 顶部动作栏（v2.29）—— 只放「归属来源标签 + 动作按钮」，**不再复述结论文案**：
-       * 归属结论（匹配到哪封 / 需人工指定）已在识别进度的「归属匹配」行表达过一次。
+       * ① 动作栏 —— **只放动作按钮**。归属结论（匹配到哪封 / 需人工指定）已在识别进度的
+       * 「归属匹配」行表达过一次；四要素对照表已于 v2.45 移除（归属匹配只给结果）。
        */}
-      {(result.assignSource || canOperate) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          {result.assignSource && <AssignBadge source={result.assignSource} />}
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            {canOperate && level === 'confirm' && (
-              <>
-                <Button size="small" type="primary" ghost onClick={onConfirm}>
-                  确认归属
-                </Button>
-                <Button size="small" onClick={() => setExpandOverride(!showCandidates)}>
-                  {showCandidates ? '收起候选' : '改派'}
-                </Button>
-              </>
-            )}
-            {canOperate && level === 'manual' && (
-              <Button size="small" onClick={() => setExpandOverride(!showCandidates)}>
-                {showCandidates ? '收起候选' : '选择归属'}
+      {canOperate && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          {level === 'confirm' && (
+            <>
+              <Button size="small" type="primary" ghost onClick={onConfirm}>
+                确认归属
               </Button>
-            )}
-          </span>
+              <Button size="small" onClick={() => setExpandOverride(!showCandidates)}>
+                {showCandidates ? '收起候选' : '改派'}
+              </Button>
+            </>
+          )}
+          {level === 'manual' && (
+            <Button size="small" onClick={() => setExpandOverride(!showCandidates)}>
+              {showCandidates ? '收起候选' : '选择归属'}
+            </Button>
+          )}
         </div>
       )}
 
-      {/* ② 事实清单 · 四要素对照 */}
-      <Table<BankTextField>
-        size="small"
-        rowKey="key"
-        pagination={false}
-        dataSource={result.fields}
-        rowClassName={(f) => (f.matched ? '' : 'row-risk-high')}
-        columns={[
-          { title: '要素', dataIndex: 'label', width: 130 },
-          {
-            /* v2.28 精简（用户反馈）：回函识别值只留原值，归一化过程不展示（内部细节不暴露原则） */
-            title: '回函识别值',
-            dataIndex: 'value',
-            render: (v: string) => (
-              <b style={{ fontSize: 13 }}>{v}</b>
-            ),
-          },
-          {
-            /* 未匹配到系统函证时并没有对应底稿 —— 不给候选名称（否则会被当成「已比对的底稿」） */
-            title: '发函底稿值',
-            dataIndex: 'sentValue',
-            width: 200,
-            render: (v: string) =>
-              level === 'manual' ? (
-                <span className="muted">—</span>
-              ) : (
-                <span className="muted num">{v}</span>
-              ),
-          },
-          {
-            title: '匹配方式',
-            dataIndex: 'matched',
-            width: 100,
-            render: (_: boolean, f) => <HitTag field={f} />,
-          },
-          /* 权重列已按用户反馈移除（v2.28）—— 加权细节属系统内部指标，结论只看「匹配方式 + 置信度」 */
-          {
-            title: '置信度',
-            dataIndex: 'confidence',
-            width: 96,
-            render: (c: number) => <AiChip confidence={c} />,
-          },
-        ]}
-      />
-
-      {/* ② 事实清单 · 候选函证（需要改派 / 指定时才展开） */}
+      {/* ② 候选函证 —— 需要改派 / 指定时才展开（这是待人工指定时唯一的操作入口，必须保留） */}
       {showCandidates && (
         <div style={{ marginTop: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>

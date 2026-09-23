@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, App, Button, Input, Modal, Radio, Table, Tag, Tooltip, Upload } from 'antd'
 import {
   FileExcelOutlined,
@@ -8,13 +8,29 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
-import { buildBankItemsForRecord, buildSubjectEntriesForRecord } from '@/mock/confirmations'
+import { buildBankItemGroups, buildSubjectEntriesForRecord } from '@/mock/confirmations'
 import { TYPE_RULE, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
 import VerificationPanel from '@/components/VerificationPanel'
+import BankItemsTable from '@/components/BankItemsTable'
 import { AiChip, ResultBar } from '@/components/Marks'
-import type { BankItemEntry, CrossSealChoice, SubjectEntry } from '@/types'
+import type { BankItemGroup, BankItemRow, CrossSealChoice, SubjectEntry } from '@/types'
+
+/**
+ * 重算单行 —— 改了「回函值」就必须重算 `diff` 与 `match`，否则分组表自己不可信。
+ * 判据与系统一致：有差异即不相符（`services/replyRule.ts` 的 `consistencyOnly`）。
+ * 系统无此笔（`sentAmount == null`）时差异无从计算，结论交给人工判定（留 null）。
+ */
+function recalcRow(row: BankItemRow, replyAmount: number | null): BankItemRow {
+  const diff = row.sentAmount == null || replyAmount == null ? null : replyAmount - row.sentAmount
+  return {
+    ...row,
+    replyAmount,
+    diff,
+    match: diff == null ? null : diff === 0,
+  }
+}
 
 export default function ReplyResultModal({
   open,
@@ -40,8 +56,97 @@ export default function ReplyResultModal({
   const recognizing = !!record && isRecognitionPending(record)
 
   const entries = useMemo(() => (record ? buildSubjectEntriesForRecord(record) : []), [record])
-  const bankItems = useMemo(() => (record ? buildBankItemsForRecord(record) : []), [record])
-  const bankDiffCount = bankItems.filter((b) => !b.match).length
+
+  /**
+   * 询证事项分组（v2.40）—— **受控 state**，因为本页要就地编辑回函值并实时重算差异 / 结论。
+   * 换记录时按新的记录重新初始化（`recordId` 作依赖，而不是 `record` 对象引用 ——
+   * 后者每次 dispatch 都会变，会把用户的编辑冲掉）。
+   */
+  const [bankItemGroups, setBankItemGroups] = useState<BankItemGroup[]>([])
+  useEffect(() => {
+    if (!record) return
+    setBankItemGroups(recognizing ? [] : buildBankItemGroups(record))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId, recognizing])
+
+  /**
+   * 差异项计数 —— **从分组派生**，与分组表同源。
+   * `run`（识别中）与 `empty`（本份未列示）不参与计数：前者尚未有结论，
+   * 后者本就无此行。否则识别中就会算出「0 项差异 → 相符」这种看起来正常的假结论。
+   */
+  const bankDiffCount = useMemo(
+    () =>
+      bankItemGroups.reduce(
+        (n, g) =>
+          g.stat === 'empty' || g.stat === 'run'
+            ? n
+            : n + g.rows.filter((r) => r.match === false).length,
+        0,
+      ),
+    [bankItemGroups],
+  )
+
+  /**
+   * 回函值变更 —— **实时重算该行的差异与结论**。
+   * 这是分组表可信的前提：若只改数字不重算，会出现
+   * 「回函值 900 / 系统数据 1000 / 差异 0」这种自相矛盾的行。
+   */
+  const handleReplyChange = (groupId: string, rowId: string, value: number | null) => {
+    setBankItemGroups((prev) =>
+      prev.map((g) =>
+        g.id !== groupId
+          ? g
+          : {
+              ...g,
+              rows: g.rows.map((r) => (r.id !== rowId ? r : recalcRow(r, value))),
+            },
+      ),
+    )
+  }
+
+  /**
+   * 组级「应用 AI 识别值」—— **不覆盖已人工改过的行**。
+   * 判据是「回函值 ≠ AI 识别值」即视为人工改过；否则人工核对了半天，一点就白做。
+   */
+  const handleApplyGroup = (groupId: string) => {
+    setBankItemGroups((prev) =>
+      prev.map((g) =>
+        g.id !== groupId
+          ? g
+          : {
+              ...g,
+              rows: g.rows.map((r) =>
+                r.aiAmount == null || r.replyAmount !== r.aiAmount ? r : recalcRow(r, r.aiAmount),
+              ),
+            },
+      ),
+    )
+    message.success('已应用 AI 识别值（人工修改过的行保持不变）')
+  }
+
+  /**
+   * 组级「重新识别」—— **组级动作**，因为表格走 MinerU **整表识别**，只能重跑整张表。
+   * 演示：`fail → run → done`（1.6s 后回填 AI 值并重算结论）。
+   */
+  const handleRerunGroup = (groupId: string) => {
+    setBankItemGroups((prev) =>
+      prev.map((g) => (g.id !== groupId ? g : { ...g, stat: 'run' as const })),
+    )
+    window.setTimeout(() => {
+      setBankItemGroups((prev) =>
+        prev.map((g) =>
+          g.id !== groupId
+            ? g
+            : {
+                ...g,
+                stat: 'done' as const,
+                rows: g.rows.map((r) => recalcRow(r, r.sentAmount)),
+              },
+        ),
+      )
+      message.success('本组表格已重新识别完成')
+    }, 1600)
+  }
 
   /**
    * AI 推导「函证结果是否相符」—— 调用 `evaluateMatch` **唯一出口**（services/replyRule.ts）：
@@ -111,13 +216,19 @@ export default function ReplyResultModal({
 
   const markAdopt = (key: string) => setAdopted((p) => ({ ...p, [key]: true }))
 
-  /** 四项必填 —— 未处理时保存被拦下，并明确指出是哪几项（而非按钮点不动却说不出原因） */
+  /**
+   * 必填 —— 未处理时保存被拦下，并明确指出是哪几项（而非按钮点不动却说不出原因）。
+   *
+   * **按类型分流（v2.41）**：往来 = 4 项（含「是否有骑缝章」）；**银行 = 3 项** ——
+   * 自 v2.39 起银行函证不检测骑缝章（R-03 限定往来），该字段在银行行不渲染，
+   * 校验自然也不该要求它（**系统不检测的项不该要求人工填**）。
+   */
   const missingRequired = () => {
     const miss: string[] = []
     if (matched === undefined) miss.push('函证结果是否相符')
     if (sealConsistent === undefined) miss.push('回函盖章是否与被询证方名称一致')
     if (officialSeal === undefined) miss.push('是否为公章')
-    if (crossSeal === undefined) miss.push('是否有骑缝章')
+    if (!isBank && crossSeal === undefined) miss.push('是否有骑缝章')
     return miss
   }
 
@@ -171,10 +282,14 @@ export default function ReplyResultModal({
         </div>
       }
     >
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        {/* 左：回函函证文件（放大展示） */}
-        <div style={{ flex: 1.15, minWidth: 0 }}>
-          <div className="panel" style={{ padding: 10 }}>
+      <div className="result-workspace">
+        {/* 左：回函函证文件（放大展示）—— 固定栏，不参与右栏滚动 */}
+        <div className="rw-left">
+          {/* 面板撑满整栏高度，预览再吃掉标题之外的剩余空间 —— 不猜像素高度 */}
+          <div
+            className="panel"
+            style={{ padding: 10, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+          >
             <div className="section-title" style={{ marginBottom: 8 }}>
               回函函证
             </div>
@@ -185,13 +300,13 @@ export default function ReplyResultModal({
               activeRegion={v?.seal.region}
               sealBoxes={v?.seal.boxes ?? []}
               handwriting={rule?.detectHandwriting ? v?.handwriting?.text : undefined}
-              height={620}
+              height="100%"
             />
           </div>
         </div>
 
-        {/* 右：结果表单 */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* 右：结果表单 —— 独立上下滚动，左栏不动 */}
+        <div className="rw-right" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/*
            * AI 核验结论 —— 只作**建议**展示：默认不填入下方表单，人工点「采纳」才进入。
            * 三项统一为「结论条 → 依据 → 采纳动作」骨架（与核验页明细同一套），
@@ -202,7 +317,7 @@ export default function ReplyResultModal({
               type="info"
               showIcon
               message="AI 识别中"
-              description="归属已确认，系统正在异步识别其余检测项（询证事项逐项核对 / 印章 / 快递面单），完成后本页会自动刷新 AI 建议；当前可先人工填写，也可稍后再采纳。"
+              description="其余检测项完成后自动刷新 AI 建议；当前可先人工填写，也可稍后再采纳。"
             />
           )}
 
@@ -302,41 +417,43 @@ export default function ReplyResultModal({
                 }
               />
 
-              {/* 是否有骑缝章 */}
-              <ResultBar
-                status={aiCrossSeal === undefined ? 'info' : aiCrossSeal === 'yes' ? 'ok' : 'risk'}
-                message={
-                  aiCrossSeal === undefined
-                    ? '无法判定（未检出印章）'
-                    : aiCrossSeal === 'yes'
-                      ? `有（${v.seal.crossPageSealCount} 处）`
-                      : '未检出'
-                }
-                detail={
-                  aiCrossSeal === undefined
-                    ? '未在回函文件任何页检出印章'
-                    : aiCrossSeal === 'yes'
-                      ? '依据：多页回函已检出骑缝章'
-                      : '依据：多页回函未检出骑缝章；若原件为单页回函，可在下方改为「不适用」'
-                }
-                extra={
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <AiChip confidence={v.seal.crossPageSealCount ? 0.94 : 0.9} />
-                    <Button
-                      size="small"
-                      type={adopted.cross ? 'default' : 'primary'}
-                      ghost={!adopted.cross}
-                      disabled={aiCrossSeal === undefined}
-                      onClick={() => {
-                        setCrossSeal(aiCrossSeal)
-                        markAdopt('cross')
-                      }}
-                    >
-                      {adopted.cross ? '已采纳' : '采纳'}
-                    </Button>
-                  </span>
-                }
-              />
+              {/* 是否有骑缝章 —— 仅往来函证（v2.39 起银行不检测骑缝章） */}
+              {!isBank && (
+                <ResultBar
+                  status={aiCrossSeal === undefined ? 'info' : aiCrossSeal === 'yes' ? 'ok' : 'risk'}
+                  message={
+                    aiCrossSeal === undefined
+                      ? '无法判定（未检出印章）'
+                      : aiCrossSeal === 'yes'
+                        ? `有（${v.seal.crossPageSealCount} 处）`
+                        : '未检出'
+                  }
+                  detail={
+                    aiCrossSeal === undefined
+                      ? '未在回函文件任何页检出印章'
+                      : aiCrossSeal === 'yes'
+                        ? '依据：多页回函已检出骑缝章'
+                        : '依据：多页回函未检出骑缝章；若原件为单页回函，可在下方改为「不适用」'
+                  }
+                  extra={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      <AiChip confidence={v.seal.crossPageSealCount ? 0.94 : 0.9} />
+                      <Button
+                        size="small"
+                        type={adopted.cross ? 'default' : 'primary'}
+                        ghost={!adopted.cross}
+                        disabled={aiCrossSeal === undefined}
+                        onClick={() => {
+                          setCrossSeal(aiCrossSeal)
+                          markAdopt('cross')
+                        }}
+                      >
+                        {adopted.cross ? '已采纳' : '采纳'}
+                      </Button>
+                    </span>
+                  }
+                />
+              )}
 
               {/* 不相符描述 —— 手写体转录全文可见（要看内容才能决定是否采纳）；银行函证不检测手写体 */}
               {rule?.detectHandwriting && v.handwriting && (
@@ -490,42 +607,42 @@ export default function ReplyResultModal({
                     { label: '否（财务章等其他印章）', value: false },
                   ]}
                 />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  ⓘ 建议值见上方 AI 核验结论
-                </span>
+                {/* 「ⓘ 建议值见上方 AI 核验结论」已于 v2.45 移除 —— 同一页上方已有一处，不重复 */}
               </div>
 
-              {/* 是否有骑缝章 */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  background:
-                    showErrors && crossSeal === undefined ? 'var(--c-risk-high-bg)' : undefined,
-                }}
-              >
-                <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
-                  <span style={{ color: 'var(--c-risk-high)' }}>* </span>是否有骑缝章
-                </span>
-                <Radio.Group
-                  value={crossSeal}
-                  onChange={(e) => setCrossSeal(e.target.value)}
-                  optionType="button"
-                  buttonStyle="solid"
-                  size="small"
-                  options={[
-                    { label: '是', value: 'yes' },
-                    { label: '否', value: 'no' },
-                    { label: '不适用（单页回函）', value: 'na' },
-                  ]}
-                />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  ⓘ 单页回函选择「不适用」
-                </span>
-              </div>
+              {/* 是否有骑缝章 —— 仅往来函证（v2.39 起银行不检测骑缝章） */}
+              {!isBank && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    background:
+                      showErrors && crossSeal === undefined ? 'var(--c-risk-high-bg)' : undefined,
+                  }}
+                >
+                  <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
+                    <span style={{ color: 'var(--c-risk-high)' }}>* </span>是否有骑缝章
+                  </span>
+                  <Radio.Group
+                    value={crossSeal}
+                    onChange={(e) => setCrossSeal(e.target.value)}
+                    optionType="button"
+                    buttonStyle="solid"
+                    size="small"
+                    options={[
+                      { label: '是', value: 'yes' },
+                      { label: '否', value: 'no' },
+                      { label: '不适用（单页回函）', value: 'na' },
+                    ]}
+                  />
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    ⓘ 单页回函选择「不适用」
+                  </span>
+                </div>
+              )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
@@ -584,91 +701,19 @@ export default function ReplyResultModal({
                 </span>
               </div>
 
-              <Table<BankItemEntry>
-                size="small"
-                rowKey="id"
-                pagination={false}
-                dataSource={bankItems}
-                rowClassName={(r) => (!r.match ? 'row-risk-high' : '')}
-                columns={[
-                  {
-                    title: '询证事项',
-                    dataIndex: 'item',
-                    width: 190,
-                    render: (t: string, r) => (
-                      <span>
-                        <span className="muted num" style={{ marginRight: 6 }}>
-                          {r.itemNo}
-                        </span>
-                        {t}
-                      </span>
-                    ),
-                  },
-                  {
-                    title: '发函金额',
-                    dataIndex: 'sentAmount',
-                    width: 140,
-                    align: 'right',
-                    render: (val: number | null) => (
-                      <span className="num">{val ? val.toLocaleString('zh-CN') : '—'}</span>
-                    ),
-                  },
-                  {
-                    title: '回函金额（元）',
-                    dataIndex: 'repliedAmount',
-                    width: 160,
-                    align: 'right',
-                    render: (val: number | null, r) => (
-                      <Input
-                        size="small"
-                        defaultValue={val ? val.toLocaleString('zh-CN') : ''}
-                        style={{
-                          textAlign: 'right',
-                          color: r.match ? undefined : 'var(--c-risk-high)',
-                          fontWeight: r.match ? 400 : 600,
-                        }}
-                      />
-                    ),
-                  },
-                  {
-                    title: '差异',
-                    dataIndex: 'diff',
-                    width: 120,
-                    align: 'right',
-                    render: (d: number) => (
-                      <span className="num" style={{ color: d === 0 ? 'var(--c-text-3)' : 'var(--c-risk-high)' }}>
-                        {d === 0 ? '0' : d.toLocaleString('zh-CN')}
-                      </span>
-                    ),
-                  },
-                  {
-                    title: '核对结论',
-                    dataIndex: 'match',
-                    width: 96,
-                    render: (m: boolean) => (
-                      <Tag
-                        style={{
-                          marginInlineEnd: 0,
-                          fontSize: 12,
-                          border: 'none',
-                          color: 'var(--c-text-1)',
-                          background: m ? 'var(--c-risk-low-bg)' : 'var(--c-risk-high-bg)',
-                        }}
-                      >
-                        {m ? '相符' : '不一致'}
-                      </Tag>
-                    ),
-                  },
-                  {
-                    title: '备注',
-                    dataIndex: 'note',
-                    render: (t?: string) => (
-                      <span className="muted" style={{ fontSize: 13 }}>
-                        {t ?? '—'}
-                      </span>
-                    ),
-                  },
-                ]}
+              {/*
+                v2.40：扁平平表 → **分组表**（`BankItemsTable`，可写模式）。
+                真实回函里每一项各是一张列结构互不相同的子表、且一项可能多行，
+                所以形态是「可折叠分组 + 组内标准子表 + 五列对照」
+                （标识列 / 系统数据 / AI 识别值 / 回函值 / 差异 / 结论）。
+                回函值改动后**差异与结论实时重算**；组级「应用 AI 识别值」**不覆盖已人工改过的行**。
+              */}
+              <BankItemsTable
+                groups={bankItemGroups}
+                mode="edit"
+                onReplyChange={handleReplyChange}
+                onApplyGroup={handleApplyGroup}
+                onRerunGroup={handleRerunGroup}
               />
 
               {bankDiffCount > 0 && (

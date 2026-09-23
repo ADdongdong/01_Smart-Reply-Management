@@ -40,7 +40,12 @@ interface AppState {
 }
 
 type Action =
-  | { type: 'START_BATCH'; batch: UploadBatch }
+  /**
+   * 启动一个识别批次（`recognitionOpen` 一并置 true → 自动进入工作台）。
+   * `uploadType` 由**上传弹窗**给出 —— 类型在上传那一刻就已确定（v2.47 起），
+   * 不必再另外发一次 `OPEN_RECOGNITION`（分两次 dispatch 会让工作台先按旧类型渲染一帧）。
+   */
+  | { type: 'START_BATCH'; batch: UploadBatch; uploadType?: ConfirmationType }
   | { type: 'TICK' }
   /**
    * 打开识别工作台。`uploadType` 由上传入口指定（缺省按「往来函证」处理，
@@ -260,6 +265,8 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         batches: [...state.batches, action.batch],
         recognitionOpen: true,
+        /* 入口类型随批次一起定 —— 上传弹窗知道自己是哪一类，避免工作台先按旧类型渲染一帧 */
+        recognitionType: action.uploadType ?? state.recognitionType,
         floatingVisible: true,
       }
 

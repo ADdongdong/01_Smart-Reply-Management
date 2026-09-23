@@ -1,21 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Alert, App, Button, Input, Tag, Tooltip } from 'antd'
+import { App, Button, Input, Tag, Tooltip } from 'antd'
 import {
   CheckCircleFilled,
-  ClearOutlined,
   CloudUploadOutlined,
   FilePdfOutlined,
   InboxOutlined,
   InfoCircleFilled,
-  ThunderboltOutlined,
-  WarningFilled,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { buildPrefillFields } from '@/mock/confirmations'
 import { faceSheetUrlOf } from '@/config/preview'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
-import { AiChip, AiMark } from '@/components/Marks'
 import type { ExpressInfo, PrefillField, ReplyRecord } from '@/types'
 
 /**
@@ -44,22 +40,17 @@ export default function ReplyDocEntryModal({
     record ? (buildPrefillFields(record) as PrefillField[]) : [],
   )
 
-  /** AI 识别字段数（含识别失败的收件人三项之外的全部 AI 字段） */
-  const aiCount = useMemo(() => fields.filter((f) => f.ai).length, [fields])
-  /** 已采纳 / 待人工确认 —— 默认采纳规则下，待确认的只剩低置信度与未识别项 */
-  const adoptedCount = useMemo(() => fields.filter((f) => f.adopted).length, [fields])
-  const pendingCount = fields.length - adoptedCount
-  const lowConfidence = useMemo(
-    () => fields.filter((f) => f.ai && f.confidence > 0 && f.confidence < 0.9),
-    [fields],
-  )
+  /** 上次人工确认过、本次回显的项数（编辑态提示用，与 AI 无关） */
+  const confirmedCount = useMemo(() => fields.filter((f) => f.confirmed).length, [fields])
+
   /**
-   * 仍需人工处理的必填项 —— 只提示、不阻断（原型里不把流程堵死）：
-   * · AI 已识别但置信度不足的，需点一下「采纳」
-   * · AI 识别不了的（收件人三项），需手工填写
+   * 仍需人工处理的必填项 —— 只提示、不阻断（原型里不把流程堵死）。
+   *
+   * **v2.36：本弹窗不再承载 AI 识别结果的采纳**（置信度胶囊、「采纳 / 已确认」与顶部
+   * 批量采纳全部移除），因此判据只剩一条 —— 必填项是否为空（识别不到时留下的「—」也算空）。
    */
   const requiredPending = useMemo(
-    () => fields.filter((f) => f.required && (f.ai ? !f.adopted : ['—', ''].includes(f.value))),
+    () => fields.filter((f) => f.required && ['—', ''].includes(f.value)),
     [fields],
   )
 
@@ -134,7 +125,7 @@ export default function ReplyDocEntryModal({
               </>
             ) : (
               <>
-                <CheckCircleFilled style={{ color: 'var(--c-primary)' }} /> 确认后记录核验人「张审计」与核验时间（核验留痕的唯一入口），
+                <CheckCircleFilled style={{ color: 'var(--c-primary)' }} /> 确认后记录核验人与核验时间，
                 并把 AI 核验结论带入「填写回函结果」由你采纳或修改
               </>
             )}
@@ -157,7 +148,7 @@ export default function ReplyDocEntryModal({
                 return
               }
               dispatch({ type: 'CONFIRM_DOC', recordId: record.id, patch })
-              message.success('回函快递信息已确认，并标记为「已人工核验」')
+              message.success('回函快递信息已确认，已记录核验人与时间')
               if (onDone) onDone(record.id)
               else onClose()
             }}
@@ -220,59 +211,27 @@ export default function ReplyDocEntryModal({
           </div>
         </div>
 
-        {/* 右：AI 预填表单 */}
+        {/* 右：快递信息表单 */}
         <div className="panel" style={{ flex: 1, minWidth: 0, padding: 16 }}>
+          {/*
+           * v2.36：本弹窗**不再承载 AI 识别结果的采纳** —— 原「已自动采纳 N 项 + 全部采纳 /
+           * 全部清除」与低置信度提醒一并移除。字段值仍由识别阶段预填、直接可改，
+           * 需要人处理的只剩「必填项是否为空」这一件事（底栏提示 + 缺项红档浅底）。
+           */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <span className="section-title">
-              <ThunderboltOutlined style={{ color: 'var(--c-primary)' }} />
-              {isEdit ? `已回显 ${adoptedCount} 项上次确认值` : `已自动采纳 ${adoptedCount} 项`}
-            </span>
+            <span className="section-title">回函快递信息</span>
             <span className="muted" style={{ fontSize: 13 }}>
-              {pendingCount > 0
-                ? `${pendingCount} 项待你确认（共 ${fields.length} 项，其中 AI 识别 ${aiCount} 项）`
-                : '全部已确认'}
-            </span>
-            <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-              <Button
-                size="small"
-                icon={<CheckCircleFilled />}
-                onClick={() => {
-                  setFields((prev) => prev.map((f) => (f.ai ? { ...f, adopted: true } : f)))
-                  message.success('已采纳全部 AI 识别结果')
-                }}
-              >
-                全部采纳
-              </Button>
-              <Button
-                size="small"
-                icon={<ClearOutlined />}
-                onClick={() => setFields((prev) => prev.map((f) => ({ ...f, adopted: false })))}
-              >
-                全部清除
-              </Button>
+              {isEdit
+                ? `已回显 ${confirmedCount} 项上次确认值，可直接修改后保存`
+                : '请核对下方信息；识别不到的项需手工填写'}
             </span>
           </div>
-
-          {lowConfidence.length > 0 && (
-            <Alert
-              type="warning"
-              showIcon
-              icon={<WarningFilled />}
-              style={{ marginBottom: 12 }}
-              message={
-                <span style={{ fontSize: 13 }}>
-                  有 {lowConfidence.length} 项 AI 识别置信度低于 90%，已留待人工确认并高亮：
-                  {lowConfidence.map((f) => f.label).join('、')}
-                </span>
-              }
-            />
-          )}
 
           {/* 附件区 */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             {[
-              { label: '回函文件', value: record.replyFile, conf: 0.98 },
-              { label: '快递面单', value: record.faceSheet, conf: 0.95 },
+              { label: '回函文件', value: record.replyFile },
+              { label: '快递面单', value: record.faceSheet },
             ].map((f) => (
               <div
                 key={f.label}
@@ -288,10 +247,7 @@ export default function ReplyDocEntryModal({
               >
                 <FilePdfOutlined style={{ color: 'var(--c-risk-high)', fontSize: 18 }} />
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: 'var(--c-text-2)' }}>
-                    {f.label}
-                    <AiMark source="识别切分结果" confidence={f.conf} />
-                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--c-text-2)' }}>{f.label}</div>
                   <div
                     style={{
                       fontSize: 14,
@@ -322,17 +278,11 @@ export default function ReplyDocEntryModal({
             }}
           >
             {fields.map((f) => {
-              const low = f.ai && f.confidence > 0 && f.confidence < 0.9
               /**
-               * 底色只标「需要你处理」的项：
-               * 已采纳是默认常态，不再上色（避免整片浅底破坏单一色系）；低置信度走红档、
-               * 未识别的待填写项走中性底。
+               * 底色只标「需要你处理」的项 —— v2.36 起判据只有一条：
+               * 必填项是否为空（识别不到时留下的「—」也算空）。其余一律不上色。
                */
-              const tone = f.adopted
-                ? undefined
-                : low
-                  ? 'var(--c-risk-high-bg)'
-                  : 'var(--c-neutral-bg)'
+              const needFill = f.required && ['—', ''].includes(f.value)
               return (
                 <div
                   key={f.key}
@@ -342,7 +292,7 @@ export default function ReplyDocEntryModal({
                     gap: 6,
                     padding: '5px 6px',
                     borderRadius: 4,
-                    background: tone,
+                    background: needFill ? 'var(--c-risk-high-bg)' : undefined,
                   }}
                 >
                   <span
@@ -363,7 +313,7 @@ export default function ReplyDocEntryModal({
                     onChange={(e) => setField(f.key, { value: e.target.value })}
                     style={{ flex: 1, minWidth: 0 }}
                   />
-                  {f.confirmed ? (
+                  {f.confirmed && (
                     <Tooltip title="你上次确认 / 修改后保存的值，可直接改后再次保存">
                       <span style={{ flexShrink: 0 }}>
                         <Tag
@@ -382,40 +332,8 @@ export default function ReplyDocEntryModal({
                         </Tag>
                       </span>
                     </Tooltip>
-                  ) : f.ai ? (
-                    <>
-                      <Tooltip title={`识别来源：${f.source}`}>
-                        <span style={{ flexShrink: 0 }}>
-                          <AiChip confidence={f.confidence} />
-                        </span>
-                      </Tooltip>
-                      {f.adopted ? (
-                        <Tag
-                          style={{
-                            marginInlineEnd: 0,
-                            flexShrink: 0,
-                            fontSize: 11,
-                            lineHeight: '16px',
-                            padding: '0 4px',
-                            border: 'none',
-                            color: 'var(--c-primary)',
-                            background: 'var(--c-primary-bg)',
-                          }}
-                        >
-                          ✓ 已确认
-                        </Tag>
-                      ) : (
-                        <Button
-                          size="small"
-                          type="link"
-                          style={{ padding: 0, flexShrink: 0, fontSize: 13 }}
-                          onClick={() => setField(f.key, { adopted: true })}
-                        >
-                          采纳
-                        </Button>
-                      )}
-                    </>
-                  ) : (
+                  )}
+                  {!f.confirmed && needFill && (
                     <span style={{ flexShrink: 0, width: 74, fontSize: 12, color: 'var(--c-text-3)' }}>
                       需人工填写
                     </span>

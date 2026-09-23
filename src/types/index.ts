@@ -236,8 +236,13 @@ export interface ReplyRecord {
   /** 函证起止日期（银行函证四要素之一、二） */
   periodStart?: string
   periodEnd?: string
-  /** 询证事项逐项核对（银行函证专用，替代往来函证的科目余额分录） */
+  /** 询证事项逐项核对（银行函证专用，替代往来函证的科目余额分录）—— 拍平视图，见 `BankItemEntry` 的注释 */
   bankItems?: BankItemEntry[]
+  /**
+   * 询证事项的**分组形态**（v2.40）—— 展示用；缺省时由 `buildBankItemGroups` 回退到内置演示数据。
+   * `bankItems` 与它**同源**：前者是后者拍平的结果（见 `buildBankItemsForRecord`）。
+   */
+  bankItemGroups?: BankItemGroup[]
   /**
    * 「AI 识别中」标记（银行函证两阶段专用）。
    * 阶段一落库时置 true（此时只识别出四要素、归属已确认，其余检测项尚未开跑），
@@ -317,6 +322,45 @@ export interface RecognitionTask {
   plannedFailure?: StageKey
 }
 
+/**
+ * 批次内的一张**快递面单**（v2.42）。
+ *
+ * 识别只读**条形码**（→ `expressNo`）与**寄件人**（→ `sender`），
+ * 再由 `services/faceSheet.ts` 与函证做交叉校验。
+ *
+ * **`matchedConfirmationNos` 是数组** —— 一个包裹里可能装着同一被询证单位的
+ * 多封回函（银行一次寄回多个函证项很常见），此时多封**共用一张面单**。
+ * 所以这里不能用「面单 ↔ 函证 一对一」的模型。
+ */
+export interface BatchFaceSheet {
+  id: string
+  /** 面单扫描件文件名，如 `SF7444706556947.jpg` */
+  fileName: string
+  /** 条形码读出的快递单号 */
+  expressNo: string
+  /** 条形码上方印的寄件人名称 —— 交叉校验的对象（应与被询证单位一致） */
+  sender: string
+  /** 交叉校验后配对到的函证编号（**可多封**） */
+  matchedConfirmationNos: string[]
+  /** 校验结论；`ok` 为通过 */
+  check?: FaceSheetCheck
+}
+
+/**
+ * 面单的**交叉校验**结论（v2.42）。
+ *
+ * 本轮只实现**第一条**（用户决策：先做模型与最少的交叉校验，其余四条后续补）：
+ * **寄件人 ↔ 被询证单位**。故 `rule` 目前只有这一个取值，但结构预留 ——
+ * 后续四条（单号唯一性 / 一面对多封的合理上限 / 寄件日期与回函日期先后 /
+ * 收件人是否为项目组）沿用同一形状追加即可。
+ */
+export interface FaceSheetCheck {
+  rule: 'senderMatchesEntity'
+  level: 'ok' | 'warn'
+  /** 直接可读的结论句 —— 界面不再二次加工 */
+  message: string
+}
+
 /** 上传批次 */
 export interface UploadBatch {
   id: string
@@ -325,6 +369,21 @@ export interface UploadBatch {
   pageCount: number
   type: ConfirmationType | '自动判定中'
   tasks: RecognitionTask[]
+  /**
+   * 本批次携带的**快递面单**（v2.42）。
+   *
+   * 真实形态：面单是**独立的一叠扫描件**（一次寄 20 封就是 20 张面单，打进一个 PDF），
+   * 与回函件**一起上传**；识别只在面单上读**条形码**（拿快递单号），
+   * 再按「同批次内的单号 / 寄件人」把面单与函证配对。
+   *
+   * 两处与旧模型的关键差别：
+   * · **一张面单可以对应多封函证** —— 一个快递包裹里塞了 3 封回函（同一被询证单位
+   *   一次寄回多个函证项，常见于银行），此时 3 封共用一个单号，故
+   *   `matchedConfirmationNos` 是数组（见 `BatchFaceSheet`）；
+   * · **面单不再拼在回函件里** —— 旧模型（`ReplyRecord.faceSheet` 那条「面单是回函 PDF
+   *   的最后一页」）只保留给**往来函证**（它的拼接件确实带面单页）；银行函证改走本字段。
+   */
+  faceSheets?: BatchFaceSheet[]
   status: 'queued' | 'running' | 'done' | 'failed'
   createdAt: string
 }
@@ -403,6 +462,12 @@ export interface SubjectEntry {
  * 询证事项逐项核对（银行函证，按标准《银行询证函》固定询证项）。
  * 数据来自**系统内已存的格式一 / 格式二**，与回函识别结果逐项比对 ——
  * 它是银行函证「回函是否相符」判定的**唯一依据**（见 services/replyRule.ts）。
+ *
+ * **注意（v2.40 起）**：本结构是**拍平后的视图**，供「一致性摘要 / 列表相符性」这类
+ * 只关心「共几项、几项不一致」的消费者使用。**真正的展示形态是分组（见下 `BankItemGroup`）** ——
+ * 真实回函里每一项各是一张列结构互不相同的子表、且一项可能多行，
+ * 「一项一行一个金额」装不下（如银行存款 3 个账户）。
+ * 分组由 `buildBankItemGroups` 提供，拍平由 `buildBankItemsForRecord` 从分组派生。
  */
 export interface BankItemEntry {
   id: string
@@ -415,6 +480,62 @@ export interface BankItemEntry {
   diff: number
   match: boolean
   note?: string
+}
+
+/**
+ * 询证事项的**一个分组** = 标准《银行询证函》的一个大项（v2.40）。
+ *
+ * 为什么不是扁平的「一行一项」：真实回函里
+ * · **每一项各是一张列结构互不相同的子表** —— 银行存款 11 列（账户名称 / 银行账号 / 币种 /
+ *   利率 / 账户类型 / 账户余额 / 是否属于资金归集账户 / 起始日期 / 终止日期 /
+ *   是否存在冻结担保或使用限制 / 备注），而「存放于贵行托管的证券或其他产权文件」只有 5 列
+ *   （文件名称 / 编号 / 数量 / 币种 / 金额），**没有一列共通**；
+ * · **一项可能多行** —— 银行存款 3 个账户、已贴现商业汇票 4 张、信用证 4 笔。
+ *
+ * 故展示形态为「**可折叠分组 + 组内标准子表 + 对照列**」：组内保留该组的**标识列**（天然主键）
+ * 与**金额列**，再对金额列给 `系统数据 → AI 识别值 → 回函值 → 差异 → 结论` 五列对照；
+ * 币种 / 利率 / 起止日期这类描述性字段不进对照（否则银行存款会是 11 + 5 = 16 列）。
+ */
+export interface BankItemGroup {
+  id: string
+  /** 序号，如 "1"；附表为 "附" */
+  itemNo: string
+  /** 项名，如「银行存款」「自 2025-01-01 起至 2025-12-31 期间内注销的银行存款账户」 */
+  item: string
+  /** 该组的**标识列名**（行配对的依据），如 ['账户名称', '银行账号', '币种'] */
+  keyLabels: string[]
+  /** 该组**参与比对的金额列名**，如「账户余额」 */
+  amountLabel: string
+  /**
+   * 该组的识别状态：
+   * · `done` 已识别 —— 有 AI 值，可编辑回函值、可一键应用；
+   * · `run` 识别中 —— 显示「正在识别…」，回函值输入框禁用；
+   * · `fail` 识别失败 —— 组标题给「重新识别」（**组级动作**：MinerU 整表识别只能重跑整张表），
+   *   回函值列**可直接手填**（失败补录就在表内完成，不需要另开录入界面）；
+   * · `empty` 本份回函未列示 —— 收成一行灰字，不给空表。
+   */
+  stat: 'done' | 'run' | 'fail' | 'empty'
+  rows: BankItemRow[]
+}
+
+/** 分组内的一行 —— 对应标准子表里的一条记录（一个账户 / 一张票据 / 一笔合约） */
+export interface BankItemRow {
+  id: string
+  /** 标识列的值，顺序与所属分组的 `keyLabels` 一致 */
+  keys: string[]
+  /** 系统内数据（发函）—— 来自格式一 / 格式二 */
+  sentAmount: number | null
+  /** **AI 识别回函值** —— 独立成列是为了让人**看出自己改了什么**；识别中 / 失败时为 null */
+  aiAmount: number | null
+  /** **回函值** —— 比对的实际输入，**人工确认值**，AI 值到达即自动预填、人工可改 */
+  replyAmount: number | null
+  /**
+   * 差异 = `回函值 − 系统数据`（v2.40）。**人工改「回函值」后必须实时重算** ——
+   * 否则会出现「回函值 900 / 系统数据 1000 / 差异 0」这种自相矛盾的行，比对表自己不可信。
+   */
+  diff: number | null
+  /** 核对结论：相符 / 不相符 / 系统无此笔（回函新增） */
+  match: boolean | null
 }
 
 /* ------------------------------------------------------------------ */

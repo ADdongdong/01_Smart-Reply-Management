@@ -102,8 +102,8 @@ export const themeConfig: ThemeConfig = {
       bodyBg: token.colorBgLayout,
     },
     Table: {
-      /** 表头不铺底色，露出卡片白底，视觉更干净 */
-      headerBg: 'transparent',
+      /** 表头铺极淡中性底（参照 Ant Design Pro 详情页） */
+      headerBg: token.colorFillLight,
       headerColor: token.colorTextTertiary,
       headerSplitColor: 'transparent',
       cellPaddingBlock: 8,
@@ -115,8 +115,9 @@ export const themeConfig: ThemeConfig = {
       headerBorderRadius: 8,
     },
     Card: {
-      paddingLG: 16,
-      headerFontSize: 14,
+      /** 卡片内边距略放宽，向 Ant Design Pro 详情页的呼吸感靠 */
+      paddingLG: 20,
+      headerFontSize: 15,
     },
     Tabs: {
       horizontalItemPadding: '6px 0',

@@ -46,6 +46,11 @@
   --radius-control: 6px;
   --radius-tag: 4px;
 
+  /* 标签高度 —— 只有两档。此前 6 处小标签各写一遍 inline style，
+     高度出现了 16 / 20 两种（同一种信息形态不该有多种尺度） */
+  --h-tag: 20px;
+  --h-tag-sm: 16px;
+
   /* 阴影 —— 多层叠加而非单层硬投影。
      每层偏移与模糊成比例递减，堆出接近真实光照的柔和过渡 */
   --shadow-card:
@@ -152,7 +157,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 16px;
+  height: var(--h-tag-sm);
   padding: 0 4px;
   border-radius: var(--radius-tag);
   font-size: 11px;
@@ -160,6 +165,84 @@ body {
   color: var(--c-primary);
   background: var(--c-ai-bg);
   white-space: nowrap;
+}
+
+/* 低置信度 —— 与「高风险」共用红档：底色与文字都走深档。
+   此前这里底色用红档、文字却是墨色，与风险标签并列时看起来像两种语义 */
+.ai-chip--low {
+  color: var(--c-risk-high-text);
+  background: var(--c-risk-high-bg);
+}
+
+/* ------------------------- 状态标签（全站统一） ------------------------- */
+
+/* 列表 / 明细 / 徽标共用的小标签。**尺寸与配色只在这里定义**，组件侧只传
+   tone 与 size —— 此前同一形态在 6 处各写一遍 inline style，高度出现 16 / 20 两种。
+   两档高度：默认 20（表格列内），sm 16（行内跟随文字）。 */
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: var(--h-tag);
+  padding: 0 6px;
+  border-radius: var(--radius-tag);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.status-tag--sm {
+  height: var(--h-tag-sm);
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 400;
+}
+/* 档位配色 —— 浅底 + 深档文字，各档在自身浅底上 ≥ 4.5:1（WCAG AA）。
+   底色与文字必须成对引用，不要跨档混搭 */
+.status-tag--high {
+  color: var(--c-risk-high-text);
+  background: var(--c-risk-high-bg);
+}
+.status-tag--low {
+  color: var(--c-risk-low-text);
+  background: var(--c-risk-low-bg);
+}
+.status-tag--neutral {
+  color: var(--c-text-3);
+  background: var(--c-tag-bg);
+}
+.status-tag--primary {
+  color: var(--c-primary);
+  background: var(--c-primary-bg);
+}
+/* AI 产出 —— 浅底 + 1px 虚线，与主色的实心浅底区分开 */
+.status-tag--ai {
+  color: var(--c-primary);
+  background: var(--c-ai-bg);
+  border: 1px dashed rgba(59, 91, 219, 0.34);
+  padding: 0 5px;
+}
+.status-tag--ai.status-tag--low {
+  color: var(--c-risk-low-text);
+  background: var(--c-risk-low-bg);
+  border-color: rgba(63, 163, 77, 0.42);
+}
+.status-tag--ai.status-tag--high {
+  color: var(--c-risk-high-text);
+  background: var(--c-risk-high-bg);
+  border-color: rgba(229, 72, 77, 0.4);
+}
+/* 标签里的 ✦ —— 更小一号，不顶高行距 */
+.status-tag__mark {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+/* 带悬停说明的标签 —— 光标提示「这里可以悬停」
+   （它承载的是 Tooltip，而不是链接或按钮，故不用手型） */
+.status-tag--help {
+  cursor: help;
 }
 
 /* 高风险行左侧标记条 —— 语义性线条，保留但收窄 */
@@ -202,7 +285,43 @@ body {
 
 /* 8px 网格 —— 所有结构性间距都是 8 的倍数 */
 .page {
-  padding: 24px;
+  padding: 16px 24px 24px;
+}
+
+/* ------------------------- 页面头 ------------------------- */
+
+/* 参照 Ant Design Pro 的详情页：面包屑（12px 次要色）+ 标题（20 / 600）。
+   它承担「我在哪」—— 顶部导航条已按用户决定删除，页面头是唯一的层级线索。 */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 4px 0 16px;
+}
+.page-head .ant-breadcrumb {
+  font-size: 12px;
+}
+.page-head__title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--c-text-1);
+}
+.page-head__title small {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--c-text-3);
+}
+/* 标题里的数字用等宽，避免条数变化时标题宽度跳动 */
+.page-head__title b {
+  font-weight: 600;
+  color: var(--c-text-2);
 }
 
 /* 卡片 —— 无边框，靠多层柔和阴影表达边界 */
@@ -230,9 +349,19 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 分组标题 16px —— 参照 Ant Design Pro 详情页 */
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--c-text-1);
+}
+
+/* 分组内部的次级小标题 —— 与分组标题同源、降一档。
+   此前两者字号 / 字重完全一样，层级只能靠「谁在上面」推断；
+   读者得先比较位置才知道哪一级是分组、哪一级是组内小节 */
+.section-title--sub {
   font-size: 14px;
   font-weight: 500;
-  color: var(--c-text-1);
+  color: var(--c-text-2);
 }
 
 .muted {
@@ -282,23 +411,9 @@ body {
   color: var(--c-risk-high-text);
 }
 
-/* 拖拽上传区 —— 虚线仅作「可放置」的功能性提示，压到最淡 */
-.dropzone {
-  border: 1px dashed #dce1ea;
-  border-radius: var(--radius-card);
-  background: var(--c-fill-light);
-  padding: 20px 16px;
-  text-align: center;
-  cursor: pointer;
-  transition:
-    border-color var(--motion-fast) var(--ease-out),
-    background-color var(--motion-fast) var(--ease-out);
-}
-.dropzone:hover,
-.dropzone.dragging {
-  border-color: var(--c-primary);
-  background: var(--c-primary-bg);
-}
+/* v2.47：原 `.dropzone`（拖拽上传区）已随「上传移出识别工作台」删除 ——
+   工作台的空态与顶部上传条都不再存在，上传统一在列表页的上传弹窗里。
+   （当时口径：虚线仅作「可放置」的功能性提示，压到最淡。） */
 
 /* 仿 PDF 页面预览 —— 像一张浮起的纸，不用边框框住 */
 .pdf-canvas {
@@ -429,6 +544,263 @@ body {
 .fs-body-inner {
   max-width: 1600px;
   margin: 0 auto;
+}
+
+/* ------------------------- 回函结果填写（左固定 / 右独立滚动） ------------------------- */
+
+/* 「回函结果填写」是长表单：右侧要一屏屏往下填，而左侧的函面原件是**核对参照** ——
+   两者一起整页滚动时，填到下面几项就看不到原件了。因此与识别工作台同一套做法：
+   内容为 .result-workspace 时把 body 变成定高 flex、内容区自身不滚动，
+   由**右栏独立滚动**、左栏固定。
+   （:has 不受支持时优雅降级为 body 整页滚动，功能不受影响。） */
+.fs-modal .ant-modal-body:has(.result-workspace) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+/*
+ * **横向宽度必须硬约束**（2026-09-23 修 bug：回函结果填写页表格展示不全、字符被遮盖）
+ *
+ * 三个都缺一不可 —— 这条链从 `.ant-modal-body`（宽 1680）往下：
+ *   `.fs-body-inner`（column flex 容器）→ `.result-workspace`（row flex 容器）→ 两栏
+ *
+ * 右栏里的**询证事项分组表**（14 组，组内 8 列：标识列 + 系统数据 / AI 识别值 /
+ * 回函值 / 差异 / 结论）最小内容宽可达 1000px+。仅靠 `min-width: 0` **不足够**：
+ * 实测该链会被内容的 min-content 一路撑到 2407px，`.ant-modal-body` 又是
+ * `overflow-x: hidden`，超出的部分**被直接裁掉** —— 表现为「右侧的列和字看不见、
+ * 标识列被挤成残字」（正是用户截图里的现象）。
+ * 故这里用 `width / max-width: 100%` 做**硬约束**（相对父级 content box，
+ * 不参与 flex 尺寸协商），宽度交给 `.rw-right` 的内部滚动承担。
+ */
+.fs-modal .ant-modal-body:has(.result-workspace) > .fs-body-inner {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.result-workspace {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  padding: 16px 24px;
+}
+/* 左：回函函证 —— 固定栏，**不出滚动条**（内容整体放不下时宁可裁掉也不给第二条滚动条：
+   同一屏里并列两条滚动条既难看、也让「哪一条管哪儿」变得难判断）。
+   实际放得下由组件侧把预览高度做成自适应视口来保证，见 ReplyResultModal 的 previewHeightOf()。 */
+.result-workspace > .rw-left {
+  flex: 1.15;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 右：AI 核验结论 + 函证结果 —— 独立上下滚动 */
+.result-workspace > .rw-right {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 窄屏降级：回到「整页一起滚动」（两栏本就上下堆叠，拆分滚动没有意义） */
+@media (max-width: 1100px) {
+  .fs-modal .ant-modal-body:has(.result-workspace) {
+    display: block;
+    overflow: auto;
+    padding: 16px 24px;
+  }
+  .fs-modal .ant-modal-body:has(.result-workspace) > .fs-body-inner {
+    display: block;
+    max-width: 1600px;
+  }
+  .result-workspace {
+    display: block;
+    padding: 0;
+  }
+  .result-workspace > .rw-left,
+  .result-workspace > .rw-right {
+    overflow: visible;
+    padding-right: 0;
+  }
+  .result-workspace > .rw-left {
+    margin-bottom: 16px;
+  }
+}
+
+/* ------------------------- 智能识别工作台（全屏两栏） ------------------------- */
+
+/* 说明：识别工作台由「右侧 920px 抽屉」改为「全屏两栏工作区」，容器复用 .fs-modal。
+   内容区自身不滚动，由左右两栏各自滚动 —— 因此仅当内容为 .recognition-workspace 时，
+   把 body 变成定高 flex 容器、去掉内边距，并放开 .fs-body-inner 的限宽。
+   （:has 不受支持时优雅降级为 body 整页滚动，功能不受影响。） */
+.fs-modal .ant-modal-body:has(.recognition-workspace) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.fs-modal .ant-modal-body:has(.recognition-workspace) > .fs-body-inner {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.recognition-workspace {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.recognition-workspace__top {
+  flex: none;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.recognition-bench {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+/* 左栏 —— 识别队列 */
+.recognition-queue {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--c-hairline);
+}
+.recognition-queue__head {
+  flex: none;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.recognition-queue__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* 批次组标题（v2.48）—— 浅底、不带阴影：与下方的任务卡（透明底 + 阴影）拉开层次，
+   表达「这组卡片属于这个文件」的从属关系。只用既有令牌，不新增色值。 */
+.recognition-queue__group {
+  background: var(--c-fill-light);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 右栏 —— 选中项详情 */
+.recognition-detail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px 24px;
+}
+
+/* 空态 —— 「暂无识别任务」（v2.47 起工作台不再承担上传，故无拖拽区、无演示入口） */
+.recognition-empty {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-top: 8px;
+}
+
+/* 队列卡片 —— 一个归属项一张可点卡片（选中态明确；颜色只用既有令牌） */
+.recognition-task {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-card);
+  padding: 10px 12px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition:
+    box-shadow var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out);
+}
+.recognition-task:hover {
+  box-shadow: var(--shadow-hover);
+}
+.recognition-task.is-selected {
+  background: var(--c-primary-bg);
+  box-shadow:
+    0 0 0 1px var(--c-primary),
+    var(--shadow-card);
+}
+.recognition-task.is-failed {
+  background: var(--c-risk-high-bg);
+}
+.recognition-task.is-failed.is-selected {
+  box-shadow:
+    0 0 0 1px var(--c-risk-high),
+    var(--shadow-card);
+}
+
+/* 检测点逐项行 —— 图标 + 名称 + 结论，末行不画线 */
+.recognition-stage {
+  display: grid;
+  grid-template-columns: 14px 186px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.recognition-stage:last-child {
+  border-bottom: 0;
+}
+.recognition-stage__icon {
+  align-self: center;
+}
+
+/* 窄屏降级：两栏改单栏、整页滚动（工作台以桌面为主） */
+@media (max-width: 900px) {
+  .fs-modal .ant-modal-body:has(.recognition-workspace) {
+    display: block;
+    overflow: auto;
+    padding: 0;
+  }
+  .fs-modal .ant-modal-body:has(.recognition-workspace) > .fs-body-inner {
+    display: block;
+    max-width: 1600px;
+  }
+  .recognition-workspace {
+    display: block;
+  }
+  .recognition-bench {
+    display: block;
+  }
+  .recognition-queue {
+    border-right: 0;
+    border-bottom: 1px solid var(--c-hairline);
+  }
+  .recognition-queue__list,
+  .recognition-detail {
+    overflow: visible;
+  }
 }
 
 /* ------------------------- 表格去线 ------------------------- */

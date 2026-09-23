@@ -41,9 +41,22 @@ export interface TypeRule {
   /**
    * 是否为两阶段识别（v2.28）：**先对应、后细查**。
    * · 银行函证 true —— 阶段一只识别四要素并给出归属，用户确认对应后其余检测项才自动开跑；
-   * · 往来函证 false —— 二维码精确命中归属，无需人工「对应」，一次性跑完。
+   * · 往来函证 false —— 归属由**切分界面**（见下 `needsSplit`）在识别之前确定，
+   *   进入工作台时归属已定，故工作台内不再分阶段、六项一起跑。
    */
   twoPhase: boolean
+  /**
+   * 上传后是否先走「切分」界面（v2.35）：**两个居中弹窗** ——
+   * ① 「文件识别录入」（最后页是否快递面单 + 拖拽上传拼接件）
+   * ② 「数据核对」（切分结果表 + 函面原件预览，点确定 = 归属即定）
+   *
+   * · 往来函证 true —— 上传的是**拼接件**（多封回函 + 各自面单页），必须先按右上角二维码
+   *   切分成若干段并人工确认归属；**确认之后才打开识别工作台**，那时六项检测才一起开跑。
+   *   「确认」因此不只是同一页里的一个按钮，而是**两个界面之间的分界**。
+   * · 银行函证 false —— 回函文件内没有系统二维码、不需要切分，点上传**直接进识别工作台**，
+   *   归属按四要素在工作台内匹配。
+   */
+  needsSplit: boolean
   /** 识别工作台的演示批次 */
   presetBatchId: 'A' | 'B'
   /** 列表页上传入口按钮文案 */
@@ -64,6 +77,7 @@ export const TYPE_RULE: Record<ConfirmationType, TypeRule> = {
     detectBankText: false,
     matchBy: 'sealRegion',
     twoPhase: false,
+    needsSplit: true,
     presetBatchId: 'A',
     entryTitle: '上传往来函证回函',
     verifyItemsLabel: '一致性比对 / 印章 / 手写体',
@@ -77,6 +91,7 @@ export const TYPE_RULE: Record<ConfirmationType, TypeRule> = {
     detectBankText: true,
     matchBy: 'consistencyOnly',
     twoPhase: true,
+    needsSplit: false,
     presetBatchId: 'B',
     entryTitle: '上传银行函证回函',
     verifyItemsLabel: '询证事项逐项核对 / 印章 / 银行函证文本识别',
@@ -134,7 +149,12 @@ export function evaluateMatch(record: ReplyRecord): MatchEvaluation {
    * 若不短路，未识别完就会算出一个看起来正常的「相符 / 不相符」结论。
    */
   if (isRecognitionPending(record)) {
-    return { matched: null, byAi: true, basis: 'AI 识别中 —— 其余检测项完成后自动刷新' }
+    /*
+     * **不返回 `basis`** —— 「识别中」这句话统一由 `Marks` 的 `RECOGNIZING_HINT`
+     * 经标签悬停表达一次。此前两处都返回，导致同一个 tooltip 里出现两句同义说明
+     * （「AI 识别中 —— 归属已确认，其余检测项完成后自动刷新结论」+「依据：AI 识别中 —— 其余检测项完成后自动刷新」）。
+     */
+    return { matched: null, byAi: true }
   }
 
   const rule = TYPE_RULE[record.type]

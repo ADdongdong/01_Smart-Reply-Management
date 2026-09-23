@@ -92,8 +92,11 @@ export default function RecordDetailModal({
           { key: 'a', label: '函证编号', children: record.confirmationNo },
           { key: 'b', label: '函证类型', children: record.type },
           { key: 'c', label: '被询证单位', children: record.entity },
+          /* 「发函方式」与「快递公司」于 v2.38 从列表展开行并入本页 —— 列表侧不再出现这两项 */
+          { key: 'g', label: '发函方式', children: record.sendMethod },
           { key: 'd', label: '发函登记日期', children: record.sendDate },
           { key: 'e', label: '回函登记日期', children: record.replyDate ?? '—' },
+          { key: 'h', label: '快递公司', children: record.expressCompany ?? '—' },
           {
             key: 'f',
             label: '回函快递单号',

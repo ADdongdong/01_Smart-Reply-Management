@@ -2,6 +2,7 @@ import type {
   AiVerification,
   BankCandidateSource,
   BankItemEntry,
+  BankItemGroup,
   BankTextResult,
   ConfirmationType,
   ConsistencyRow,
@@ -791,11 +792,237 @@ export function buildSubjectEntriesForRecord(record: ReplyRecord): SubjectEntry[
 }
 
 /**
- * 回函结果填写 —— 询证事项逐项核对（银行函证专用）。
+ * 回函结果填写 —— 询证事项逐项核对（银行函证专用）**分组形态**（v2.40）。
+ *
+ * 数据取自真实回函《银行询证函（格式一）》（8 页 / 14 项 + 1 个资金归集附表），
+ * 每组**列结构与该组的标准子表一致**（银行存款 11 列、托管的证券 5 列……），
+ * 但界面上只展示「标识列 + 金额列 + 五列对照」——
+ * 币种 / 利率 / 起止日期这类描述性字段不进对照，否则银行存款会是 11 + 5 = 16 列。
+ *
+ * 三个演示态就落在数据里：第 11 组（外汇买卖合约）为 `run` 识别中、
+ * 第 12 组（托管的证券）为 `fail` 识别失败、第 14 组（其他）为 `empty` 本份未列示；
+ * 另有两处刻意造的差异（银行存款第 3 个账户、已贴现商业汇票第 4 张），便于看差异行样式。
+ */
+const BANK_ITEM_GROUPS_QS: BankItemGroup[] = [
+  {
+    id: 'g1',
+    itemNo: '1',
+    item: '银行存款',
+    keyLabels: ['账户名称', '银行账号', '币种'],
+    amountLabel: '账户余额',
+    stat: 'done',
+    rows: [
+      { id: 'g1-1', keys: ['西安西点信息技术有限公司', '58491750', '人民币'], sentAmount: 5367, aiAmount: 5367, replyAmount: 5367, diff: 0, match: true },
+      { id: 'g1-2', keys: ['西安西点信息技术有限公司', '58491749', '人民币'], sentAmount: 25368, aiAmount: 25368, replyAmount: 25368, diff: 0, match: true },
+      { id: 'g1-3', keys: ['西安西点信息技术有限公司', '58491751', '人民币'], sentAmount: 5371, aiAmount: 5900, replyAmount: 5900, diff: 529, match: false },
+    ],
+  },
+  {
+    id: 'g2',
+    itemNo: '2',
+    item: '银行借款',
+    keyLabels: ['借款人名称', '借款账号', '币种'],
+    amountLabel: '余额',
+    stat: 'done',
+    rows: [
+      { id: 'g2-1', keys: ['西小点', '58491749', '人民币'], sentAmount: 10, aiAmount: 10, replyAmount: 10, diff: 0, match: true },
+    ],
+  },
+  {
+    id: 'g3',
+    itemNo: '3',
+    item: '自 2025-01-01 起至 2025-12-31 期间内注销的银行存款账户',
+    keyLabels: ['账户名称', '银行账号', '币种'],
+    amountLabel: '注销账户日',
+    stat: 'done',
+    rows: [
+      { id: 'g3-1', keys: ['西安西点信息技术有限公司', '58491749', '人民币'], sentAmount: null, aiAmount: null, replyAmount: null, diff: null, match: true },
+    ],
+  },
+  {
+    id: 'g4',
+    itemNo: '4',
+    item: '本公司作为委托人的委托贷款',
+    keyLabels: ['账户名称', '银行结算账号', '资金借入方', '币种'],
+    amountLabel: '余额',
+    stat: 'done',
+    rows: [
+      { id: 'g4-1', keys: ['西点信息', '58491749', '东点信息', '人民币'], sentAmount: 600, aiAmount: 600, replyAmount: 600, diff: 0, match: true },
+    ],
+  },
+  {
+    id: 'g5',
+    itemNo: '5',
+    item: '本公司作为借款人的委托贷款',
+    keyLabels: ['账户名称', '银行结算账号', '资金借出方', '币种'],
+    amountLabel: '余额',
+    stat: 'done',
+    rows: [
+      { id: 'g5-1', keys: ['西点信息', '58491749', '东点信息', '人民币'], sentAmount: 600, aiAmount: 600, replyAmount: 600, diff: 0, match: true },
+    ],
+  },
+  {
+    id: 'g6',
+    itemNo: '6',
+    item: '担保',
+    keyLabels: ['被担保人', '担保方式', '币种'],
+    amountLabel: '担保余额',
+    stat: 'done',
+    rows: [
+      { id: 'g6-1', keys: ['西安西小小技术有限公司', '保证', '人民币'], sentAmount: 10000, aiAmount: 10000, replyAmount: 10000, diff: 0, match: true },
+    ],
+  },
+  {
+    id: 'g7',
+    itemNo: '7',
+    item: '本公司为出票人且由贵行承兑而尚未支付的银行承兑汇票',
+    keyLabels: ['银行承兑汇票号码', '结算账户账号', '币种'],
+    amountLabel: '票面金额',
+    stat: 'done',
+    rows: [
+      { id: 'g7-1', keys: ['58491749', '58491749', '人民币'], sentAmount: 800, aiAmount: 800, replyAmount: 800, diff: 0, match: true },
+    ],
+  },
+  {
+    id: 'g8',
+    itemNo: '8',
+    item: '本公司向贵行已贴现而尚未到期的商业汇票',
+    keyLabels: ['商业汇票号码', '承兑人名称', '币种'],
+    amountLabel: '票面金额',
+    stat: 'done',
+    rows: [
+      { id: 'g8-1', keys: ['123459', '小孙', '人民币'], sentAmount: 4000, aiAmount: 4000, replyAmount: 4000, diff: 0, match: true },
+      { id: 'g8-2', keys: ['123456', '小李', '人民币'], sentAmount: 1000, aiAmount: 1000, replyAmount: 1000, diff: 0, match: true },
+      { id: 'g8-3', keys: ['123458', '小赵', '人民币'], sentAmount: 3000, aiAmount: 3000, replyAmount: 3000, diff: 0, match: true },
+      { id: 'g8-4', keys: ['123457', '小王', '人民币'], sentAmount: 2000, aiAmount: 2400, replyAmount: 2400, diff: 400, match: false },
+    ],
+  },
+  {
+    id: 'g9',
+    itemNo: '9',
+    item: '本公司为持票人且由贵行托收（或由本公司提示付款）的商业汇票',
+    keyLabels: ['商业汇票号码', '承兑人名称', '币种'],
+    amountLabel: '票面金额',
+    stat: 'done',
+    rows: [
+      { id: 'g9-1', keys: ['123457', '小王', '人民币'], sentAmount: 2000, aiAmount: 2000, replyAmount: 2000, diff: 0, match: true },
+      { id: 'g9-2', keys: ['123456', '小李', '人民币'], sentAmount: 1000, aiAmount: 1000, replyAmount: 1000, diff: 0, match: true },
+    ],
+  },
+  {
+    id: 'g10',
+    itemNo: '10',
+    item: '本公司为申请人，由贵行开具的、未履行完毕的不可撤销信用证',
+    keyLabels: ['信用证号码', '受益人', '币种'],
+    amountLabel: '信用证金额',
+    stat: 'done',
+    rows: [
+      { id: 'g10-1', keys: ['123458', '小赵', '人民币'], sentAmount: 3000, aiAmount: 3000, replyAmount: 3000, diff: 0, match: true },
+      { id: 'g10-2', keys: ['123456', '小李', '人民币'], sentAmount: 1000, aiAmount: 1000, replyAmount: 1000, diff: 0, match: true },
+      { id: 'g10-3', keys: ['123457', '小王', '人民币'], sentAmount: 2000, aiAmount: 2000, replyAmount: 2000, diff: 0, match: true },
+      { id: 'g10-4', keys: ['123459', '小孙', '人民币'], sentAmount: 4000, aiAmount: 4000, replyAmount: 4000, diff: 0, match: true },
+    ],
+  },
+  {
+    /* 演示「识别中」—— MinerU 是整表识别，故整组一起等，不做「逐项进度」 */
+    id: 'g11',
+    itemNo: '11',
+    item: '本公司与贵行之间未履行完毕的外汇买卖合约',
+    keyLabels: ['类别', '合约号码', '卖出 / 买入币种'],
+    amountLabel: '未履行的合约买卖金额',
+    stat: 'run',
+    rows: [
+      { id: 'g11-1', keys: ['类别2', '123459', '人民币 / 人民币'], sentAmount: 4000, aiAmount: null, replyAmount: null, diff: null, match: null },
+      { id: 'g11-2', keys: ['类别2', '123457', '人民币 / 人民币'], sentAmount: 2000, aiAmount: null, replyAmount: null, diff: null, match: null },
+      { id: 'g11-3', keys: ['类别1', '123456', '人民币 / 人民币'], sentAmount: 1000, aiAmount: null, replyAmount: null, diff: null, match: null },
+      { id: 'g11-4', keys: ['类别2', '123458', '人民币 / 人民币'], sentAmount: 3000, aiAmount: null, replyAmount: null, diff: null, match: null },
+    ],
+  },
+  {
+    /* 演示「识别失败」—— 回函值列可直接手填，失败补录就在表内完成，不需要另开录入界面 */
+    id: 'g12',
+    itemNo: '12',
+    item: '本公司存放于贵行托管的证券或其他产权文件',
+    keyLabels: ['文件名称', '编号', '币种'],
+    amountLabel: '金额',
+    stat: 'fail',
+    rows: [
+      { id: 'g12-1', keys: ['文件1', '123456', '人民币'], sentAmount: 1000, aiAmount: null, replyAmount: null, diff: null, match: null },
+      { id: 'g12-2', keys: ['文件2', '123457', '人民币'], sentAmount: 2000, aiAmount: null, replyAmount: null, diff: null, match: null },
+    ],
+  },
+  {
+    id: 'g13',
+    itemNo: '13',
+    item: '本公司购买的由贵行发行的未到期银行理财产品',
+    keyLabels: ['产品名称', '产品类型', '币种'],
+    amountLabel: '产品净值',
+    stat: 'done',
+    rows: [
+      { id: 'g13-1', keys: ['文件2', '123457（封闭式）', '人民币'], sentAmount: 2000, aiAmount: 2000, replyAmount: 2000, diff: 0, match: true },
+      { id: 'g13-2', keys: ['文件1', '123456（开放式）', '人民币'], sentAmount: 1000, aiAmount: 1000, replyAmount: 1000, diff: 0, match: true },
+    ],
+  },
+  {
+    /* 本份回函未列示 —— 收成一行灰字，不给空表 */
+    id: 'g14',
+    itemNo: '14',
+    item: '其他',
+    keyLabels: ['内容'],
+    amountLabel: '金额',
+    stat: 'empty',
+    rows: [],
+  },
+  {
+    id: 'gAtt',
+    itemNo: '附',
+    item: '资金归集（资金池或其他资金管理）账户具体信息',
+    keyLabels: ['资金提供机构名称', '资金提供机构账号', '资金使用机构名称'],
+    amountLabel: '拨入 / 拨出余额',
+    stat: 'done',
+    rows: [
+      { id: 'gAtt-1', keys: ['机构1', '123123', '机构1'], sentAmount: 200, aiAmount: 200, replyAmount: 200, diff: 0, match: true },
+      { id: 'gAtt-2', keys: ['机构2', '123321', '机构2'], sentAmount: 200, aiAmount: 200, replyAmount: 200, diff: 0, match: true },
+    ],
+  },
+]
+
+/**
+ * 回函结果填写 / 核验明细 —— 询证事项逐项核对（银行函证专用）**分组形态**。
  * 银行回函是银行盖章的格式化证明，与我方函证逐项对应，
- * 因此核对对象是标准询证项而非往来科目余额。
+ * 因此核对对象是**标准询证项**而非往来科目余额。
+ */
+export function buildBankItemGroups(record: ReplyRecord): BankItemGroup[] {
+  if (record.bankItemGroups?.length) return record.bankItemGroups
+  return BANK_ITEM_GROUPS_QS
+}
+
+/**
+ * 询证事项**拍平视图** —— 从分组派生，供只关心「共几项、几项不一致」的消费者使用
+ * （`consistencyOf` 的一致性摘要、列表「回函是否相符」列）。
+ *
+ * **展示一律用分组**（`buildBankItemGroups`）；本函数只为兼容既有的汇总口径而存在，
+ * 二者同源，不会出现「摘要说有 1 项差异、表里却看到 2 处」这类打架。
  */
 export function buildBankItemsForRecord(record: ReplyRecord): BankItemEntry[] {
   if (record.bankItems?.length) return record.bankItems
-  return BANK_ITEMS_QS
+  const out: BankItemEntry[] = []
+  buildBankItemGroups(record).forEach((g) => {
+    /* `empty` 组（本份未列示）与 `run` 组（尚未识别）不参与汇总 ——
+       否则识别中就会算出一个看起来正常的「相符」结论（见 evaluateMatch 的短路注释） */
+    if (g.stat === 'empty' || g.stat === 'run') return
+    g.rows.forEach((r) => {
+      out.push({
+        id: r.id,
+        itemNo: g.itemNo,
+        item: g.rows.length > 1 ? `${g.item}（${r.keys.join(' / ')}）` : g.item,
+        sentAmount: r.sentAmount,
+        repliedAmount: r.replyAmount,
+        diff: r.diff ?? 0,
+        match: r.match !== false,
+        note: g.stat === 'fail' ? '表格识别失败，待人工补录' : undefined,
+      })
+    })
+  })
+  return out
 }

@@ -110,7 +110,14 @@ export default function AnnotatedPdfPreview({
   fileUrl: string
   /** 打开时定位到的页（默认第 1 页） */
   page?: number
-  height?: number
+  /**
+   * 预览高度：传数字为固定像素；传 `'100%'` 时**撑满父容器**。
+   *
+   * 用在「左固定栏」这类场景（如「回函结果填写」）：左栏高度由窗口决定、且除预览外
+   * 只有一行标题，撑满即可 —— 不必去猜一个像素值（猜小了会在下方留一大块空白，
+   * 猜大了又会溢出）。内部的 ResizeObserver 会在容器尺寸变化时自动重渲染。
+   */
+  height?: number | string
   sealBoxes?: SealBox[]
   /** 是否展示「信息证明无误 / 信息不符」两个落章区域 */
   showRegions?: boolean

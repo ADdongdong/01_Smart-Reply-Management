@@ -2,17 +2,17 @@ import { useState, type ReactNode } from 'react'
 import { Alert, Table } from 'antd'
 import {
   AuditOutlined,
-  BankOutlined,
   HighlightOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons'
-import type { BankItemEntry, ReplyRecord } from '@/types'
+import type { ReplyRecord } from '@/types'
 import type { PreviewMode } from '@/config/preview'
 import { TYPE_RULE, isRecognitionPending } from '@/services/replyRule'
-import { buildBankItemsForRecord } from '@/mock/confirmations'
+import { buildBankItemGroups, buildBankItemsForRecord } from '@/mock/confirmations'
+import BankItemsTable from '@/components/BankItemsTable'
 import ConsistencyDiff from '@/components/ConsistencyDiff'
 import SealRecognition from '@/components/SealRecognition'
-import BankTextRecognition from '@/components/BankTextRecognition'
+/* v2.39：「银行函证文本识别」不再作为独立检测点，本页不再引用 BankTextRecognition（组件仍被识别工作台的归属匹配区使用） */
 import HandwritingRecognition from '@/components/HandwritingRecognition'
 import PdfPreview from '@/components/PdfPreview'
 
@@ -27,60 +27,12 @@ function annotationLegend(record: ReplyRecord): string {
   return 'AI 批注图例：蓝框＝检出的印章位置　蓝虚线＝手写体识别区　绿框＝相符判定（印章落于「信息证明无误」）　红框＝异常印章或不相符　灰虚线＝未命中的落章区域'
 }
 
-/**
- * 银行函证：询证事项逐项核对明细（只读）。
- * 回函识别结果与**系统内已存的格式一 / 格式二数据**逐项比对 —— 这是银行函证相符性的唯一依据。
+/*
+ * v2.40：原 `BankItemsDiff`（扁平平表）已由 `BankItemsTable`（分组表）替代 ——
+ * 真实回函里每一项各是一张列结构互不相同的子表（银行存款 11 列、托管的证券 5 列）、
+ * 且一项可能多行，扁平结构装不下。本页为**只读**模式：无输入框、无一键应用、无重新识别
+ * （「核验页看，结果页采纳」—— 那页的场景是拿着结论去原件上核对依据，能改反而让人不确定该在哪改）。
  */
-function BankItemsDiff({ items }: { items: BankItemEntry[] }) {
-  return (
-    <Table<BankItemEntry>
-      size="small"
-      rowKey="id"
-      pagination={false}
-      dataSource={items}
-      rowClassName={(r) => (!r.match ? 'row-risk-high' : '')}
-      columns={[
-        {
-          title: '询证事项',
-          dataIndex: 'item',
-          width: 180,
-          render: (t: string, r) => (
-            <span>
-              <span className="muted num" style={{ marginRight: 6 }}>
-                {r.itemNo}
-              </span>
-              {t}
-            </span>
-          ),
-        },
-        {
-          title: '系统数据（发函）',
-          dataIndex: 'sentAmount',
-          align: 'right',
-          width: 140,
-          render: (n: number | null) => <span className="num">{n?.toLocaleString() ?? '—'}</span>,
-        },
-        {
-          title: '回函金额',
-          dataIndex: 'repliedAmount',
-          align: 'right',
-          width: 140,
-          render: (n: number | null) => <span className="num">{n?.toLocaleString() ?? '—'}</span>,
-        },
-        {
-          title: '核对结论',
-          dataIndex: 'note',
-          render: (note: string | undefined, r) => (
-            <span style={{ color: r.match ? 'var(--c-risk-low-text)' : 'var(--c-risk-high-text)' }}>
-              {r.match ? '一致' : '存在差异'}
-              {note && <span className="muted"> · {note}</span>}
-            </span>
-          ),
-        },
-      ]}
-    />
-  )
-}
 
 /**
  * AI 核验只读面板 —— 左右分栏：
@@ -120,7 +72,7 @@ export default function VerificationPanel({
           type="info"
           showIcon
           message="AI 识别中"
-          description="归属已确认，系统正在异步识别其余检测项（询证事项逐项核对 / 印章 / 快递面单），完成后本页自动刷新。"
+          description="其余检测项完成后本页自动刷新。"
         />
       )
     }
@@ -139,9 +91,11 @@ export default function VerificationPanel({
   /** 本类型的业务规则 —— 检测项清单与命名一律查表（services/replyRule.ts） */
   const rule = TYPE_RULE[record.type]
   const isBank = rule.matchBy === 'consistencyOnly'
-  /** 询证事项逐项核对（银行函证）—— 相符性的唯一数据来源 */
+  /** 询证事项逐项核对（银行函证）—— 相符性的唯一数据来源（拍平视图，仅用于「有几项不符」的计数） */
   const bankItemsForRecord = buildBankItemsForRecord(record)
   const bankItemsDiff = bankItemsForRecord.filter((i) => !i.match).length
+  /** 展示用分组（v2.40）—— 与上面的拍平视图**同源**，不会出现「摘要说 1 项差异、表里 2 处」的打架 */
+  const bankItemGroups = buildBankItemGroups(record)
   const rows = v.consistency.rows
   const diffCount = v.consistency.diffCount
   const sealNormal = v.seal.hasSeal && v.seal.region !== '信息不符区'
@@ -162,7 +116,7 @@ export default function VerificationPanel({
       icon: <AuditOutlined />,
       risk: isBank ? bankItemsDiff > 0 : diffCount > 0,
       children: isBank ? (
-        <BankItemsDiff items={bankItemsForRecord} />
+        <BankItemsTable groups={bankItemGroups} mode="view" />
       ) : (
         <ConsistencyDiff rows={rows} confidence={v.consistency.confidence} />
       ),
@@ -172,19 +126,15 @@ export default function VerificationPanel({
       title: '印章识别',
       icon: <SafetyCertificateOutlined />,
       risk: !sealNormal,
-      children: <SealRecognition seal={v.seal} entity={record.entity} />,
+      /* 银行函证：不渲染骑缝章行（v2.39 起 R-03 限定往来），结论条也不推导相符性 */
+      children: <SealRecognition seal={v.seal} entity={record.entity} isBank={isBank} />,
     },
-    ...(rule.detectBankText && v.bankText
-      ? [
-          {
-            key: 'bank',
-            title: '银行函证文本识别',
-            icon: <BankOutlined />,
-            risk: v.bankText.level === 'manual',
-            children: <BankTextRecognition result={v.bankText} />,
-          },
-        ]
-      : []),
+    /*
+     * 「银行函证文本识别」页签已于 v2.39 移除 —— 它不再是独立检测点：
+     * 四要素取值归阶段一的「识别四要素」（归属匹配的输入），各询证项金额并入上面的
+     * 「询证事项逐项核对」。二者本就由不同引擎产出（OCR / 大模型 vs MinerU）。
+     * 因此本页银行侧检测项为 **2 项**（往来仍为 3 项）。
+     */
     /* 手写体仅往来函证检测 —— 按**类型**而非数据有无决定，银行侧即使有残留数据也不展示 */
     ...(rule.detectHandwriting && v.handwriting
       ? [

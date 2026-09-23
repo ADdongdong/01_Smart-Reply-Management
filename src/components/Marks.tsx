@@ -3,6 +3,7 @@ import { Tooltip } from 'antd'
 import { CheckCircleFilled, ExclamationCircleFilled, InfoCircleFilled } from '@ant-design/icons'
 import type { ConfirmationType, RiskLevel, VerifyStatus } from '@/types'
 import { TYPE_RULE } from '@/services/replyRule'
+import { StatusTag, type TagTone } from '@/components/StatusTag'
 
 /* ------------------- AI 来源标识 ------------------- */
 
@@ -28,12 +29,7 @@ export function AiChip({ confidence, label = 'AI' }: { confidence: number; label
   const low = confidence < 0.9
   return (
     <span
-      className="ai-chip"
-      style={
-        low
-          ? { color: 'var(--c-text-1)', background: 'var(--c-risk-high-bg)' }
-          : undefined
-      }
+      className={low ? 'ai-chip ai-chip--low' : 'ai-chip'}
       title={low ? '置信度偏低，建议人工重点核对' : undefined}
     >
       {label} {Math.round(confidence * 100)}%
@@ -54,18 +50,18 @@ export function AiChip({ confidence, label = 'AI' }: { confidence: number; label
  *   改用深档语义色后，红 / 绿在浅底上依然 ≥ 4.5:1（WCAG AA），且这两个色已排除橙色系，
  *   不会出现用户反感的「咖啡色」。
  */
-const RISK_MAP: Record<RiskLevel, { text: string; color: string; bg: string }> = {
-  high: { text: '高风险', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' },
-  medium: { text: '中风险', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' },
-  low: { text: '低风险', color: 'var(--c-risk-low-text)', bg: 'var(--c-risk-low-bg)' },
-  none: { text: '未核验', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' },
+const RISK_MAP: Record<RiskLevel, { text: string; tone: TagTone }> = {
+  high: { text: '高风险', tone: 'high' },
+  medium: { text: '中风险', tone: 'high' },
+  low: { text: '低风险', tone: 'low' },
+  none: { text: '未核验', tone: 'neutral' },
 }
 
 /**
  * 「识别中」标签的中性样式（v2.28 两阶段）—— 与「无法判定 / 未核验」同一灰阶：
  * 它表达的是「**数据还没就绪**」，不是任何业务结论。
  */
-const PENDING_CFG = { text: '识别中', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' } as const
+const PENDING_CFG = { text: '识别中', tone: 'neutral' } as const
 
 /** 「识别中」的悬停说明 —— 与「无法判定」的「待人工判定」区分开 */
 export const RECOGNIZING_HINT = 'AI 识别中 —— 归属已确认，其余检测项完成后自动刷新结论'
@@ -81,39 +77,22 @@ export function RiskTag({
   pending?: boolean
 }) {
   const cfg = pending ? PENDING_CFG : RISK_MAP[level]
-  const tag = (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 20,
-        padding: '0 6px',
-        borderRadius: 'var(--radius-tag)',
-        fontSize: 12,
-        lineHeight: 1,
-        color: cfg.color,
-        background: cfg.bg,
-        fontWeight: 500,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {cfg.text}
-    </span>
-  )
   const tips = pending ? [RECOGNIZING_HINT] : (reasons ?? [])
-  if (!tips.length) return tag
   return (
-    <Tooltip
-      title={
-        <div style={{ fontSize: 13, lineHeight: 1.8 }}>
-          {tips.map((r) => (
-            <div key={r}>· {r}</div>
-          ))}
-        </div>
+    <StatusTag
+      tone={cfg.tone}
+      tip={
+        tips.length ? (
+          <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+            {tips.map((r) => (
+              <div key={r}>· {r}</div>
+            ))}
+          </div>
+        ) : undefined
       }
     >
-      {tag}
-    </Tooltip>
+      {cfg.text}
+    </StatusTag>
   )
 }
 
@@ -159,34 +138,19 @@ export function MatchTag({
    */
   pending?: boolean
 }) {
-  const cfg = pending
-    ? PENDING_CFG
+  /**
+   * 档位与「是否 AI 产出」分两位表达：
+   * · `tone` 讲结论（相符 / 不相符 / 无法判定）；
+   * · `ai` 讲来源（尚未经人工确认）—— 走虚线框 + `✦`，与人工确认值可辨。
+   * 「无法判定」不加 AI 标记：那时还没有结论，谈不上「建议值」。
+   */
+  const cfg: { text: string; tone: TagTone; ai: boolean } = pending
+    ? { ...PENDING_CFG, ai: false }
     : matched === true
-      ? { text: '相符', color: 'var(--c-risk-low-text)', bg: 'var(--c-risk-low-bg)' }
+      ? { text: '相符', tone: 'low', ai: Boolean(byAi) }
       : matched === false
-        ? { text: '不相符', color: 'var(--c-risk-high-text)', bg: 'var(--c-risk-high-bg)' }
-        : { text: '无法判定', color: 'var(--c-text-3)', bg: 'var(--c-tag-bg)' }
-
-  const tag = (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 20,
-        padding: '0 6px',
-        borderRadius: 'var(--radius-tag)',
-        fontSize: 12,
-        lineHeight: 1,
-        color: cfg.color,
-        background: cfg.bg,
-        fontWeight: 500,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {byAi && matched !== null && <span style={{ marginRight: 2, fontSize: 10 }}>✦</span>}
-      {cfg.text}
-    </span>
-  )
+        ? { text: '不相符', tone: 'high', ai: Boolean(byAi) }
+        : { text: '无法判定', tone: 'neutral', ai: false }
 
   const tips: string[] = []
   if (pending) {
@@ -207,8 +171,11 @@ export function MatchTag({
   if (reasons?.length) tips.push(...reasons.map((r) => `· ${r}`))
 
   return (
-    <Tooltip
-      title={
+    <StatusTag
+      tone={cfg.tone}
+      ai={cfg.ai}
+      mark={cfg.ai ? '✦' : undefined}
+      tip={
         <div style={{ fontSize: 13, lineHeight: 1.8 }}>
           {tips.map((t) => (
             <div key={t}>{t}</div>
@@ -216,8 +183,8 @@ export function MatchTag({
         </div>
       }
     >
-      {tag}
-    </Tooltip>
+      {cfg.text}
+    </StatusTag>
   )
 }
 
@@ -243,47 +210,16 @@ export function VerifyBadge({
 }) {
   if (status === 'verified') {
     return (
-      <Tooltip title={`核验人：${by ?? '—'}　核验时间：${at ?? '—'}`}>
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            height: 20,
-            padding: '0 6px',
-            borderRadius: 'var(--radius-tag)',
-            fontSize: 12,
-            lineHeight: 1,
-            color: 'var(--c-primary)',
-            background: 'var(--c-primary-bg)',
-            fontWeight: 500,
-            whiteSpace: 'nowrap',
-            cursor: 'help',
-          }}
-        >
-          ✓ 已人工核验
-        </span>
-      </Tooltip>
+      <StatusTag
+        tone="primary"
+        className="status-tag--help"
+        tip={`核验人：${by ?? '—'}　核验时间：${at ?? '—'}`}
+      >
+        ✓ 已人工核验
+      </StatusTag>
     )
   }
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        height: 20,
-        padding: '0 6px',
-        borderRadius: 'var(--radius-tag)',
-        fontSize: 12,
-        lineHeight: 1,
-        color: 'var(--c-text-3)',
-        background: 'var(--c-tag-bg)',
-        fontWeight: 500,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      待核验
-    </span>
-  )
+  return <StatusTag tone="neutral">待核验</StatusTag>
 }
 
 /* ------------------- （已移除）AI 核验进度徽标 ------------------- */
