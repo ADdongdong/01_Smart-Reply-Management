@@ -7,7 +7,7 @@ import type {
   UploadBatch,
 } from '@/types'
 import { BANK_ITEMS_QS, BANK_VERIFY_FALLBACK, REPLY_RECORDS, fallbackVerification } from '@/mock/confirmations'
-import { makeStages } from '@/mock/recognition'
+import { makeSegmentTask, makeStages } from '@/mock/recognition'
 import { advanceBatch } from '@/services/mockRecognition'
 import { TYPE_RULE } from '@/services/replyRule'
 import dayjs from 'dayjs'
@@ -82,6 +82,28 @@ type Action =
   | { type: 'CLOSE_EXPRESS' }
   | { type: 'CONFIRM_ASSIGN'; taskId: string }
   | { type: 'MANUAL_MATCH'; taskId: string; confirmationNo: string; entity: string }
+  /**
+   * 提交「回函归属」界面的**手动切分**（v2.62）—— 用户点「确定」时发一次。
+   *
+   * 载荷是**这份文件的完整切分结果**（段 = 页区间 + 归属），而不是"某段改了什么"：
+   * 切分是"整份文件被分成哪几段"这件事的一个整体状态，逐段下发 delta 会让
+   * "删除一段、把两段并成一段"这类操作没有对应的 delta 可发。
+   *
+   * 为什么要**在确定时才提交**、而不是每动一下剪刀就写库：切分是编辑动作，
+   * 中间态（比如批量切了 11 段、还没归完）不该落进任务列表 —— 那会让后台识别
+   * 按一个用户并不认可的分段去跑。`AssignView` 的草稿因此是纯本地的。
+   */
+  | {
+      type: 'COMMIT_SPLIT'
+      fileName: string
+      segments: {
+        pageStart: number
+        pageEnd: number
+        /** `待指定` = 该段未归属（不写入回函列表） */
+        confirmationNo: string
+        entity?: string
+      }[]
+    }
   | { type: 'RETRY_TASK'; taskId: string }
   | { type: 'SKIP_TASK'; taskId: string }
   | { type: 'CONFIRM_DOC'; recordId: string; patch?: Partial<ReplyRecord> }
@@ -465,6 +487,86 @@ function reducer(state: AppState, action: Action): AppState {
       const started = startDetailPhase(assigned, action.taskId)
       /* 界面是否关闭由用户点「确定」决定（v2.57），此处只推进数据 */
       return finished ? started : { ...started, floatingVisible: true }
+    }
+
+    /**
+     * 提交「回函归属」界面的手动切分（v2.62）。
+     *
+     * ## 重建规则：**按页区间复用**，对不上才新建
+     *
+     * 切分结果与既有任务不是"谁覆盖谁"的关系：
+     * · 页区间**完全一致**的旧任务 → **原样保留**（它可能已经跑了识别、甚至已落库，
+     *   重建会把进度与核验数据全丢掉）；
+     * · 区间一致但**归属变了** → 就地改归属，并把 `applied` 置回 false，让 TICK 按新归属重新落库；
+     * · 对不上的区间 → 新建一段（`makeSegmentTask`）。
+     *
+     * 这条"复用优先"正是**初稿从整份一段开始也不丢演示数据**的原因：银行侧用户
+     * 按固定页数 4 页一切得到 1-4 / 5-8 / 9-11，恰好与既有三段一一吻合，
+     * 三段的识别进度与核验文案都因此被继承下来。
+     */
+    case 'COMMIT_SPLIT': {
+      if (!action.segments.length) return state
+
+      const batches = state.batches.map((b) => {
+        if (b.fileName !== action.fileName) return b
+        /* 一个旧任务只能被一段复用（否则两段会指向同一个 task.id） */
+        const used = new Set<string>()
+
+        const tasks = action.segments.map((seg, i) => {
+          const reused = b.tasks.find(
+            (t) => !used.has(t.id) && t.pageStart === seg.pageStart && t.pageEnd === seg.pageEnd,
+          )
+          if (reused) {
+            used.add(reused.id)
+            if (reused.confirmationNo === seg.confirmationNo) return reused
+            /*
+             * 归属改了 → 重新落库：原先按旧归属写进列表的那条不能再算数。
+             * 注意这里**不回收旧记录** —— 演示里改归属多发生在「待指定」的段上
+             * （它们本就没落库，不会产生重复）；已落库再改属于补正行为，
+             * 走回函管理里的补正入口。
+             */
+            return {
+              ...reused,
+              confirmationNo: seg.confirmationNo,
+              matchedEntity: seg.entity ?? reused.matchedEntity,
+              assignSource:
+                seg.confirmationNo === '待指定' ? undefined : ('manual-assign' as const),
+              applied: false,
+              recordId: undefined,
+            }
+          }
+          return makeSegmentTask({
+            /*
+             * 取**批次内任务的类型**而不是 `b.type`：批次的 type 允许是
+             * `'自动判定中'`（上传时类型未定），而任务上的 type 一定是确定的两类之一 ——
+             * 切分出的新段必须跟着这份文件本来的类型走。
+             */
+            type: b.tasks[0]?.type ?? state.recognitionType,
+            fileName: b.fileName,
+            index: i,
+            pageStart: seg.pageStart,
+            pageEnd: seg.pageEnd,
+            confirmationNo: seg.confirmationNo,
+            entity: seg.entity,
+          })
+        })
+
+        return {
+          ...b,
+          tasks,
+          /* 切分变了 → 批次回到 running，让 TICK 重新接管推进 */
+          status: b.status === 'done' ? ('running' as const) : b.status,
+        }
+      })
+
+      /* 归属已定的段立即落库，并**启动阶段二**（与 CONFIRM_ASSIGN / MANUAL_MATCH 同一衔接） */
+      let next: AppState = { ...state, batches, floatingVisible: true }
+      const committed = next.batches.find((b) => b.fileName === action.fileName)
+      for (const task of committed?.tasks ?? []) {
+        if (!task.assignSource) continue
+        next = startDetailPhase(finalizeTask(next, task.id), task.id)
+      }
+      return next
     }
 
     case 'RETRY_TASK': {

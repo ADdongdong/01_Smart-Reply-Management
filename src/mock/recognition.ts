@@ -226,6 +226,48 @@ function createTask(seed: TaskSeed, fileName: string, index: number): Recognitio
   }
 }
 
+/**
+ * 按「切分结果」新建一段的任务（v2.62）。
+ *
+ * ## 什么时候用它
+ *
+ * 用户在「回函归属」界面手动切分后点「确定」，store 的 `COMMIT_SPLIT` 会用切分结果
+ * **重建该文件的任务**。重建时优先**复用**页区间完全一致的旧任务（保住识别进度与核验数据）；
+ * 只有对不上（用户切出了新的区间）才走这里新建。
+ *
+ * 与 `createTask`（种子 → 任务）的差别：种子那套要算四要素归属、解析 `pageRange` 字符串，
+ * 而这里**切分与归属都已经是确定的事实**（人切好、人选好的），直接落字段即可 ——
+ * 这也是「归属不再依赖 AI」的落点：新段的归属来自 `seg.confirmationNo`，不经过任何匹配。
+ */
+export function makeSegmentTask(opts: {
+  type: ConfirmationType
+  fileName: string
+  /** 本段在文件内的序号（仅用于生成 id） */
+  index: number
+  pageStart: number
+  pageEnd: number
+  /** 归属到的函证编号；`待指定` = 尚未归属（该段不会写入回函列表） */
+  confirmationNo: string
+  entity?: string
+}): RecognitionTask {
+  const { type, fileName, index, pageStart, pageEnd, confirmationNo, entity } = opts
+  const resolved = confirmationNo !== '待指定'
+  return {
+    id: `${fileName}-seg${pageStart}-${pageEnd}-${index}`,
+    confirmationNo,
+    fileName,
+    pageStart,
+    pageEnd,
+    type,
+    matchedEntity: entity,
+    /* 归属由人指定 —— 与「确认归属」一样记 manual-assign，不冒充系统自动归属 */
+    assignSource: resolved ? 'manual-assign' : undefined,
+    status: 'pending',
+    phase: 1,
+    stages: makeStages(type, 1),
+  }
+}
+
 /** 演示批次 A：往来函证拼接回函（含一个二维码识别失败案例） */
 export function buildBatchA(): UploadBatch {
   const fileName = '0813回函123.pdf'

@@ -32,6 +32,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     auditedEntity: AUDITED_ENTITY,
     periodStart: '2024-01-01',
     periodEnd: '2024-03-31',
+    type: '银行函证',
   },
   {
     confirmationNo: 'QS2024-018',
@@ -39,6 +40,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     auditedEntity: AUDITED_ENTITY,
     periodStart: '2023-01-01',
     periodEnd: '2023-12-31',
+    type: '银行函证',
   },
   {
     confirmationNo: 'QS2024-019',
@@ -46,6 +48,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     auditedEntity: AUDITED_ENTITY,
     periodStart: '2024-01-01',
     periodEnd: '2024-03-31',
+    type: '银行函证',
   },
   {
     confirmationNo: 'whzf0010008',
@@ -53,6 +56,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     auditedEntity: AUDITED_ENTITY,
     periodStart: '2024-01-01',
     periodEnd: '2024-06-30',
+    type: '往来函证',
   },
   {
     confirmationNo: 'whzf0010009',
@@ -60,6 +64,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     auditedEntity: AUDITED_ENTITY,
     periodStart: '2024-01-01',
     periodEnd: '2024-06-30',
+    type: '往来函证',
   },
   {
     confirmationNo: 'whzf0010010',
@@ -67,6 +72,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     auditedEntity: AUDITED_ENTITY,
     periodStart: '2024-01-01',
     periodEnd: '2024-06-30',
+    type: '往来函证',
   },
 ]
 

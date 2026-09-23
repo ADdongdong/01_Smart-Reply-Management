@@ -128,6 +128,27 @@ export interface BankCandidateSource {
   auditedEntity: string
   periodStart: string
   periodEnd: string
+  /**
+   * 函证类型（v2.62）。
+   *
+   * 归属界面的「每段一个下拉」要从**同一份候选清单**里按当前类型筛出可选项 ——
+   * 银行批次的回函不该出现在往来批次的候选里（反之亦然）。
+   * 四要素匹配（`services/bankMatch.ts`）本身不关心这个字段，故为可选。
+   */
+  type?: ConfirmationType
+}
+
+/**
+ * 一段连续的页（v2.62）—— 页级切分的基本单位。
+ *
+ * 字段名刻意与 `RecognitionTask` 的 `pageStart` / `pageEnd` 对齐：段可以直接喂给
+ * `pageRangeOf` / `splitIssuesOf` 这些既有函数，不必再转一层。
+ */
+export interface PageSegment {
+  /** 起始页（1-based，含） */
+  pageStart: number
+  /** 结束页（1-based，含） */
+  pageEnd: number
 }
 
 /** 银行函证四要素识别输入 */

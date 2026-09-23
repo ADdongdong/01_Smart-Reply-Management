@@ -1103,18 +1103,17 @@ body {
   animation-delay: 80ms;
 }
 
-/* ------------------------- 归属页（v2.56） ------------------------- */
+/* ------------------------- 归属页（v2.57 立，v2.62 改为页级切分） ------------------------- */
 
 /*
- * 识别工作台的「归属页」—— 银行函证在**归属尚未确定**时的全部内容：
- * 左 = 原始回函预览（整份铺出、本段描边），右 = 切分结果表 + 归属操作。
+ * 「回函归属」界面的骨架：**左 = 页缩略图墙，右 = 拆分方式 + 切分结果**。
  *
- * 为何左右分栏而非上下堆叠：归属这一步要做的判断是「**这份文件的每一页归得对不对**」，
- * 依据在左（原件）、结论在右（切分与归属），两栏并排才能对着原件核对；
- * 上下堆叠时看完原件要滚回去看结论，来回翻。
+ * 为何左右分栏：这一步做的判断是「**这份文件的每一页该归到哪封函证**」——
+ * 依据在左（页面本身），结论在右（切成几段、每段归谁），两栏并排才能对着页面核对。
  *
- * 高度：左栏定型（预览是独立滚动区，高度不能随内容涨），故给整块一个下限，
- * 窄屏时（见下方媒体查询）退回上下堆叠。
+ * v2.62 的口径变化：左栏由「一整份 A4 连续预览」改为**页缩略图墙 + 页间剪刀** ——
+ * 连续预览里"第 4 页和第 5 页之间"只能靠猜，缩略图墙让切点变成可以直接指的东西。
+ * 右栏也随之由「切分结果表 + 候选函证表」收成「拆分方式 + 每段一个归属下拉」。
  */
 .assign-pane {
   display: flex;
@@ -1123,23 +1122,239 @@ body {
   min-height: 560px;
   margin-top: 12px;
 }
-.assign-pane__left {
-  /*
-   * 预览取**固定宽**而非比例（实测：按 1.15 分配时两栏各约 290px，
-   * 表格的「被询证单位」被压成三行、「归属状态」直接被裁掉）。
-   * 400px 足够看清 A4 扫描件的版式与印章，余下的宽度全给表格 ——
-   * 这一步要判断的是「切得对不对」，表格比预览更缺宽度。
-   */
-  flex: none;
-  width: 400px;
-  /* 预览内部自适应父高（`AnnotatedPdfPreview` 的 ResizeObserver 会跟随） */
-  height: 560px;
-}
-.assign-pane__right {
+.assign-pane__board {
   flex: 1;
   min-width: 0;
+  height: 560px;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--radius-card);
+  background: var(--c-fill-light);
+  /* 滚动交给内部的 .split-board（外框不滚，避免圆角被卷走） */
+  overflow: hidden;
+}
+.assign-pane__right {
+  /*
+   * 固定宽而非比例：这一栏的内容是「三个单选项 + 一段列表 + 下拉」，
+   * 宽度需求是可预知的（下拉要放得下「齐商银行股份有限公司 · QS2024-031」），
+   * 余下的宽度全部让给缩略图墙 —— 那才是越宽越好用的一边。
+   */
+  flex: none;
+  width: 360px;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* ------------------------- 页缩略图切分板（v2.62） ------------------------- */
+
+.split-board {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  /* 行间距留足：段首角标是溢出到卡片外侧的（top:-7px），行太挤会顶到上一行的页码 */
+  gap: 24px 0;
+  padding: 20px 16px;
+}
+.split-board--msg {
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--c-text-2);
+}
+.split-board__loading {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-tag);
+  background: var(--c-fill-light);
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.split-board__page {
+  position: relative;
+  flex: none;
+  width: 150px;
+  margin: 0 4px;
+  padding: 6px 6px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
+}
+.split-board__page:hover {
+  border-color: var(--c-border);
+}
+/* 当前段 —— 主色描边 + 浅底，与右栏被选中的那一行呼应 */
+.split-board__page.is-active {
+  border-color: var(--c-primary);
+  background: var(--c-primary-bg);
+}
+.split-board__canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border: 1px solid var(--c-hairline);
+  border-radius: 2px;
+}
+.split-board__no {
+  display: block;
+  padding: 4px 0 2px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+/*
+ * 段首角标 —— 让人一眼看出"这一段从哪页开始"。
+ *
+ * **贴在卡片内**（而不是溢出到卡片外侧）：曾经写在 `top:-7px; left:-5px`，
+ * 结果换行后第二行段首的角标正好压在**上一行最后一张卡片的页码文字**上
+ * （实测截图里「段 2」盖住了「第 4 页」）。放在卡内压在缩略图右上角就没有这个冲突，
+ * 缩略图边缘本来就是页边空白，遮住一点不影响判断。
+ */
+.split-board__seg {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  padding: 0 6px;
+  border-radius: var(--radius-tag);
+  background: var(--c-primary);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.18);
+}
+/*
+ * 页间剪刀 —— **未激活时只是淡剪影**（11 页就有 10 把，全都醒目会盖过页面本身），
+ * 悬停才亮起；激活后是主色 + 一条贯穿该行高度的虚线，切分线因此"看得见"。
+ */
+.split-board__cut {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-3);
+  opacity: 0.35;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+.split-board__cut:hover {
+  opacity: 1;
+  color: var(--c-primary);
+}
+.split-board__cut.is-on {
+  opacity: 1;
+  color: var(--c-primary);
+}
+.split-board__cut.is-on::before {
+  content: '';
+  position: absolute;
+  top: 4%;
+  bottom: 10%;
+  left: 50%;
+  border-left: 1px dashed var(--c-primary);
+  opacity: 0.5;
+}
+/* 图标压住虚线 —— 给个底色圆点，避免"圈里穿一条线" */
+.split-board__cut.is-on .anticon {
+  position: relative;
+  padding: 3px 0;
+  background: var(--c-fill-light);
+}
+
+/* ------------------------- 拆分方式与切分结果（v2.62） ------------------------- */
+
+.split-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.split-panel__modes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.split-panel__param {
+  margin-left: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.split-panel__param-suffix {
+  font-size: 13px;
+  color: var(--c-text-2);
+}
+.split-panel__hint {
+  margin: 12px 0;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+.split-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.split-rows__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-border-light);
+  border-radius: var(--radius-control);
+  background: var(--c-neutral-bg);
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
+}
+.split-rows__item:hover {
+  border-color: var(--c-border);
+}
+.split-rows__item.is-active {
+  border-color: var(--c-primary);
+  background: var(--c-primary-bg);
+}
+.split-rows__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.split-rows__idx {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-1);
+}
+.split-rows__range {
+  font-size: 13px;
+  color: var(--c-text-1);
+}
+.split-rows__pages {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--c-text-3);
 }
 
 /* ------------------------- 回函进度步骤条（v2.51） ------------------------- */
