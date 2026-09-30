@@ -31,6 +31,7 @@ export default function PdfPreview({
   entity = '广东证券股份有限公司',
   indexNo = 'LC2026006906',
   page = 1,
+  locateToken = 0,
   totalPages = 2,
   sealBoxes = [],
   showRegions = false,
@@ -42,6 +43,7 @@ export default function PdfPreview({
   viewMode,
   onViewModeChange,
   markRange,
+  markLabel = '本段',
 }: {
   confirmationNo: string
   /**
@@ -59,6 +61,11 @@ export default function PdfPreview({
   indexNo?: string
   totalPages?: number
   page?: number
+  /**
+   * 定位令牌（v2.70）—— `page` 没变时也能把视图**重新**定位过去，见 `AnnotatedPdfPreview`。
+   * 用于「点右侧某张表 → 左侧原件跳到该表所在页」，同一张表可反复点。
+   */
+  locateToken?: number
   sealBoxes?: SealBox[]
   /** 是否展示「信息证明无误 / 信息不符」两个落章区域 */
   showRegions?: boolean
@@ -81,6 +88,8 @@ export default function PdfPreview({
    * 整份铺出来、当前段描边打角标。不传 = 不标记。详见 `AnnotatedPdfPreview`。
    */
   markRange?: { start: number; end: number }
+  /** 被标记页的角标前缀（默认「本段」）—— 见 `AnnotatedPdfPreview` 的同名 prop */
+  markLabel?: string
 }) {
   const [internalMode, setInternalMode] = useState<PreviewMode>(DEFAULT_PREVIEW_MODE)
   const pref = forceAnnotated ? 'annotated' : (viewMode ?? internalMode)
@@ -141,6 +150,7 @@ export default function PdfPreview({
       <AnnotatedPdfPreview
         fileUrl={fileUrl ?? browserSampleUrlOf(confirmationNo)}
         page={page}
+        locateToken={locateToken}
         singlePage={singlePage ? page : undefined}
         height={height}
         sealBoxes={annotated ? sealBoxes : []}
@@ -148,6 +158,7 @@ export default function PdfPreview({
         activeRegion={annotated ? activeRegion : undefined}
         handwriting={annotated ? handwriting : undefined}
         markRange={markRange}
+        markLabel={markLabel}
       />
       {switcher}
     </div>

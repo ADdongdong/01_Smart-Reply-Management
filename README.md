@@ -6,8 +6,10 @@
 
 ```bash
 npm install
-npm run dev      # http://127.0.0.1:5178
+npm run dev      # http://127.0.0.1:15178
 ```
+
+> 端口 **15178** 是刻意选的：本机 Windows 动态端口范围是 1024–15000，而 Hyper-V / WSL 每次开机都会从这段里划走若干「保留区间」，落在里面的端口会 `listen EACCES: permission denied`（**不是被占用**）。详见 `scripts/start_dev.py` 文件头。
 
 其他命令：
 
@@ -184,7 +186,7 @@ src/
 浏览器 ──→ KKFileView(127.0.0.1:18012)
               │  容器去下载文件
               ↓
-       host.docker.internal:5178/samples/xxx.pdf   ← 容器视角的「宿主机」
+       host.docker.internal:15178/samples/xxx.pdf  ← 容器视角的「宿主机」
               ↑
        Vite dev server（已改为 host: true + allowedHosts 放行）
 ```
@@ -203,13 +205,15 @@ docker run -d --name kkfileview -p 18012:8012 --restart=always keking/kkfileview
 
 ### 样例文件与配置
 
-三个真实样例 PDF 放在 `public/samples/`，映射关系见 `src/config/preview.ts`：
+样例 PDF 放在 `public/samples/`，映射关系见 `src/config/preview.ts`：
 
-| 样例文件 | 对应函证 |
-|---|---|
-| `huihan-0813.pdf` | 往来函证拼接回函（默认，覆盖大多数记录） |
-| `wanglai-1-SJ01YF001.pdf` | whzf0010005（印章 + 手写体演示件） |
-| `bank-qishang-20240331.pdf` | QS2024-031（银行函证） |
+| 样例文件 | 页数 | 对应函证 |
+|---|---|---|
+| `fahan-cswl0526.pdf` | 6 | **发函用印件**（含中信 / 国泰君安 / 华泰三封，每封 2 页）—— 核验页左栏「发函用印件」那一栏 |
+| `huihan-cswl0526.pdf` | 9 | 与之对应的**回函件**（每封「正文 2 页 + 一张扫描页」）—— **默认回函样例**，覆盖大多数记录 |
+| `wanglai-1-SJ01YF001.pdf` | 2 | whzf0010005（印章 + 手写体演示件；印章批注坐标按它校准） |
+| `bank-qishang-20240331.pdf` | 4 | QS2024-031（银行函证） |
+| `huihan-0813.pdf` | 9 | 早期的往来拼接回函样例（v2.70 起默认件换成 `huihan-cswl0526.pdf`，本文件保留备用） |
 
 > 换成生产环境的文件服务时，只需改 `src/config/preview.ts` 中的 `KKFILEVIEW_PORT` 与 `FILE_HOST`，并让 `sampleFileUrlOf()` 返回真实文件地址。
 

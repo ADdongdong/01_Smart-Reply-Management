@@ -83,32 +83,76 @@ export function TaskDot({ task, needsAction }: { task: RecognitionTask; needsAct
 export function Section({
   title,
   count,
+  collapsible,
+  open = true,
+  onToggle,
   children,
 }: {
   title: string
   count?: ReactNode
+  /** 可折叠（v2.73）—— 折叠时**正文不渲染**，整条标题行成为开关 */
+  collapsible?: boolean
+  /** 展开态（受控）；`collapsible` 未开时忽略 */
+  open?: boolean
+  onToggle?: () => void
   children: ReactNode
 }) {
+  const header = (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: 8,
+        flexWrap: 'wrap',
+        paddingBottom: 8,
+        borderBottom: '1px solid var(--c-hairline)',
+      }}
+    >
+      {collapsible && (
+        <DownOutlined
+          style={{
+            fontSize: 11,
+            color: 'var(--c-text-3)',
+            transform: open ? 'none' : 'rotate(-90deg)',
+            transition: 'transform var(--motion-fast) var(--ease-out)',
+          }}
+        />
+      )}
+      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--c-text-1)' }}>{title}</h3>
+      {count != null && (
+        <span className="num" style={{ fontSize: 12, color: 'var(--c-text-3)' }}>
+          {count}
+        </span>
+      )}
+    </div>
+  )
+
+  /*
+   * 折叠开关挂在**整条标题行**上，但不套 `<button>`：`<button>` 只允许短语内容，
+   * 里面放 `<h3>` 是非法嵌套 ⇒ 用 `role="button"` + 键盘处理实现同等语义。
+   */
   return (
     <section style={{ paddingTop: 20 }}>
       <div
-        style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: 8,
-          flexWrap: 'wrap',
-          paddingBottom: 8,
-          borderBottom: '1px solid var(--c-hairline)',
-        }}
+        role={collapsible ? 'button' : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        aria-expanded={collapsible ? open : undefined}
+        onClick={collapsible ? onToggle : undefined}
+        onKeyDown={
+          collapsible
+            ? (e: ReactKeyboardEvent<HTMLDivElement>) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onToggle?.()
+                }
+              }
+            : undefined
+        }
+        style={collapsible ? { cursor: 'pointer', userSelect: 'none' } : undefined}
       >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--c-text-1)' }}>{title}</h3>
-        {count != null && (
-          <span className="num" style={{ fontSize: 12, color: 'var(--c-text-3)' }}>
-            {count}
-          </span>
-        )}
+        {header}
       </div>
-      <div style={{ paddingTop: 12 }}>{children}</div>
+      {(!collapsible || open) && <div style={{ paddingTop: 12 }}>{children}</div>}
     </section>
   )
 }

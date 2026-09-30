@@ -4,8 +4,10 @@ import { useApp } from '@/store/AppStore'
 import FullscreenModal from '@/components/FullscreenModal'
 import PageSplitBoard from '@/components/PageSplitBoard'
 import SplitPanel, { UNASSIGNED } from '@/components/SplitPanel'
-import { CANDIDATE_SOURCES } from '@/mock/confirmations'
+import type { AssignCandidate } from '@/components/SplitPanel'
+import { AUDITED_ENTITY, CANDIDATE_SOURCES } from '@/mock/confirmations'
 import { browserSampleUrlByFileName } from '@/config/preview'
+import { TYPE_RULE } from '@/services/replyRule'
 import { cutsOfSegments, segmentsOfCuts, toggleCut } from '@/utils/pageSplit'
 
 /** 切分草稿 —— 归属界面是**一次性事务**，草稿不落 store（关掉就该忘掉这次编辑） */
@@ -16,6 +18,13 @@ interface Draft {
   cuts: number[]
   /** 段序 → 用户显式选定的函证编号（未选过的段不在此表，见 `assignOf`） */
   assigns: Record<number, string>
+  /**
+   * 段序 → 用户**手工补/改过**的快递单号（未改过的段不在此表，见 `expressOf`）。
+   *
+   * **只对"未识别到 / 异常"的段开放修改** —— 判定见 `@/utils/expressNo`，
+   * 那里也写了为什么不做"逐段人工核对"。
+   */
+  express: Record<number, string>
 }
 
 /**
@@ -83,6 +92,25 @@ export default function AssignView() {
   }, [state.batches, currentFile, fileTasks])
 
   /**
+   * 「改」某个段的快递单号时，请求把**该段最后一页（面单页）**钉在屏幕上（v2.79）。
+   *
+   * 一处状态、两个使用者：切分板负责画，切分结果负责说"我要看哪一页、对齐到哪一行"。
+   * 之所以要钉住而不是靠悬停：用户此刻要**眼睛看面单、手在输入框里敲** ——
+   * 悬停预览会随鼠标移开消失、还正好压住输入框。
+   */
+  const [previewPin, setPreviewPin] = useState<{ page: number; anchor: HTMLElement } | null>(null)
+
+  /**
+   * 每段尾部是否带一页快递面单 —— 往来「① 文件识别录入」里用户指定的那一项
+   * （`UploadBatch.faceSheetLast`，v2.76 起接上用途）。为真时，切分结果里每段会带出
+   * **段尾面单识别出的快递单号**。银行批次不带此字段（它的面单是独立扫描件、不拼在回函件里）。
+   */
+  const showSegmentExpress = useMemo(() => {
+    const batch = state.batches.find((b) => b.tasks.some((t) => t.fileName === currentFile))
+    return batch?.faceSheetLast === true
+  }, [state.batches, currentFile])
+
+  /**
    * 切分草稿。
    *
    * **初稿按类型分**（用户明确指定的做法）：
@@ -92,14 +120,14 @@ export default function AssignView() {
    *   自动预填既有识别结果（见 `assignOf`），所以从头切也不会丢演示里的归属线索。
    */
   const baseDraft: Draft = useMemo(() => {
-    if (!isTrade) return { file: currentFile ?? '', cuts: [], assigns: {} }
+    if (!isTrade) return { file: currentFile ?? '', cuts: [], assigns: {}, express: {} }
     /* 往来：把现有分段还原成切点（`flatMap` 顺便收窄掉缺页码的异常任务） */
     const segs = fileTasks.flatMap((t) =>
       t.pageStart != null && t.pageEnd != null
         ? [{ pageStart: t.pageStart, pageEnd: t.pageEnd }]
         : [],
     )
-    return { file: currentFile ?? '', cuts: cutsOfSegments(segs), assigns: {} }
+    return { file: currentFile ?? '', cuts: cutsOfSegments(segs), assigns: {}, express: {} }
   }, [currentFile, isTrade, fileTasks])
 
   const [draftState, setDraftState] = useState<Draft | null>(null)
@@ -112,10 +140,43 @@ export default function AssignView() {
   const segments = useMemo(() => segmentsOfCuts(pageCount, draft.cuts), [pageCount, draft.cuts])
 
   /** 可归属的候选函证 —— **按当前函证类型筛**（银行批次不列往来函证，反之亦然） */
-  const candidates = useMemo(
-    () => CANDIDATE_SOURCES.filter((c) => c.type === state.recognitionType),
-    [state.recognitionType],
-  )
+  const candidates = useMemo<AssignCandidate[]>(() => {
+    /*
+     * 候选 = 该类型下**本期函证控制表里的全部函证**，两处来源取并集：
+     * · `CANDIDATE_SOURCES` —— 控制表本身；
+     * · 已有回函记录 —— 演示数据里两处各只覆盖了一部分（往来侧尤其明显：
+     *   候选表是 008/009/010，而演示批次的分段是 006/005/003），**只取其一必然出现
+     *   「预填的归属不在下拉里」** —— antd 的 Select 找不到匹配项时会退化成直接显示裸值，
+     *   界面上就只剩一个光秃秃的函证编号，被审计单位与被询证单位全都看不到。
+     *   （真实系统里控制表本就是全量，这条并集只是把演示数据的缺口补上。）
+     */
+    const byNo = new Map<string, AssignCandidate>()
+    CANDIDATE_SOURCES.filter((c) => c.type === state.recognitionType).forEach((c) =>
+      byNo.set(c.confirmationNo, {
+        confirmationNo: c.confirmationNo,
+        entity: c.entity,
+        auditedEntity: c.auditedEntity,
+      }),
+    )
+    state.records
+      .filter((r) => r.type === state.recognitionType)
+      .forEach((r) => {
+        if (byNo.has(r.confirmationNo)) return
+        byNo.set(r.confirmationNo, {
+          confirmationNo: r.confirmationNo,
+          entity: r.entity,
+          auditedEntity: AUDITED_ENTITY,
+        })
+      })
+    return [...byNo.values()].sort((a, b) => a.confirmationNo.localeCompare(b.confirmationNo))
+  }, [state.recognitionType, state.records])
+
+  /**
+   * 与该段**页区间完全一致**的既有任务 —— 归属与快递单号都从它预填。
+   * 页区间就是段与段、段与任务之间的天然配对键（切的是什么，任务就是哪一段）。
+   */
+  const taskOfSegment = (i: number) =>
+    fileTasks.find((t) => t.pageStart === segments[i]?.pageStart && t.pageEnd === segments[i]?.pageEnd)
 
   /**
    * 段 i 的归属：**用户显式选过就用他的，否则按页区间从既有任务里预填**。
@@ -128,12 +189,18 @@ export default function AssignView() {
   const assignOf = (i: number): string => {
     const picked = draft.assigns[i]
     if (picked) return picked
-    const seg = segments[i]
-    const matched = fileTasks.find(
-      (t) => t.pageStart === seg?.pageStart && t.pageEnd === seg?.pageEnd,
-    )
+    const matched = taskOfSegment(i)
     return matched && matched.confirmationNo !== UNASSIGNED ? matched.confirmationNo : UNASSIGNED
   }
+
+  /**
+   * 段 i 的**段尾面单快递单号**：用户手工补/改过就用他改的，否则取该段任务上识别出的值。
+   *
+   * 未识别到时为 `undefined`（切分结果会标「未识别到」并允许就地补）。
+   * **它是段级数据** —— 面单页就是本段最后一页，与"这封函证最近一次回函的单号"是两回事
+   * （同一封函证多次回函就有多个单号），所以不取 `ReplyRecord.expressNo`。
+   */
+  const expressOf = (i: number): string | undefined => draft.express[i] ?? taskOfSegment(i)?.expressNo
 
   const specified = segments.filter((_, i) => assignOf(i) !== UNASSIGNED).length
   const fileUrl = browserSampleUrlByFileName(currentFile ?? '')
@@ -221,6 +288,8 @@ export default function AssignView() {
                     ...seg,
                     confirmationNo,
                     entity: candidates.find((c) => c.confirmationNo === confirmationNo)?.entity,
+                    /* 段尾面单的单号随段提交（可能是识别的、也可能是人工补/改的，v2.78） */
+                    expressNo: expressOf(i),
                   }
                 }),
               })
@@ -242,12 +311,17 @@ export default function AssignView() {
             activeIndex={activeIndex}
             onToggleCut={handleToggleCut}
             onPickSegment={setActiveIndex}
+            pinnedPage={previewPin?.page ?? null}
+            pinnedAnchor={previewPin?.anchor ?? null}
           />
         </div>
 
         {/* 右栏：批量拆分方式 + 切分结果（每段一行 + 归属下拉） */}
         <div className="assign-pane__right">
           <SplitPanel
+            /* 类型切换（往来↔银行）时强制重挂载 —— 右栏的默认展开态按类型给（`batchPanelOpenByDefault`），
+             * 而 `useState` 只取一次初值；靠 `key` 重置是 React 里的标准做法，比再加一个同步 effect 干净 */
+            key={state.recognitionType}
             pageCount={pageCount}
             segments={segments}
             activeIndex={activeIndex}
@@ -255,7 +329,14 @@ export default function AssignView() {
             onCutsChange={(cuts) => patch({ cuts })}
             assigns={Object.fromEntries(segments.map((_, i) => [i, assignOf(i)]))}
             onAssign={(i, confirmationNo) => patch({ assigns: { ...draft.assigns, [i]: confirmationNo } })}
-            candidates={candidates.map((c) => ({ confirmationNo: c.confirmationNo, entity: c.entity }))}
+            candidates={candidates}
+            batchPanelOpenByDefault={TYPE_RULE[state.recognitionType].batchPanelOpenByDefault}
+            showSegmentExpress={showSegmentExpress}
+            expressValues={Object.fromEntries(segments.map((_, i) => [i, expressOf(i)]))}
+            onExpressChange={(i, v) => patch({ express: { ...draft.express, [i]: v } })}
+            onRequestPreview={(page, anchor) =>
+              setPreviewPin(page != null && anchor ? { page, anchor } : null)
+            }
           />
         </div>
       </div>

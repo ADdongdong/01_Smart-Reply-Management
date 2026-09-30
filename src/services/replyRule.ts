@@ -36,6 +36,15 @@ export interface TypeRule {
   detectHandwriting: boolean
   /** 是否检测并展示银行函证文本识别（四要素，用于归属匹配） */
   detectBankText: boolean
+  /**
+   * 是否存在**独立的「发函用印件」文件**（v2.70）。
+   *
+   * · **往来函证 true** —— 一致性比的是「发函件 × 回函件」，两份都是真实文件，
+   *   核验页左栏要同时铺出来（否则用户只能「拿一半依据去核对」）；
+   * · **银行函证 false** —— 银行只上传**回函件**，发函数据（格式一 / 格式二）存放在
+   *   函证系统里、**没有文件**，故左栏只有回函件一栏。
+   */
+  sentFilePreview: boolean
   /** 相符性判据 */
   matchBy: MatchBasis
   /**
@@ -57,6 +66,15 @@ export interface TypeRule {
    *   归属按四要素在工作台内匹配。
    */
   needsSplit: boolean
+  /**
+   * 「回函归属」右栏「拆分方式」是否**默认展开**（v2.73，用户指定）。
+   *
+   * · **往来函证 false（默认折叠）** —— 初稿已由二维码切好，用户进来主要是**核对与微调**
+   *   （左墙点页间剪刀），批量拆分是次要动作；折叠后右栏一眼就是「切分结果」。
+   * · **银行函证 true（默认展开）** —— 初稿是**整份一段**，用户必须先切，
+   *   批量拆分正是他要做的第一步，收起来反而要多点一次。
+   */
+  batchPanelOpenByDefault: boolean
   /** 识别工作台的演示批次 */
   presetBatchId: 'A' | 'B'
   /** 列表页上传入口按钮文案 */
@@ -75,9 +93,11 @@ export const TYPE_RULE: Record<ConfirmationType, TypeRule> = {
     consistencyLabel: '发函回函一致性检测',
     detectHandwriting: true,
     detectBankText: false,
+    sentFilePreview: true,
     matchBy: 'sealRegion',
     twoPhase: false,
     needsSplit: true,
+    batchPanelOpenByDefault: false,
     presetBatchId: 'A',
     entryTitle: '上传往来函证回函',
     verifyItemsLabel: '一致性比对 / 印章 / 手写体',
@@ -89,9 +109,11 @@ export const TYPE_RULE: Record<ConfirmationType, TypeRule> = {
     consistencyLabel: '询证事项逐项核对',
     detectHandwriting: false,
     detectBankText: true,
+    sentFilePreview: false,
     matchBy: 'consistencyOnly',
     twoPhase: true,
     needsSplit: false,
+    batchPanelOpenByDefault: true,
     presetBatchId: 'B',
     entryTitle: '上传银行函证回函',
     verifyItemsLabel: '询证事项逐项核对 / 印章 / 银行函证文本识别',

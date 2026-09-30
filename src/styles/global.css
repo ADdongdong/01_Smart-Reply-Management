@@ -104,6 +104,9 @@
   --z-sticky-header: 20;
   --z-floating-card: 60;
   --z-modal: 1000;
+  /* 悬停放大预览（v2.75）—— 必须**压在全屏弹窗之上**：它是 portal 到 body 的浮层，
+     与 `.fs` 同层时会被全屏弹窗盖住 */
+  --z-zoom-popup: 1010;
 }
 
 /* 尊重系统的「减少动态效果」偏好 */
@@ -1135,8 +1138,14 @@ body {
 .assign-pane__right {
   /*
    * 固定宽而非比例：这一栏的内容是「三个单选项 + 一段列表 + 下拉」，
-   * 宽度需求是可预知的（下拉要放得下「齐商银行股份有限公司 · QS2024-031」），
-   * 余下的宽度全部让给缩略图墙 —— 那才是越宽越好用的一边。
+   * 宽度需求是可预知的，余下的宽度全部让给缩略图墙 —— 那才是越宽越好用的一边。
+   *
+   * **宽度恒定 360px，不随数据变**（v2.73 用户明确要求：「我希望宽度是固定的，
+   * 不要因为被审计单位名称和被询证单位名称太长就变宽」）。
+   * v2.72 曾为了把「编号 · 被审计单位 · 被询证单位」三段全塞进触发框而放到 500px ——
+   * **那是本末倒置**：栏宽被数据长度牵着走，板子白白少了 140px。
+   * 现在触发框只放「**被询证单位 · 函证编号**」（最长约 246px，360 下余量充足），
+   * 被审计单位放浮层里，栏宽回到原值。
    */
   flex: none;
   width: 360px;
@@ -1158,11 +1167,28 @@ body {
   gap: 24px 0;
   padding: 20px 16px;
 }
-.split-board--msg {
-  align-items: center;
-  justify-content: center;
+/*
+ * 错误横幅（v2.75）—— **常驻在板子顶部、绝不替换板子**（理由见 `PageSplitBoard`）。
+ * `sticky` + 整行占位（`flex: 0 0 100%`）：卡片照常铺在下面，滚动时它一直压在最上面。
+ */
+.split-board__error {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--c-fill-light);
+}
+.split-board__error-title {
   font-size: 13px;
-  color: var(--c-text-2);
+  color: var(--c-risk-high-text);
+}
+/* 横幅里那行原始报错（`Failed to fetch` 之类）—— 排查用，不该盖过上面那句人话 */
+.split-board__raw {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--c-text-3);
 }
 .split-board__loading {
   position: absolute;
@@ -1178,11 +1204,17 @@ body {
   font-size: 12px;
   color: var(--c-text-3);
 }
-.split-board__page {
+/* 卡片定位容器（v2.75）—— flex 与间距上移到这一层，按钮退成普通块级；
+   它同时是「查看原件」链接与悬停放大预览的锚点 */
+.split-board__pagewrap {
   position: relative;
   flex: none;
-  width: 150px;
   margin: 0 4px;
+}
+.split-board__page {
+  position: relative;
+  display: block;
+  width: 150px;
   padding: 6px 6px 2px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
@@ -1191,6 +1223,94 @@ body {
   transition:
     border-color var(--motion-fast) var(--ease-out),
     background var(--motion-fast) var(--ease-out);
+}
+/*
+ * 「查看原件」—— 悬停浮现（左上角是「段 N」角标，故放右上角）。
+ * 它是一条**普通链接**，交给浏览器自带的 PDF 查看器打开，不经过本站的 `fetch` / pdf.js。
+ * 键盘聚焦时也要可见 —— `opacity: 0` 的元素照样能获得焦点。
+ */
+.split-board__open {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-tag);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card);
+  color: var(--c-text-2);
+  font-size: 13px;
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+.split-board__pagewrap:hover .split-board__open,
+.split-board__open:focus-visible {
+  opacity: 1;
+}
+.split-board__open:hover {
+  color: var(--c-primary);
+}
+/*
+ * 放大预览 —— portal 到 body、fixed 定位。
+ *
+ * **接鼠标**（v2.79 起，此前是 `pointer-events: none`）：它要能点「固定」、能拖动平移 ——
+ * 这正解决「一边看面单一边往输入框里敲单号」的场景（悬停预览会消失、还压住输入框）。
+ * 收起逻辑相应加了「离开卡片后延迟 300ms」，留出从卡片走到弹窗上的时间。
+ */
+.split-board__zoom {
+  position: fixed;
+  z-index: var(--z-zoom-popup);
+  padding: 10px 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-pop);
+}
+.split-board__zoom-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+/* 头部的「固定 / 关闭」—— 贴右，不与说明文字抢位置 */
+.split-board__zoom-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+/*
+ * 平移取景 = **按住拖动**（v2.82 定稿；此前"悬停跟随""点一下再滑动"两版都被用户否掉 —— 都说很难受）。
+ * 抓取语义要配得上：`grab` → 按下时 `grabbing`；并且**按下不能让输入框失焦**
+ * （`onMouseDown` 里 `preventDefault()`，原因见组件注释）。
+ */
+.split-board__zoom-canvas {
+  cursor: grab;
+}
+.split-board__zoom-canvas.is-dragging {
+  cursor: grabbing;
+}
+.split-board__zoom-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border: 1px solid var(--c-hairline);
+  border-radius: 2px;
+}
+.split-board__zoom-empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--c-text-3);
 }
 .split-board__page:hover {
   border-color: var(--c-border);
@@ -1356,6 +1476,45 @@ body {
   font-size: 12px;
   color: var(--c-text-3);
 }
+/*
+ * 段尾面单的快递单号（v2.76）—— 面单识别的结果带在段上。
+ * 它是**识别值**（只读）：要改走「回函快递信息」那一处确认入口，不在这里逐段手填
+ * （v2.32 已把"逐段手填快递单号"从切分步骤移除，此处只是把识别结果显出来）。
+ */
+.split-rows__express {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  /* 异常原因可能较长，允许换行 */
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.split-rows__express .num {
+  color: var(--c-text-1);
+}
+/*
+ * 「未识别到 / 异常」的那一行 —— **只有这两类才标出来**，正常值只读
+ * （判定与理由见 `utils/expressNo`：这一步的注意力该花在切分与归属上）。
+ * 与全站一致：靠**文字着色 + 字重**提辨识度，不加描边、不加底色块。
+ */
+.split-rows__express.is-flagged .num {
+  color: var(--c-risk-high-text);
+  font-weight: 600;
+}
+.split-rows__express-why {
+  color: var(--c-risk-high-text);
+}
+.split-rows__express.is-editing {
+  align-items: center;
+}
+
+/*
+ * 归属下拉的字号**保持默认 13px**（v2.72 曾为塞下三段全称压到 12px，v2.73 已不需要 ——
+ * 触发框只放「被询证单位 · 函证编号」，最长约 246px，固定 360px 的右栏余量充足）。
+ * 附记一条坑：字号只能写在 CSS 层 —— antd 把字号设在 `.ant-select-selector` 上，
+ * 写 `<Select style={{ fontSize }}>` 管不到它（实测无效）。
+ */
 
 /* ------------------------- 回函进度步骤条（v2.51） ------------------------- */
 
@@ -1424,6 +1583,325 @@ body {
 .progress-steps__arrow {
   color: var(--c-text-3);
   font-size: 12px;
+}
+
+/* ------------------------- 发函 / 回函表格并排对比（v2.69） ------------------------- */
+
+/*
+ * 一致性检测的形态：**一张表一个分组，组内左右并排两张独立表**
+ * · **原件怎么排，界面就怎么排** —— 列名与列序照抄识别结果（不归一化、不丢列），
+ *   两侧用同一份列宽（`colgroup` 由「列的角色」算权重）⇒ 同一行落在同一水平线上；
+ * · **不一致的单元格打红框**（`--c-risk-high` 描边 + 浅红底 + 深档红字）——
+ *   这是语义性描边（AI 判定结果的可视化），与「印章定位框 / 落章区高亮」同类，
+ *   不属于「去线条化」要压掉的装饰性边框；
+ * · 行线取发丝线、末行不画线，与全站表格口径一致。
+ *
+ * 字号取 12px（比常规明细表小一档）：一张原件表最多 5 列、又要并排两份，
+ * 12px 下「293,338.73」这类 10 位金额仍能整行容下（实测），既不换行也不省略 —— 金额不能被省略号吃掉。
+ */
+.cmp-group + .cmp-group {
+  margin-top: 16px;
+}
+.cmp-group__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+/* 大类（原件里的大项标题，如「1. 销售与未结算」）—— 浅底无边框的小标签，退后一档 */
+.cmp-group__section {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-tag);
+  background: var(--c-tag-bg);
+  font-size: 12px;
+  color: var(--c-text-2);
+}
+.cmp-group__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-1);
+}
+.cmp-group__unit {
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.cmp-group__sum {
+  margin-left: auto;
+  font-size: 12px;
+}
+.cmp-group__sum.is-ok {
+  color: var(--c-risk-low-text);
+}
+.cmp-group__sum.is-risk {
+  color: var(--c-risk-high-text);
+}
+/* 并排容器 —— 嵌套区块走浅底，不叠第二层框 */
+.cmp-pair {
+  display: flex;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--c-fill-light);
+}
+.cmp-side {
+  flex: 1;
+  min-width: 0;
+}
+.cmp-side + .cmp-side {
+  margin-left: 12px;
+  padding-left: 12px;
+  border-left: 1px solid var(--c-hairline);
+}
+.cmp-side__label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.cmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+/* 表头**允许换行**：原件的列名（「欠贵公司（已开票-含税）」）比列宽长得多，
+   省略号会把列名吃掉，而列名正是「这张表在核什么」的答案 */
+.cmp-table th {
+  padding: 0 3px 6px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--c-text-3);
+  border-bottom: 1px solid var(--c-hairline);
+  word-break: break-word;
+  vertical-align: bottom;
+}
+.cmp-table td {
+  padding: 0 3px;
+  min-height: 28px;
+  color: var(--c-text-1);
+  border-bottom: 1px solid var(--c-hairline);
+  word-break: break-word;
+  vertical-align: middle;
+}
+.cmp-table tbody tr {
+  height: 28px;
+}
+.cmp-table tr:last-child td {
+  border-bottom: 0;
+}
+.cmp-table th.is-right,
+.cmp-table td.is-right {
+  text-align: right;
+}
+/* 不一致的单元格 —— 红框 + 浅红底 + 深档红字 */
+.cmp-cell {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: var(--radius-tag);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.cmp-cell--diff {
+  border: 1px solid var(--c-risk-high);
+  background: var(--c-risk-high-bg);
+  color: var(--c-risk-high-text);
+  font-weight: 600;
+}
+.cmp-cell--absent {
+  font-size: 11px;
+}
+.cmp-empty {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--c-text-3);
+}
+
+/* ------------------------- AI 核验页：双原件预览栈（v2.70） ------------------------- */
+
+/*
+ * 一致性检测比的是**发函件 × 回函件**，左栏因此从「一个预览」变成**上下两栏的预览栈**：
+ * 上「发函用印件」、下「回函件」，各占一半高度、各自独立滚动缩放。
+ *
+ * 高度仍是**让布局自己吃满**，不算像素常量：`.fs-modal` 的 body 本就是
+ * `flex:1 + min-height:0`（100vh 三分），这里把内容区也换成定高 flex，
+ * 一路把确定高度传到每栏的画布上（与 `.result-workspace` 同一套做法）。
+ */
+.fs-modal .ant-modal-body:has(.verify-workspace) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.fs-modal .ant-modal-body:has(.verify-workspace) > .fs-body-inner {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.verify-workspace {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  padding: 16px 24px;
+}
+/* 左：预览栈（固定，不参与滚动）；右：检测项明细（独立上下滚动） */
+.verify-workspace > .vw-left {
+  flex: 1.15;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.verify-workspace > .vw-right {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.pv-stack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/*
+ * 两栏之间只用一条发丝线分隔，**不加底色块、不叠第二层边框** ——
+ * 页面底已经是白，再给每栏铺一层浅底会让「纸」与「底」打架（去线条化的既有口径）。
+ */
+.pv-pane + .pv-pane {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--c-hairline);
+}
+.pv-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* 双栏各半 / 本栏放大 —— 都吃满剩余高度；收起态只留一行标题 */
+.pv-pane.is-half,
+.pv-pane.is-full {
+  flex: 1 1 0;
+}
+.pv-pane.is-collapsed {
+  flex: 0 0 auto;
+}
+.pv-pane__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding-right: 2px;
+}
+.pv-pane.is-collapsed .pv-pane__head {
+  min-height: 26px;
+}
+.pv-pane__label {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-1);
+}
+.pv-pane__file {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--c-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pv-pane__note {
+  flex: none;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.pv-pane__note::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--c-hairline);
+}
+/* 「只看这一件 / 恢复双栏 / 展开」—— 图标走方向语义，悬停变主色 */
+.pv-pane__toggle {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-tag);
+  background: none;
+  color: var(--c-text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+.pv-pane__toggle:hover {
+  background: var(--c-tag-bg);
+  color: var(--c-primary);
+}
+/* 画布 —— 圆角由本层裁，纸页底色仍由预览自己铺 */
+.pv-pane__canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.pv-legend {
+  flex: none;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--c-text-3);
+}
+
+/* 窄屏降级：两栏上下堆叠、整页滚动 —— 每栏给一个可用的固定高度（此时没有"半高"可言） */
+@media (max-width: 1100px) {
+  .fs-modal .ant-modal-body:has(.verify-workspace) {
+    display: block;
+    overflow: auto;
+    padding: 16px 24px;
+  }
+  .fs-modal .ant-modal-body:has(.verify-workspace) > .fs-body-inner {
+    display: block;
+    max-width: 1600px;
+  }
+  .verify-workspace {
+    display: block;
+    padding: 0;
+  }
+  .verify-workspace > .vw-left {
+    overflow: visible;
+    margin-bottom: 16px;
+  }
+  .verify-workspace > .vw-right {
+    overflow: visible;
+    padding-right: 0;
+  }
+  .pv-pane.is-half,
+  .pv-pane.is-full {
+    flex: none;
+    height: 420px;
+  }
 }
 
 /* ⑦ 无障碍降级 —— 用户开启「减少动态效果」时全部退回静态 */

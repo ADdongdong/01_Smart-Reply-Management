@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Input, Modal, Radio, Table, Tag, Tooltip, Upload } from 'antd'
+import { Alert, App, Button, Input, Radio, Table, Tag, Tooltip, Upload } from 'antd'
 import {
   FileExcelOutlined,
   InfoCircleFilled,
@@ -333,9 +333,17 @@ export default function ReplyResultModal({
               </div>
 
               {/* 相符性 —— 往来按印章落章区域；银行按询证事项逐项核对（依据见 evaluateMatch） */}
+              {/*
+               * v2.67：五条结论的标题由「结论词」扩写为「完整结论」（用户要求）——
+               * 原先「相符」「一致」「否（检出「财务章」）」这类词要连着下面那行依据才读得懂，
+               * 且与列表「回函是否相符」列的口径（「相符 / 不相符 / 无法判定」）表述不一。
+               * 扩写后每条**单独可读**，无法判定的分支保持原样。
+               */}
               <ResultBar
                 status={aiMatched === null ? 'info' : aiMatched ? 'ok' : 'risk'}
-                message={aiMatched === null ? '无法判定' : aiMatched ? '相符' : '不相符'}
+                message={
+                  aiMatched === null ? '无法判定' : aiMatched ? '回函结果相符' : '回函结果不符'
+                }
                 detail={
                   suggestion?.basis
                     ? `依据：${suggestion.basis}`
@@ -363,7 +371,7 @@ export default function ReplyResultModal({
               {/* 盖章一致性 */}
               <ResultBar
                 status={v.seal.nameMatched ? 'ok' : 'risk'}
-                message={v.seal.nameMatched ? '一致' : '不一致'}
+                message={v.seal.nameMatched ? '印章与被询证单位一致' : '印章与被询证单位不一致'}
                 detail={`依据：印章名称「${v.seal.sealName}」`}
                 extra={
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -390,8 +398,8 @@ export default function ReplyResultModal({
                   aiOfficialSeal === undefined
                     ? '无法判定（未检出印章）'
                     : aiOfficialSeal
-                      ? '是'
-                      : `否（检出「${v.seal.sealType}」）`
+                      ? '不为财务章'
+                      : '为财务章'
                 }
                 detail={
                   aiOfficialSeal === undefined
@@ -425,8 +433,8 @@ export default function ReplyResultModal({
                     aiCrossSeal === undefined
                       ? '无法判定（未检出印章）'
                       : aiCrossSeal === 'yes'
-                        ? `有（${v.seal.crossPageSealCount} 处）`
-                        : '未检出'
+                        ? `有骑缝章（${v.seal.crossPageSealCount} 处）`
+                        : '无骑缝章'
                   }
                   detail={
                     aiCrossSeal === undefined
@@ -455,11 +463,13 @@ export default function ReplyResultModal({
                 />
               )}
 
-              {/* 不相符描述 —— 手写体转录全文可见（要看内容才能决定是否采纳）；银行函证不检测手写体 */}
+              {/* 不相符手写内容识别（v2.67 改名，原「不相符处描述」）—— 手写体转录全文可见
+                  （要看内容才能决定是否采纳）；银行函证不检测手写体。
+                  采纳后仍带入下方表单的「回函结果不相符处的描述」字段。 */}
               {rule?.detectHandwriting && v.handwriting && (
                 <ResultBar
                   status="info"
-                  message="不相符处描述"
+                  message="不相符手写内容识别"
                   detail={v.handwriting.text}
                   extra={
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -490,13 +500,14 @@ export default function ReplyResultModal({
                   color: 'var(--c-text-3)',
                 }}
               >
-                <span>完整核验明细（{rule?.verifyItemsLabel ?? '一致性比对 / 印章'}）</span>
-                <Button
-                  type="link"
-                  size="small"
-                  style={{ padding: 0, height: 'auto', fontSize: 12 }}
-                  onClick={() => setVerifyOpen(true)}
-                >
+                <span>完整核验明细（{rule?.verifyItemsLabel ?? '一致性比对 / 印章 / 手写体'}）</span>
+                {/*
+                 * v2.66：链接 → **实心按钮**（用户要求「改成按钮，更明显一些」）。
+                 * 链接形态混在灰字说明里，存在感太弱 —— 而它是「核对 AI 结论的依据」的唯一入口，
+                 * 分量不该低于一行说明文字。用默认小按钮（带边框与底色）即可明显，
+                 * 不用主色实心 —— 那会和上方各结论条上的「采纳」抢主操作的注意力。
+                 */}
+                <Button size="small" onClick={() => setVerifyOpen(true)}>
                   查看完整核验
                 </Button>
               </div>
@@ -798,17 +809,32 @@ export default function ReplyResultModal({
         </div>
       </div>
 
-      {/* 内嵌只读核验明细 —— 不改变列表页的互斥弹窗状态，因此本弹窗不卸载、已填草稿不丢 */}
-      <Modal
+      {/*
+       * 内嵌只读核验明细 —— **全屏弹窗**（v2.66，用户要求「不要只是局部弹窗」）。
+       *
+       * ① **为什么全屏**：§7.6 #10 的既有规范本就是「四类明细统一走全屏弹窗」—— 查看函证 /
+       *    列表 AI 核验 / 回函快递信息 / 结果填写全是 `FullscreenModal`，唯独这里用了 1280 宽的
+       *    局部 Modal，属于漏网；核验页是「左常驻预览 + 右明细」的分栏布局，1280 宽里预览被压得
+       *    很小，全屏后预览才有"对着原件看批注"该有的尺寸。
+       * ② **不卸载外层**：用独立的 `verifyOpen` 开关、不走列表页的互斥状态 —— 点开核验时
+       *    外层结果填写弹窗**不卸载、已填草稿不丢**，关掉核验回来接着填。
+       * ③ **两层全屏弹窗的层级**由 antd 自动管理（后打开的在上）。
+       */}
+      <FullscreenModal
         open={verifyOpen}
-        title={`AI 智能核验 · ${record.confirmationNo}`}
-        width={1280}
-        footer={<Button onClick={() => setVerifyOpen(false)}>关闭</Button>}
-        onCancel={() => setVerifyOpen(false)}
-        styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflow: 'auto' } }}
+        title="AI 智能核验"
+        subtitle={`${record.confirmationNo} · ${record.entity}`}
+        onClose={() => setVerifyOpen(false)}
+        footer={
+          <div style={{ display: 'flex' }}>
+            <Button style={{ marginLeft: 'auto' }} onClick={() => setVerifyOpen(false)}>
+              关闭
+            </Button>
+          </div>
+        }
       >
-        <VerificationPanel record={record} previewHeight={520} />
-      </Modal>
+        <VerificationPanel record={record} />
+      </FullscreenModal>
     </FullscreenModal>
   )
 }

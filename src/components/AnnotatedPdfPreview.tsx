@@ -100,6 +100,7 @@ type ZoomMode = 'fit-width' | 'fit-page' | 'custom'
 export default function AnnotatedPdfPreview({
   fileUrl,
   page = 1,
+  locateToken = 0,
   height = 420,
   sealBoxes = [],
   showRegions = false,
@@ -107,10 +108,19 @@ export default function AnnotatedPdfPreview({
   handwriting,
   singlePage,
   markRange,
+  markLabel = '本段',
 }: {
   fileUrl: string
-  /** 打开时定位到的页（默认第 1 页） */
+  /** 定位到的页（默认第 1 页）。改这个值即触发一次定位 */
   page?: number
+  /**
+   * **定位令牌**（v2.70）—— 只改 `page` 时，**重复点同一个目标不会重新定位**
+   * （effect 依赖没变、React 不会重跑）。调用方每次要求「跳过去」就把令牌自增。
+   *
+   * 用于「点右侧某张表 → 左侧原件跳到该表所在页」：同一张表可以反复点，
+   * 第二次点页码没变，只有令牌变了，才能把视图从别处拉回来。
+   */
+  locateToken?: number
   /**
    * 预览高度：传数字为固定像素；传 `'100%'` 时**撑满父容器**。
    *
@@ -137,6 +147,12 @@ export default function AnnotatedPdfPreview({
    * 不传 = 不做任何标记（如 AI 核验页的预览，那里没有"段"的概念）。
    */
   markRange?: { start: number; end: number }
+  /**
+   * 被标记页的角标前缀（默认「本段」）—— 角标是**跟着语境说话**的：
+   * 归属匹配里标记的是「这一**段**回函」，核验页里标记的是「这**张表**所在的页」。
+   * 用同一个「本段」去说后者，会让人以为这里也在切分。
+   */
+  markLabel?: string
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const pageElRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -325,17 +341,25 @@ export default function AnnotatedPdfPreview({
   /* ---------------------- 打开时定位到指定页 ---------------------- */
 
   /**
-   * 打开时定位到指定页。
+   * 定位到指定页（`page` 变化、或 `locateToken` 自增时触发）。
    *
    * **必须等各页高度算出来再滚**：`sizes` 是逐页异步读出的，若在 `doc` 刚就绪时
    * 就 `scrollIntoView`，目标页此刻高度为 0（尚未撑开），滚动会落在错误的页上
    * （实测会偏到后面几页）。因此这里等到目标页元素有了真实高度再滚，
    * 并用 rAF 重试兜住懒渲染的时序。
    *
-   * **单页模式直接短路** —— 只有一个渲染槽位，无需滚动定位。
+   * **不再为「第 1 页」短路（v2.70）** —— 原实现 `page <= 1` 直接 return，
+   * 于是「跳回第 1 页」这个动作根本做不了：视图已滚到第 5 页时点属于第 1 页的格子，
+   * 什么都不会发生。定位到第 1 页时 `jump()` 算出的位移本就接近 0，无需特判。
+   *
+   * **单页模式仍然短路** —— 只有一个渲染槽位，无需滚动定位。
+   *
+   * ⚠️ `sizes` / `scale` 留在依赖里是有意的：前者要等页高算出来（rAF 闭包会读到旧值，
+   * 不能从依赖里摘掉），后者让缩放之后仍停在目标页。二者只在「文档重载 / 缩放」时变化，
+   * 不影响用户自由滚动 —— 不会把人从别处拽回来。
    */
   useEffect(() => {
-    if (!doc || single || page <= 1) return
+    if (!doc || single) return
 
     /**
      * 目标页 —— **钳到文件的实际页数**（v2.56）。
@@ -399,7 +423,7 @@ export default function AnnotatedPdfPreview({
     }
     raf = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(raf)
-  }, [doc, page, sizes, single, scale])
+  }, [doc, page, locateToken, sizes, single, scale])
 
   /* ---------------------- Ctrl + 滚轮 / 触控板捏合缩放 ---------------------- */
 
@@ -554,7 +578,7 @@ export default function AnnotatedPdfPreview({
                     background: 'var(--c-primary)',
                   }}
                 >
-                  本段 · 第 {pageNos[i]} 页
+                  {markLabel} · 第 {pageNos[i]} 页
                 </span>
               )}
               <canvas

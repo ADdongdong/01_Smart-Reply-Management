@@ -1,12 +1,16 @@
-import { Button, Tooltip } from 'antd'
 import type { SealResult } from '@/types'
 import { InfoRow, ResultBar } from '@/components/Marks'
 
 /**
- * 印章识别明细 —— 「结论条 → 事实清单 → 处理动作」三段骨架。
+ * 印章识别明细 —— 「结论条 → 事实清单」两段。
  *
  * 印章定位的可视化由 AI 核验页**左侧常驻主视图**承担（切到本项时自动切为 AI 批注视图），
  * 这里只呈现检测字段与判定，不内嵌第二个 PDF 预览（同屏两个 PDF 既占空间又让人分不清该看哪个）。
+ *
+ * **没有「处理动作」段（v2.65 移除）** —— 核验页**整体只读**（见需求文档 §5.3）：本页只是"看依据"，
+ * 采纳与人工判定都在「回函结果填写」页完成（那里的「AI 核验结论」区块才是采纳的落点）。
+ * 原先这里的「采纳该判定 / 人工判定为相符 / 人工判定为不相符」三个按钮**都没有 onClick**，
+ * 属于"看得见、点不动"的摆设，还与「本页只读」的口径直接矛盾，故整段移除。
  *
  * **按类型分流（v2.39 / v2.41）**：
  * · **骑缝章** —— 自 v2.39 起**仅往来函证检测**（R-03），银行侧**不渲染**该行；
@@ -83,17 +87,6 @@ export default function SealRecognition({
           hint={isBank ? '仅作事实记录 —— 银行函证的相符性判定不看落章区域' : '决定回函结果是否相符'}
           confidence={0.92}
         />
-      </div>
-
-      {/* ③ 处理动作 */}
-      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-        <Button size="small" type="primary" ghost>
-          采纳该判定
-        </Button>
-        <Tooltip title="人工覆盖后系统会记录为「人工判定」，并保留 AI 原始结论">
-          <Button size="small">人工判定为相符</Button>
-        </Tooltip>
-        <Button size="small">人工判定为不相符</Button>
       </div>
     </div>
   )

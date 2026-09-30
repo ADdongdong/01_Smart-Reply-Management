@@ -7,9 +7,26 @@
 ----
     python scripts/start_dev.py                  # 启动并在就绪后自动打开浏览器
     python scripts/start_dev.py --no-open        # 只启动，不打开浏览器
-    python scripts/start_dev.py --port 5179      # 换端口
+    python scripts/start_dev.py --port 15179     # 换端口
+    python scripts/start_dev.py --strict-port    # 端口不可用时直接报错，不自动顺延
     python scripts/start_dev.py --install        # 缺 node_modules 时自动 npm install
     python scripts/start_dev.py --build          # 先生产构建，再用静态服务预览 dist/
+
+端口（重要 —— 别再用 5178 那个段）
+----------------------------------
+本机 Windows 动态端口范围是 **1024–15000**，而 **Hyper-V / WSL 会在每次开机从这段里
+划走若干「保留区间」**（实测 2314-2413、3698-3997、5095-5194、5355-5454… **且每天漂移**）。
+落在保留区间里的端口 `bind` 会抛 `EACCES`（`listen EACCES: permission denied`）——
+**这不是「端口被占用」**（那才是 `EADDRINUSE`），报错信息极易误导。
+历史上 8012、5178 都栽在这上面（5178 现落在 5095-5194 里）。
+
+因此默认端口取 **15178** —— **刻意选在动态范围之外**，不会被 Hyper-V 抽走。
+即便如此，脚本仍不假设它一定可用：启动前会**先试探性 bind**，
+若发现端口被保留区间吞掉或已被占用，就**自动顺延找下一个能绑的端口**（`--strict-port` 可关掉）。
+另可用 `netsh interface ipv4 show excludedportrange protocol=tcp` 查看当前保留区间。
+
+⚠️ **自动顺延会改变访问端口**，而 KKFileView 备用链路里写死了 `host.docker.internal:<端口>`
+—— 换端口时需同步改 `src/config/preview.ts` 的 `DEV_SERVER_PORT`（脚本会在换端口时提示）。
 
 运行环境（重要）
 ----------------
@@ -36,7 +53,10 @@ from pathlib import Path
 
 # 项目根目录 = 本脚本所在目录（scripts/）的上一级
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PORT = 5178
+# 默认端口刻意取在 Windows 动态端口范围（本机 1024–15000）**之外** —— 见文件头「端口」一节
+DEFAULT_PORT = 15178
+# 端口不可用时往后顺延试探的个数 —— 够跨过一整段保留区间（实测最长约 300 个，故另配 --port 兜底）
+PORT_SCAN_TRIES = 40
 DEFAULT_HOST = "127.0.0.1"
 READY_TIMEOUT = 90  # 等待服务就绪的最长秒数（首次启动 vite 需要预构建依赖）
 
@@ -120,6 +140,54 @@ def is_port_open(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
+# 端口状态四态 —— 区分「被保留区间吞掉」与「被人占用」是本文件存在的关键，
+# 因为两者在 Vite 里的报错长得很像（都起不来），但处置完全不同（换端口 vs 找占用进程）。
+PORT_OPEN = "open"          # 已有服务在监听 ⇒ 直接复用
+PORT_FREE = "free"          # 可绑定 ⇒ 可用
+PORT_RESERVED = "reserved"  # 被 Windows 保留端口区间占用 ⇒ 只能换端口
+PORT_USED = "used"          # 被其他进程占用（但未在该地址监听）
+
+
+def probe_port(host: str, port: int) -> str:
+    """
+    判断端口的真实状态。
+
+    为什么不能只看 `connect_ex`：**被保留区间吞掉的端口没有任何人监听**，
+    连接探测会得出「空闲」这个错误结论，于是脚本高高兴兴去启动、再被 Vite 的
+    `EACCES` 打回来。因此这里**真的试着 bind 一次** —— 这是唯一能区分二者的办法：
+        · bind 成功       ⇒ 空闲
+        · PermissionError ⇒ WinError 10013，端口落在系统保留区间
+        · OSError 其他    ⇒ 已被别的进程占用
+    """
+    if is_port_open(host, port):
+        return PORT_OPEN
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            # 绑到「脚本将要交给 vite 的那个监听地址」上，探测结论才与 vite 的实际遭遇一致
+            # （不绑 0.0.0.0：那会把「别人占了别的网卡」也算成自己不可用，且 Windows 上
+            #  0.0.0.0 与具体地址的冲突判定受 SO_EXCLUSIVEADDRUSE 影响，容易误判）
+            sock.bind((host, port))
+        except PermissionError:
+            # Windows 上的「端口被保留」就长这样：WSAEACCES(10013) → PermissionError
+            return PORT_RESERVED if os.name == "nt" else PORT_USED
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 10013:
+                return PORT_RESERVED
+            return PORT_USED
+    return PORT_FREE
+
+
+def find_free_port(host: str, start: int, tries: int = PORT_SCAN_TRIES) -> int | None:
+    """从 start 起顺序找一个能绑定的端口 —— 用来绕开被保留区间吞掉的那一段。"""
+    for offset in range(tries):
+        port = start + offset
+        if port > 65535:
+            break
+        if probe_port(host, port) == PORT_FREE:
+            return port
+    return None
+
+
 def wait_until_ready(host: str, port: int, timeout: int) -> bool:
     """轮询等待服务就绪，期间打印进度点。"""
     say(f"[i] 等待服务就绪（{host}:{port}，最多 {timeout}s）", )
@@ -183,6 +251,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"服务端口（默认 {DEFAULT_PORT}）")
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"监听地址（默认 {DEFAULT_HOST}）")
     parser.add_argument("--no-open", action="store_true", help="就绪后不自动打开浏览器")
+    parser.add_argument(
+        "--strict-port",
+        action="store_true",
+        help="端口不可用时直接报错退出，不自动顺延到下一个可用端口",
+    )
     parser.add_argument("--install", action="store_true", help="缺少 node_modules 时自动执行 npm install")
     parser.add_argument("--build", action="store_true", help="改用生产方式：先构建再用 vite preview 预览 dist/")
     return parser.parse_args()
@@ -204,14 +277,42 @@ def main() -> int:
     npm = assert_node_available()
     ensure_dependencies(npm, args.install)
 
+    # 端口先探明状态再启动 —— 直接跑 vite 只会拿到一句 `listen EACCES`，看不出真因
+    state = probe_port(args.host, args.port)
+
     # 端口已被占用：多半是上次的服务还在跑，直接复用而不是报错
-    if is_port_open(args.host, args.port):
+    if state == PORT_OPEN:
         url = f"http://{args.host}:{args.port}"
         say(f"[!] {args.host}:{args.port} 已有服务在监听 —— 直接复用，不再重复启动。")
         if not args.no_open:
             webbrowser.open(url)
         say(f"[√] 访问地址：{url}")
         return 0
+
+    if state != PORT_FREE:
+        if state == PORT_RESERVED:
+            say(f"[!] {args.host}:{args.port} 落在 Windows **保留端口区间**里 —— 不是被占用。")
+            say("    Hyper-V / WSL 每次开机都会从动态端口范围里划走若干区间，且每天漂移。")
+            say("    查看当前区间：netsh interface ipv4 show excludedportrange protocol=tcp")
+        else:
+            say(f"[!] {args.host}:{args.port} 已被其他进程占用。")
+            say(f"    查看占用者：netstat -ano | findstr :{args.port}")
+
+        if args.strict_port:
+            say("[×] 已指定 --strict-port，不自动顺延 —— 请用 --port 指定另一个端口。")
+            return 1
+
+        picked = find_free_port(args.host, args.port + 1)
+        if picked is None:
+            say(f"[×] {args.port + 1} 往后 {PORT_SCAN_TRIES} 个端口都不可用，请用 --port 指定一个。")
+            return 1
+        say(f"[i] 已自动顺延到可用端口 {picked}（仅本次生效，下次仍从 {DEFAULT_PORT} 试起）。")
+        args.port = picked
+
+    if args.port != DEFAULT_PORT:
+        say(f"[!] 本次端口 {args.port} ≠ 默认 {DEFAULT_PORT} —— KKFileView 备用链路里写死了")
+        say(f"    host.docker.internal:{args.port}，若要长期用该端口，请把 src/config/preview.ts")
+        say(f"    的 DEV_SERVER_PORT 一并改成 {args.port}。")
 
     if args.build:
         say("[i] 生产构建中…")
@@ -227,7 +328,9 @@ def main() -> int:
 
     try:
         if not wait_until_ready(args.host, args.port, READY_TIMEOUT):
-            say("[×] 服务在预期时间内没有就绪 —— 请检查上方 Vite 日志（常见原因：端口被占用、依赖损坏）。")
+            say("[×] 服务在预期时间内没有就绪 —— 请检查上方 Vite 日志。")
+            say("    常见原因：① 端口被 Windows 保留区间吞掉 —— Vite 会报 `listen EACCES: permission denied`")
+            say("    （本脚本已提前探测端口，若仍出现请用 --port 换一个）；② node_modules 依赖损坏（加 --install 重装）。")
             shutdown(proc)
             return 1
 

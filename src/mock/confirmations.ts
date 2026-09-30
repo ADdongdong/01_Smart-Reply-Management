@@ -1,17 +1,20 @@
 import type {
   AiVerification,
+  AssignSource,
   BankCandidateSource,
   BankItemEntry,
   BankItemGroup,
   BankTextResult,
   ConfirmationType,
   ConsistencyRow,
+  ConsistencyTable,
   HandwritingResult,
   ReplyRecord,
   SealResult,
   SubjectEntry,
 } from '@/types'
 import { scoreBankMatch } from '@/services/bankMatch'
+import { compareCell, parseAmount } from '@/utils/consistency'
 
 /** 被审计单位名称 —— 银行函证四要素之一 */
 export const AUDITED_ENTITY = '山东某某科技股份有限公司'
@@ -77,51 +80,333 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
 ]
 
 /* ------------------------------------------------------------------ */
-/* 基础科目数据 —— 取自真实样例「0813回函123.pdf」正文表格 20 条事项    */
+/* 发函件里识别出的表格 —— 逐单元格保留原件行列（v2.69）                 */
 /* ------------------------------------------------------------------ */
 
-const BASE_ROWS: { item: string; period: string; subject: string; amount: number }[] = [
-  { item: '事项1', period: '2021年度', subject: '主营业务收入', amount: 5000000 },
-  { item: '事项2', period: '2022年度', subject: '主营业务收入', amount: 5000001 },
-  { item: '事项3', period: '2023年度', subject: '主营业务收入', amount: 5000002 },
-  { item: '事项4', period: '2024年1-6月', subject: '主营业务收入', amount: 5000003 },
-  { item: '事项5', period: '2021年度', subject: '应收账款', amount: 300000 },
-  { item: '事项6', period: '2022年度', subject: '应收账款', amount: 301000 },
-  { item: '事项7', period: '2023年度', subject: '应收账款', amount: 302000 },
-  { item: '事项8', period: '2024年1-6月', subject: '应收账款', amount: 303000 },
-  { item: '事项9', period: '2021年度', subject: '预收账款', amount: 600000 },
-  { item: '事项10', period: '2022年度', subject: '预收账款', amount: 601000 },
-  { item: '事项11', period: '2023年度', subject: '预收账款', amount: 602000 },
-  { item: '事项12', period: '2024年1-6月', subject: '预收账款', amount: 603000 },
-  { item: '事项13', period: '2021年度', subject: '其他应收款', amount: 603001 },
-  { item: '事项14', period: '2022年度', subject: '其他应收款', amount: 603002 },
-  { item: '事项15', period: '2023年度', subject: '其他应收款', amount: 603003 },
-  { item: '事项16', period: '2024年1-6月', subject: '其他应收款', amount: 603004 },
-  { item: '事项17', period: '2021年度', subject: '其他应付款', amount: 603005 },
-  { item: '事项18', period: '2022年度', subject: '其他应付款', amount: 603006 },
-  { item: '事项19', period: '2023年度', subject: '其他应付款', amount: 603007 },
-  { item: '事项20', period: '2024年1-6月', subject: '其他应付款', amount: 603008 },
+/**
+ * 表格模板（**发函侧**）—— 回函侧由它 + 单元格差异覆盖派生。
+ *
+ * 两套模板分别取自两份真实样例函证（**都是逐格取自原件**）：
+ * · `cswl`    —— `fahan-cswl0526.pdf`（《企业询证函》，4 大类 / **6 张子表、列结构各不相同**），
+ *                也是左栏「发函用印件」那份样例 —— **默认记录用它，双方同源**；
+ * · `wanglai` —— `wanglai-1-SJ01YF001.pdf`（另一份《企业询证函》，4 张表），
+ *                供 `whzf0010005` 使用（它的回函样例是这份、印章批注坐标按它校准）。
+ *
+ * **模板里只写发函值**；回函值默认与发函一致，差异由 `buildConsistency` 的 patch 注入 ——
+ * 这样「发函 / 回函两套行」天然同构，不会出现列对不上的情况。
+ */
+interface LetterTableTemplate {
+  id: string
+  /** 所属大类（原件里的大项标题，如「1. 销售与未结算」）；没有两级结构时省略 */
+  section?: string
+  title: string
+  unit?: string
+  columns: string[]
+  comparedColumns: number[]
+  keyColumns: number[]
+  periodColumn?: number
+  subjectColumn?: number
+  /** 该表在**这一封**发函用印件里的页区间（**相对页号**，1 = 该封第 1 页） */
+  sentPages?: { start: number; end: number }
+  /** 该表在**这一封**回函件里的页区间（**相对页号**，同上） */
+  repliedPages?: { start: number; end: number }
+  /** 各行的单元格（发函侧），顺序与 `columns` 一致 */
+  rows: string[][]
+}
+
+/**
+ * 回函侧的单元格差异覆盖：表 id → **行下标** → 列下标 → 回函识别值。
+ * 值为空串即「回函未列示该金额」（对应 `missing`）。
+ */
+type LetterPatch = Record<string, Record<number, Record<number, string>>>
+
+/**
+ * `fahan-cswl0526.pdf` 的 **4 大类 / 6 张子表** —— 逐格取自原件（2026-09-28 按文字层坐标逐行还原）。
+ *
+ * 这封信是**「大类 → 子表」两级**结构（比 `wanglai` 那份更接近真实函证）：
+ * ```
+ * 1. 销售与未结算  （1）销售与应（预）收账款  （2）应收贵公司票据
+ * 2. 采购与未结算  （1）采购与预（应）付账款  （2）应付贵公司票据
+ * 3. 其他往来账项  （本大类即一张表，无子标题）
+ * 4. 其他事项      （空白填写框）
+ * ```
+ * 六张表的列数分别是 6 / 5 / 6 / 5 / 5 / 2 —— **没有一列共通**，再次印证「不能归一化成一张表」。
+ * 「信息证明无误 / 信息不符」签章区**不是数据表格**，不在其中（它属于印章 / 手写体识别）。
+ *
+ * **页号是「该封内的相对页号」**（每封在发函件里占 2 页、在回函件里占 3 页），
+ * 绝对页号由界面侧叠加 `letterPagesOf()` 的起点算出（见 `ConsistencyTable.sentPages` 的注释）。
+ */
+const CSWL_TEMPLATES: LetterTableTemplate[] = [
+  {
+    id: 'sales-receivable',
+    section: '1. 销售与未结算',
+    title: '（1）销售与应（预）收账款',
+    columns: [
+      '截止日期',
+      '贵公司欠（不含暂估）',
+      '暂估金额',
+      '销售给贵公司（不含税）',
+      '欠贵公司',
+      '本公司科目',
+    ],
+    comparedColumns: [1, 2, 3, 4],
+    /* 期间有重复（主营业务收入与应收账款各有 2021 年度），故配对键取「期间 + 科目」 */
+    keyColumns: [0, 5],
+    periodColumn: 0,
+    subjectColumn: 5,
+    sentPages: { start: 1, end: 1 },
+    repliedPages: { start: 1, end: 1 },
+    rows: [
+      ['2021年度', '无', '无', '5,000,000', '无', '主营业务收入'],
+      ['2022年度', '无', '无', '5,000,001', '无', '主营业务收入'],
+      ['2023年度', '无', '无', '5,000,002', '无', '主营业务收入'],
+      ['2024年1-6月', '无', '无', '5,000,003', '无', '主营业务收入'],
+      ['2021年度', '300,000', '无', '无', '无', '应收账款'],
+      ['2022年度', '301,000', '无', '无', '无', '应收账款'],
+      ['2023年度', '302,000', '无', '无', '无', '应收账款'],
+      ['2024年1-6月', '303,000', '无', '无', '无', '应收账款'],
+    ],
+  },
+  {
+    id: 'receivable-bills',
+    section: '1. 销售与未结算',
+    title: '（2）应收贵公司票据',
+    columns: ['出票日期', '票据编号', '金额', '收票人/出票人', '备注'],
+    comparedColumns: [2],
+    keyColumns: [0, 1],
+    periodColumn: 0,
+    sentPages: { start: 1, end: 1 },
+    repliedPages: { start: 1, end: 1 },
+    rows: [
+      ['2021-12-31', '1000005', '5,004', '西小点0005', '备注5'],
+      ['2022-12-31', '1000006', '5,005', '西小点0006', '备注6'],
+      ['2023-12-31', '1000007', '5,006', '西小点0007', '备注7'],
+      ['2024-06-30', '1000008', '5,007', '西小点0008', '备注8'],
+    ],
+  },
+  {
+    id: 'purchase-payable',
+    section: '2. 采购与未结算',
+    title: '（1）采购与预（应）付账款',
+    columns: [
+      '截止日期',
+      '贵公司欠',
+      '向贵公司采购（不含税）',
+      '欠贵公司（不含暂估）',
+      '暂估金额',
+      '本公司科目',
+    ],
+    comparedColumns: [1, 2, 3, 4],
+    keyColumns: [0, 5],
+    periodColumn: 0,
+    subjectColumn: 5,
+    sentPages: { start: 1, end: 1 },
+    repliedPages: { start: 1, end: 1 },
+    /* 原件里这一项**只印了表头、没有数据行** —— 照实保留这张空表（不给它编数据） */
+    rows: [],
+  },
+  {
+    id: 'payable-bills',
+    section: '2. 采购与未结算',
+    title: '（2）应付贵公司票据',
+    columns: ['出票日期', '票据编号', '金额', '受票人', '备注'],
+    comparedColumns: [2],
+    keyColumns: [0, 1],
+    periodColumn: 0,
+    /* 表标题与表头印在发函件第 1 页、数据行在第 2 页 —— 页区间照实横跨两页 */
+    sentPages: { start: 1, end: 2 },
+    repliedPages: { start: 1, end: 2 },
+    rows: [
+      ['2021-12-31', '1000001', '5,000', '西小点0001', '备注1'],
+      ['2022-12-31', '1000002', '5,001', '西小点0002', '备注2'],
+      ['2023-12-31', '1000003', '5,002', '西小点0003', '备注3'],
+      ['2024-06-30', '1000004', '5,003', '西小点0004', '备注4'],
+    ],
+  },
+  {
+    id: 'other-accounts',
+    title: '3. 其他往来账项',
+    columns: ['截止日期', '贵公司欠', '欠贵公司', '备注（内容、性质）', '本公司科目'],
+    comparedColumns: [1, 2],
+    keyColumns: [0, 4],
+    periodColumn: 0,
+    subjectColumn: 4,
+    sentPages: { start: 2, end: 2 },
+    repliedPages: { start: 2, end: 2 },
+    rows: [
+      ['2021年度', '603,001', '无', '无', '其他应收款'],
+      ['2022年度', '603,002', '无', '无', '其他应收款'],
+      ['2023年度', '603,003', '无', '无', '其他应收款'],
+      ['2024年1-6月', '603,004', '无', '无', '其他应收款'],
+      ['2021年度', '无', '603,005', '无', '其他应付款'],
+      ['2022年度', '无', '603,006', '无', '其他应付款'],
+      ['2023年度', '无', '603,007', '无', '其他应付款'],
+      ['2024年1-6月', '无', '603,008', '无', '其他应付款'],
+    ],
+  },
+  {
+    id: 'other-matters',
+    title: '4. 其他事项',
+    columns: ['其他事项', '其他备注'],
+    /* 空白填写框 —— 原件无金额，不作为核对项，但**照实展示**（它是原件里的一张表） */
+    comparedColumns: [],
+    keyColumns: [0],
+    sentPages: { start: 2, end: 2 },
+    repliedPages: { start: 2, end: 2 },
+    /* 「其他备注」格里印着一个「1」（原件如此，不臆造也不丢弃） */
+    rows: [['', '1']],
+  },
 ]
 
 /**
- * 构建一致性比对结果
- * @param diffs 差异项：item -> 回函金额（null 表示回函缺失）
+ * `wanglai-1-SJ01YF001.pdf` 的 4 张表 —— **数据逐格取自原件**（2026-09-28 渲染原页逐格核对）。
+ *
+ * 四张表的列结构**互不相同**，这正是「不能归一化成一张表」的证据：
+ *   ① 往来款项余额 5 列（含两个方向的欠款）② 交易额 4 列 ③ 票据往来 4 列 ④ 其他事项（空白框）。
+ * 「信息证明无误 / 信息不符」签章区**不是数据表格**，不在其中（它属于印章 / 手写体识别）。
  */
-function buildConsistency(diffs: Record<string, number | null> = {}): ConsistencyRow[] {
-  return BASE_ROWS.map((r) => {
-    const hasDiff = Object.prototype.hasOwnProperty.call(diffs, r.item)
-    const replied = hasDiff ? (diffs[r.item] as number | null) : r.amount
+const WANGLAI_TEMPLATES: LetterTableTemplate[] = [
+  {
+    id: 'balance',
+    title: '本公司与贵公司的往来款项余额如下',
+    unit: '单位：人民币元',
+    columns: ['截止日期', '欠贵公司（已开票-含税）', '欠贵公司（未开票-不含税）', '贵公司欠', '备注'],
+    comparedColumns: [1, 2, 3],
+    keyColumns: [0],
+    periodColumn: 0,
+    subjectColumn: 4,
+    rows: [
+      ['2018/12/31', '293,338.73', '329,040.37', '-', '应付账款'],
+      ['2019/12/31', '919,413.26', '-', '-', '应付账款'],
+      ['2020/12/31', '340,078.37', '693,303.74', '-', '应付账款'],
+      ['2021/12/31', '229,975.56', '287,846.41', '-', '应付账款'],
+      ['2022/6/30', '274,715.14', '180,359.77', '-', '应付账款'],
+    ],
+  },
+  {
+    id: 'trade',
+    title: '本公司与贵公司的交易额如下',
+    unit: '单位：人民币元',
+    columns: ['所属期间', '交易金额（含税）', '采购内容', '备注'],
+    comparedColumns: [1],
+    keyColumns: [0],
+    periodColumn: 0,
+    rows: [
+      ['2019年度', '4,344,679.63', '材料款及加工费', ''],
+      ['2020年度', '4,169,130.47', '材料款及加工费', ''],
+      ['2021年度', '4,753,787.81', '材料款及加工费', ''],
+      ['2022年1-6月', '1,890,257.59', '材料款及加工费', ''],
+    ],
+  },
+  {
+    id: 'bill',
+    title: '本公司与贵公司票据往来金额如下',
+    unit: '单位：人民币元',
+    columns: ['所属期间', '交易内容', '票据结算金额', '备注'],
+    comparedColumns: [2],
+    /* 期间有重复（两行都是 2020 年度），故配对键取「期间 + 交易内容」 */
+    keyColumns: [0, 1],
+    periodColumn: 0,
+    rows: [
+      ['2019年度', '承兑汇票支付货款', '350,000.00', ''],
+      ['2020年度', '承兑汇票支付货款', '3,000,000.00', ''],
+      ['2021年度', '承兑汇票支付货款', '1,000,000.00', ''],
+      ['2022年1-6月', '-', '-', ''],
+      ['2020年度', '接受贵公司承兑汇票背书转让', '550,000.00', ''],
+    ],
+  },
+  {
+    id: 'other',
+    title: '其他事项',
+    columns: ['（本栏由被询证方填写）'],
+    /* 空白填写框 —— 原件无金额，不作为核对项，但**照实展示**（它是原件里的一张表） */
+    comparedColumns: [],
+    keyColumns: [0],
+    rows: [['']],
+  },
+]
+
+/**
+ * 函证样例 → 表格模板（v2.70 由「`huihan` / `wanglai` 两套」收敛为「`cswl` / `wanglai` 两套」）：
+ * · `cswl`    —— **默认**，与左栏「发函用印件」同源；
+ * · `wanglai` —— `whzf0010005` 专用（它的回函样例是那份卷宗、印章批注坐标按它校准）。
+ *
+ * 原先那套 `huihan`（0813 拼接回函的 20 条事项）随默认样例切换一并删除 —— 不留死模板。
+ */
+type LetterKind = 'cswl' | 'wanglai'
+
+/**
+ * 由「逐表」派生「拍平」记录 —— 一条 = 一个**有值的金额单元格**。
+ *
+ * 判定口径与界面上的红框**共用** `@/utils/consistency`，因此「结论条说几项不符」
+ * 与「表里框了几处」必然一致。
+ */
+function flattenConsistency(tables: ConsistencyTable[]): ConsistencyRow[] {
+  const out: ConsistencyRow[] = []
+  tables.forEach((t) => {
+    t.sentRows.forEach((sent, i) => {
+      const replied = t.repliedRows[i]
+      t.comparedColumns.forEach((c) => {
+        const sentText = sent.cells[c] ?? ''
+        const repliedText = replied?.cells[c] ?? ''
+        const state = compareCell(sentText, repliedText)
+        /* 两侧都没有金额（如「贵公司欠」整列「-」）→ 不是核对项，不进拍平记录 */
+        if (state === 'same' && parseAmount(sentText) == null) return
+        out.push({
+          id: `${t.id}-${i}-${c}`,
+          item: sent.cells[t.keyColumns[0]] ?? '',
+          period: sent.cells[t.periodColumn ?? t.keyColumns[0]] ?? '',
+          subject: t.subjectColumn != null ? (sent.cells[t.subjectColumn] ?? t.title) : t.title,
+          sentAmount: parseAmount(sentText),
+          repliedAmount: parseAmount(repliedText),
+          match: state === 'same' ? 'match' : state,
+          confidence: state === 'same' ? 0.98 : 0.93,
+        })
+      })
+    })
+  })
+  return out
+}
+
+/**
+ * 构建一致性比对结果 —— **逐表识别结果 + 逐表比对**。
+ *
+ * @param kind  用哪份样例函证的表格结构（决定「发函件里有几张表、各有哪些列」）
+ * @param patch 回函侧的单元格差异覆盖（不传 = 回函与发函完全一致）
+ */
+function buildConsistency(
+  kind: LetterKind = 'cswl',
+  patch: LetterPatch = {},
+): { tables: ConsistencyTable[]; rows: ConsistencyRow[]; diffCount: number } {
+  const templates = kind === 'wanglai' ? WANGLAI_TEMPLATES : CSWL_TEMPLATES
+  /** 未显式标注页区间的表一律落在「该封首页」——`wanglai` 那份的 4 张表都在第 1 页 */
+  const FIRST_PAGE = { start: 1, end: 1 }
+  const tables: ConsistencyTable[] = templates.map((t) => {
+    const cellPatch = patch[t.id] ?? {}
     return {
-      id: r.item,
-      item: r.item,
-      period: r.period,
-      subject: r.subject,
-      sentAmount: r.amount,
-      repliedAmount: replied,
-      match: !hasDiff ? 'match' : replied === null ? 'missing' : 'diff',
-      confidence: hasDiff ? 0.93 : 0.98,
+      id: t.id,
+      section: t.section,
+      title: t.title,
+      unit: t.unit,
+      columns: t.columns,
+      comparedColumns: t.comparedColumns,
+      keyColumns: t.keyColumns,
+      periodColumn: t.periodColumn,
+      subjectColumn: t.subjectColumn,
+      sentPages: t.sentPages ?? FIRST_PAGE,
+      repliedPages: t.repliedPages ?? FIRST_PAGE,
+      sentRows: t.rows.map((cells, i) => ({ id: `${t.id}-${i}`, cells: [...cells] })),
+      repliedRows: t.rows.map((cells, i) => {
+        const p = cellPatch[i]
+        return {
+          id: `${t.id}-${i}`,
+          cells: p ? cells.map((cell, ci) => (ci in p ? p[ci] : cell)) : [...cells],
+        }
+      }),
     }
   })
+  const rows = flattenConsistency(tables)
+  return { tables, rows, diffCount: rows.filter((r) => r.match !== 'match').length }
 }
 
 /** 科目余额分录（回函结果填写页使用） */
@@ -323,14 +608,45 @@ function riskOf(type: ConfirmationType, v: { diffCount: number; seal: SealResult
   return { level, reasons }
 }
 
-/** 广东证券：印章落「信息不符」区 + 2 项金额差异 → 高风险 */
+/**
+ * 广东证券：印章落「信息不符」区 + 2 项金额差异 → 高风险。
+ * 差异落点（`cswl` 正文表）：① 销售给贵公司（不含税）2024 年 1-6 月 `5,000,003 → 5,000,030`；
+ * ② 其他往来账项 2023 年度「贵公司欠」回函**未列示**（整格缺失）。
+ */
 const VERIFY_GD: AiVerification = (() => {
-  const rows = buildConsistency({ 事项7: 284000, 事项11: null })
-  const diffCount = rows.filter((r) => r.match !== 'match').length
+  const consistency = buildConsistency('cswl', {
+    'sales-receivable': { 3: { 3: '5,000,030' } },
+    'other-accounts': { 2: { 1: '' } },
+  })
   const seal = SEAL_ABNORMAL
-  const { level, reasons } = riskOf('往来函证', { diffCount, seal })
+  const { level, reasons } = riskOf('往来函证', { diffCount: consistency.diffCount, seal })
   return {
-    consistency: { rows, diffCount, confidence: 0.95 },
+    consistency: { ...consistency, confidence: 0.95 },
+    seal,
+    handwriting: HANDWRITING_ABNORMAL,
+    riskLevel: level,
+    riskReasons: reasons,
+    completedModules: 6,
+    totalModules: 6,
+  }
+})()
+
+/**
+ * 与 `VERIFY_GD` 同口径（印章落「信息不符」区 + 2 项差异 → 高风险），
+ * 但用 **`wanglai` 样例的 4 张表** —— 供 `whzf0010005` 使用（它预览的就是那份样例文件）。
+ *
+ * 差异落点拆在两处，正是「表格不归一化」的价值：一处是**同一行的某个金额列**（往来款项余额表
+ * 2022/6/30 的「欠贵公司（已开票-含税）」），另一处是**整格缺失**（交易额表 2021 年度回函未列示）。
+ */
+const VERIFY_GD_W: AiVerification = (() => {
+  const consistency = buildConsistency('wanglai', {
+    balance: { 4: { 1: '274,715.41' } },
+    trade: { 2: { 1: '' } },
+  })
+  const seal = SEAL_ABNORMAL
+  const { level, reasons } = riskOf('往来函证', { diffCount: consistency.diffCount, seal })
+  return {
+    consistency: { ...consistency, confidence: 0.95 },
     seal,
     handwriting: HANDWRITING_ABNORMAL,
     riskLevel: level,
@@ -342,11 +658,11 @@ const VERIFY_GD: AiVerification = (() => {
 
 /** 中信证券：全部相符 → 低风险 */
 const VERIFY_ZX: AiVerification = (() => {
-  const rows = buildConsistency()
+  const consistency = buildConsistency('cswl')
   const seal = SEAL_NORMAL
   const { level, reasons } = riskOf('往来函证', { diffCount: 0, seal })
   return {
-    consistency: { rows, diffCount: 0, confidence: 0.97 },
+    consistency: { ...consistency, confidence: 0.97 },
     seal,
     handwriting: HANDWRITING_NORMAL,
     riskLevel: level,
@@ -359,12 +675,12 @@ const VERIFY_ZX: AiVerification = (() => {
 /** 齐商银行：未盖章（风险提示）+ 询证事项 1 项差异（判不相符）→ 高风险。
  *  相符性只由询证事项逐项核对决定；印章缺失不改变结论，只进风险原因。 */
 const VERIFY_QS: AiVerification = (() => {
-  const rows = buildConsistency()
+  const consistency = buildConsistency('cswl')
   const seal = SEAL_MISSING
   const bankDiffCount = BANK_ITEMS_QS.filter((i) => !i.match).length
   const { level, reasons } = riskOf('银行函证', { diffCount: 0, seal, bankDiffCount })
   return {
-    consistency: { rows, diffCount: 0, confidence: 0.9 },
+    consistency: { ...consistency, confidence: 0.9 },
     seal,
     bankText: BANK_TEXT,
     riskLevel: level,
@@ -377,12 +693,12 @@ const VERIFY_QS: AiVerification = (() => {
 /** 中国建设银行（QS2024-019）：印章正常 + 询证事项 1 项差异（判不相符）→ 中风险。
  *  它与齐商银行的区别是**印章齐全**（齐商是未盖章），用于演示「有章但金额不符」这一组合。 */
 const VERIFY_JH: AiVerification = (() => {
-  const rows = buildConsistency()
+  const consistency = buildConsistency('cswl')
   const seal = SEAL_NORMAL
   const bankDiffCount = BANK_ITEMS_QS.filter((i) => !i.match).length
   const { level, reasons } = riskOf('银行函证', { diffCount: 0, seal, bankDiffCount })
   return {
-    consistency: { rows, diffCount: 0, confidence: 0.92 },
+    consistency: { ...consistency, confidence: 0.92 },
     seal,
     bankText: BANK_TEXT,
     riskLevel: level,
@@ -424,7 +740,7 @@ export function fallbackVerification(type: ConfirmationType): AiVerification {
     bankDiffCount: bank ? BANK_ITEMS_QS.filter((i) => !i.match).length : undefined,
   })
   return {
-    consistency: { rows: buildConsistency(), diffCount: 0, confidence: 0.95 },
+    consistency: { ...buildConsistency('cswl'), confidence: 0.95 },
     seal,
     ...(bank ? { bankText: BANK_TEXT } : { handwriting: HANDWRITING_NORMAL }),
     riskLevel: level,
@@ -439,8 +755,9 @@ export function fallbackVerification(type: ConfirmationType): AiVerification {
  * 印章类型专设为财务章，用于演示「是否为公章 = 否」这一分支。
  */
 const VERIFY_HT: AiVerification = (() => {
-  const rows = buildConsistency({ 事项15: 590000 })
-  const diffCount = 1
+  /* 差异落点（`cswl` 正文表）：销售与应（预）收账款 2021 年度应收账款的「贵公司欠」300,000 → 300,300 */
+  const consistency = buildConsistency('cswl', { 'sales-receivable': { 4: { 1: '300,300' } } })
+  const diffCount = consistency.diffCount
   const seal: SealResult = {
     ...SEAL_NORMAL,
     sealType: '财务章',
@@ -451,7 +768,44 @@ const VERIFY_HT: AiVerification = (() => {
     boxes: [{ page: 1, x: 7, y: 75, w: 27, h: 15, label: '财务章 · 信息证明无误区', abnormal: false }],
   }
   return {
-    consistency: { rows, diffCount, confidence: 0.94 },
+    consistency: { ...consistency, confidence: 0.94 },
+    seal,
+    handwriting: {
+      text: '其他应收款余额差异系跨期入账所致。',
+      region: '信息不符区',
+      conclusion: '手写说明位于「信息不符」区，与印章区域不一致，建议人工复核',
+      confidence: 0.82,
+    },
+    riskLevel: 'medium',
+    riskReasons: [
+      '一致性比对存在 1 项金额差异',
+      '多页回函未检出骑缝章',
+      '手写说明区域与印章区域不一致',
+      '回函加盖的是财务章，非公章',
+    ],
+    completedModules: 6,
+    totalModules: 6,
+  }
+})()
+
+/**
+ * 与 `VERIFY_HT` 同口径（1 项差异 + 财务章 + 缺骑缝章 → 中风险），
+ * 但用 **`wanglai` 样例的 4 张表** —— 供 `whzf0010005` 第 2 次回函使用（它预览的就是那份样例文件）。
+ * 差异落点：交易额表 2020 年度「交易金额（含税）」回函 4,169,130.00（与发函 4,169,130.47 不符）。
+ */
+const VERIFY_HT_W: AiVerification = (() => {
+  const consistency = buildConsistency('wanglai', { trade: { 1: { 1: '4,169,130.00' } } })
+  const seal: SealResult = {
+    ...SEAL_NORMAL,
+    sealType: '财务章',
+    sealName: '海通证券股份有限公司',
+    crossPageSeal: false,
+    crossPageSealCount: 0,
+    confidence: 0.9,
+    boxes: [{ page: 1, x: 7, y: 75, w: 27, h: 15, label: '财务章 · 信息证明无误区', abnormal: false }],
+  }
+  return {
+    consistency: { ...consistency, confidence: 0.94 },
     seal,
     handwriting: {
       text: '其他应收款余额差异系跨期入账所致。',
@@ -534,7 +888,8 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     verifiedBy: '李复核',
     verifiedAt: '2026-09-10 17:12:08',
     aiFilled: true,
-    verification: VERIFY_GD,
+    /* 该函证预览的样例是 `wanglai-1-SJ01YF001.pdf`（4 张表），故用同结构的核验数据 */
+    verification: VERIFY_GD_W,
   },
   {
     id: 'whzf0010005-2',
@@ -555,7 +910,8 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     risk: 'medium',
     verifyStatus: 'pending',
     aiFilled: true,
-    verification: VERIFY_HT,
+    /* 该函证预览的样例是 `wanglai-1-SJ01YF001.pdf`（4 张表），故用同结构的核验数据 */
+    verification: VERIFY_HT_W,
   },
 
   /* ---------- 齐商银行：1 次回函，回函未盖章 → 高风险，待人工确认 ---------- */
@@ -1093,4 +1449,35 @@ export function buildBankItemsForRecord(record: ReplyRecord): BankItemEntry[] {
     })
   })
   return out
+}
+
+/* ------------------------------------------------------------------ */
+/* 归属来源留痕（v2.64）                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 演示数据的**归属来源**。
+ *
+ * 它回答的是审计复核时最常被问的那句「**这封凭什么是这家银行的**」——
+ * 这份回函是怎么被归到当前这封函证的。它随记录长期保留，展示在列表**展开行的留痕行**里。
+ *
+ * 真实环境由识别落库时写入（`AppStore.applyRecognizedReply` 从任务上带过来），
+ * 下面是给**既有演示数据**补的值 —— 刻意配出**三种来源**，好在界面上都能看到：
+ * · `auto` 系统自动 —— 往来函证凭右上角二维码精确命中（绝大多数）；
+ * · `manual-confirm` 人工确认 —— 系统给了建议、由人点头（齐商：四要素命中，但日期写法与发函底稿不同）；
+ * · `manual-assign` 人工指定 —— 系统没给出可用建议、由人从清单里挑（广发：回函落款单位名与系统内不一致）。
+ */
+const ASSIGN_SOURCE_BY_ID: Record<string, AssignSource> = {
+  'QS2024-031-1': 'manual-confirm',
+  'whzf0010001-1': 'manual-assign',
+  'whzf0010001-2': 'manual-assign',
+}
+
+/*
+ * 就地补写，而不是塞进上面那 10 条记录的字面量里：演示数据的重点是业务字段，
+ * 而归属来源是**每条记录都该有**的一项元信息 —— 集中写在这里，
+ * 一眼能看出「三种来源都覆盖到了」，也不必让每条记录都多一行容易看漏的字段。
+ */
+for (const r of REPLY_RECORDS) {
+  r.assignSource = ASSIGN_SOURCE_BY_ID[r.id] ?? 'auto'
 }

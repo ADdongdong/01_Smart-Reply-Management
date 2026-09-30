@@ -32,7 +32,7 @@ export default function SplitEntryModal({
 }: {
   open: boolean
   onCancel: () => void
-  /** 校验通过 → 进入 ②「数据核对」 */
+  /** 校验通过 → 进入 ②「回函归属」（`AssignView`，本链路的最后一步） */
   onNext: (value: SplitEntryValue) => void
 }) {
   const [faceSheetLast, setFaceSheetLast] = useState<'yes' | 'no' | null>(null)
@@ -79,9 +79,11 @@ export default function SplitEntryModal({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {msg && <span style={{ fontSize: 12, color: 'var(--c-risk-high-text)' }}>{msg}</span>}
           <span style={{ flex: 1 }} />
+          {/* 按钮只说「推进」不说「推到哪」（v2.71 改文案后留下的缺口）—— 一句话补上落点 */}
+          <span style={{ fontSize: 12, color: 'var(--c-text-3)' }}>下一步：核对切分与归属</span>
           <Button onClick={handleCancel}>取消</Button>
           <Button type="primary" onClick={handleOk}>
-            确定
+            下一步
           </Button>
         </div>
       }

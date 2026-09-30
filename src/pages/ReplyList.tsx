@@ -29,6 +29,7 @@ import { useApp } from '@/store/AppStore'
 import { EXPRESS_IMPORT_RESULT } from '@/mock/expressImport'
 import { DEMO_LABEL, PRESET_BATCHES } from '@/mock/recognition'
 import { TYPE_RULE, consistencyOf, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
+import { ASSIGN_SOURCE_LABEL } from '@/services/bankMatch'
 import SplitEntryModal from '@/components/SplitEntryModal'
 import type { SplitFileInfo } from '@/components/SplitEntryModal'
 import BankUploadModal from '@/components/BankUploadModal'
@@ -192,6 +193,7 @@ export default function ReplyList() {
       batch: first ? { ...batch, fileName: first.name, fileSize: first.size } : batch,
       uploadType: '银行函证',
     })
+    message.success('已开始识别 —— 请切分这份回函并逐段指定归属，点「确定」后回列表等结果')
   }
 
   /** 银行弹窗里的「用演示数据体验」—— 与上传同路，只是用内置批次 */
@@ -202,6 +204,7 @@ export default function ReplyList() {
       batch: PRESET_BATCHES[TYPE_RULE['银行函证'].presetBatchId](),
       uploadType: '银行函证',
     })
+    message.success('已开始识别 —— 请切分这份回函并逐段指定归属，点「确定」后回列表等结果')
   }
 
   /**
@@ -216,12 +219,15 @@ export default function ReplyList() {
    * 「本批回函已全部归属完成」的全屏界面**（因为往来的归属由二维码定死，那个界面
    * 没有待办可做）—— 现在这个冗余屏没有了，核完直接点「确定」回列表。
    */
-  const onSplitFileConfirm = (v: { file?: SplitFileInfo }) => {
+  const onSplitFileConfirm = (v: { file?: SplitFileInfo; faceSheetLast?: 'yes' | 'no' }) => {
     setSplit(null)
     const batch = PRESET_BATCHES[TYPE_RULE['往来函证'].presetBatchId]()
+    /* 「每段尾部是否还有一页快递面单」随批次带下去（v2.76）—— 归属界面的切分结果据此把
+     * **段尾面单识别出的快递单号**显示在每一段上（此前这一项只是个校验项、没有下游消费者） */
+    const merged = { ...batch, faceSheetLast: v.faceSheetLast === 'yes' }
     dispatch({
       type: 'START_BATCH',
-      batch: v.file ? { ...batch, fileName: v.file.name, fileSize: v.file.size } : batch,
+      batch: v.file ? { ...merged, fileName: v.file.name, fileSize: v.file.size } : merged,
       uploadType: '往来函证',
     })
     message.success('已开始识别 —— 请先核对切分与归属，点「确定」后回列表等结果')
@@ -687,24 +693,34 @@ export default function ReplyList() {
           · 核验 / 修改留痕 → 本表下方的一行小字（见下）。
         */}
 
-        {/* 留痕 —— 审计要留痕，但一行小字足够（v2.38 起不再占一整块字段网格） */}
-        {(main.verifiedAt || main.lastEditedAt) && (
-          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--c-text-3)' }}>
-            {main.verifiedAt && (
-              <>
-                核验人 {main.verifiedBy ?? '—'} · 核验时间{' '}
-                <span className="num">{main.verifiedAt}</span>
-              </>
-            )}
-            {main.verifiedAt && main.lastEditedAt ? ' · ' : null}
-            {main.lastEditedAt && (
-              <>
-                最近修改 <span className="num">{main.lastEditedAt}</span>
-                {main.lastEditedBy ? `（${main.lastEditedBy}）` : ''}
-              </>
-            )}
-          </div>
-        )}
+        {/*
+         * 留痕 —— 审计要留痕，但一行小字足够（v2.38 起不再占一整块字段网格）。
+         *
+         * **三段的次序就是业务时序**（v2.64 起并入「归属来源」）：
+         *   归属来源（识别阶段定下"归到哪封"）→ 核验（第一次人工确认）→ 最近修改（归档后补正）。
+         * 三段都**按需出现**，全都没有则整行不渲染。
+         *
+         * 「归属来源」放在**最前**：它是这份回函的**出身**，后两段都是人对它的处置。
+         * 它回答的是审计复核时最常被问的那句「**这封凭什么是这家银行的**」——
+         * 原先这只留在识别任务上、没有随记录落库，界面上完全看不到。
+         */}
+        {(() => {
+          const traces = [
+            main.assignSource ? `归属来源 ${ASSIGN_SOURCE_LABEL[main.assignSource]}` : null,
+            main.verifiedAt ? `核验人 ${main.verifiedBy ?? '—'} · 核验时间 ${main.verifiedAt}` : null,
+            main.lastEditedAt
+              ? `最近修改 ${main.lastEditedAt}${main.lastEditedBy ? `（${main.lastEditedBy}）` : ''}`
+              : null,
+          ].filter((t): t is string => !!t)
+          return (
+            traces.length > 0 && (
+              /* 整行走等宽数字（中文不受影响），时间戳因此天然对齐 */
+              <div className="num" style={{ marginTop: 8, fontSize: 12, color: 'var(--c-text-3)' }}>
+                {traces.join(' · ')}
+              </div>
+            )
+          )
+        })()}
       </div>
     )
   }
@@ -879,7 +895,7 @@ export default function ReplyList() {
             <div style={{ fontSize: 13, lineHeight: 1.9 }}>
               <div style={{ fontWeight: 500, marginBottom: 2 }}>接收带二维码的往来函证回函</div>
               <div>· 检测：发函回函一致性 / 印章 / 手写体 / 快递面单</div>
-              <div>· 按右上角二维码自动切分并归属，无需先做「回函登记」</div>
+              <div>· 按右上角二维码<b>预切分</b>；切分与归属在「回函归属」界面由你核对或改</div>
             </div>
           }
         >
@@ -901,7 +917,7 @@ export default function ReplyList() {
                 · 检测（<b>4 项</b>）：阶段一「识别四要素」；阶段二「询证事项逐项核对 / 是否有印章 /
                 印章名称与被询证单位一致」——<b>不检测手写体</b>，也<b>不检测骑缝章</b>
               </div>
-              <div>· 无二维码，按「银行名称 + 被审计单位 + 函证起止日期」四要素归属</div>
+              <div>· 无二维码，归属靠你在「回函归属」界面<b>手工切分 + 逐段指定</b>（四要素仅作参考）</div>
             </div>
           }
         >

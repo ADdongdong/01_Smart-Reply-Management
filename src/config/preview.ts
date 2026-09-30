@@ -15,7 +15,7 @@
  *   浏览器 ──→ KKFileView(127.0.0.1:18012)
  *                  │  容器去下载文件
  *                  ↓
- *           host.docker.internal:5178/samples/xxx.pdf   ← 容器视角的「宿主机」
+ *           host.docker.internal:15178/samples/xxx.pdf  ← 容器视角的「宿主机」
  *                  ↑
  *           Vite dev server（伺服 public/ 静态资源，已改为 host: true）
  *
@@ -35,8 +35,8 @@ export const KKFILEVIEW_BASE =
     ? `${window.location.protocol}//${window.location.hostname}:${KKFILEVIEW_PORT}`
     : `http://127.0.0.1:${KKFILEVIEW_PORT}`
 
-/** Vite dev server 端口（见 vite.config.ts） */
-export const DEV_SERVER_PORT = 5178
+/** Vite dev server 端口（见 vite.config.ts）—— 刻意取在 Windows 动态端口范围之外，避免被保留区间吞掉 */
+export const DEV_SERVER_PORT = 15178
 
 /** KKFileView 容器访问本机文件的地址前缀（容器视角的宿主机） */
 export const FILE_HOST = `http://host.docker.internal:${DEV_SERVER_PORT}`
@@ -49,20 +49,112 @@ export const FILE_HOST = `http://host.docker.internal:${DEV_SERVER_PORT}`
 const BANK_QISHANG = 'bank-qishang-20240331.pdf'
 /** 往来函证真实回函（印章 + 手写体演示件 —— 手写体演示件为往来函证样例） */
 const WANGLAI_SEAL = 'wanglai-1-SJ01YF001.pdf'
-/** 往来函证拼接回函（9 页，含文本层，覆盖大多数演示记录） */
-const HUIHAN_0813 = 'huihan-0813.pdf'
+
+/**
+ * **发函用印件 × 回函件** —— 一对真实样例（v2.70）。
+ *
+ * 为什么要有「发函件」这一份：一致性检测比的是**发函件 × 回函件** ——
+ * 而在 v2.70 之前，核验页左栏只铺回函件，比对的核心依据（我们发出去的用印件）
+ * 在界面上根本看不到，用户只能「拿一半依据去核对」。
+ *
+ * 两份文件出自同一批真实函证（`01_售前演示数据/20260526_内部演示/`）：
+ * · **发函用印件 6 页** = 3 封（`cswl05260001` 中信 / `cswl05260002` 国泰君安 / `cswl05260003` 华泰），每封 2 页；
+ * · **回函件 9 页** = 同样 3 封，每封「正文 2 页 + 一张无文本层的扫描页」。
+ */
+const FAHAN_CSWL0526 = 'fahan-cswl0526.pdf'
+const HUIHAN_CSWL0526 = 'huihan-cswl0526.pdf'
 
 const SAMPLE_BY_CONFIRMATION: Record<string, string> = {
   'QS2024-031': BANK_QISHANG,
   whzf0010005: WANGLAI_SEAL,
 }
 
-/** 未单独指定的函证统一使用往来函证拼接回函样例 */
-export const DEFAULT_SAMPLE_FILE = HUIHAN_0813
+/**
+ * 未单独指定的函证统一使用这份往来回函样例。
+ *
+ * **v2.70 由 `huihan-0813.pdf` 换成 `huihan-cswl0526.pdf`** —— 两者**同为 9 页**，
+ * 与识别批次 A 的页区间（1-3 / 4-6 / 7-9）正好对齐，**切分与识别工作台零回归**；
+ * 换过来的收益是：默认记录的左栏能同时铺出「发函用印件 × 回函件」，
+ * 与右侧逐表比对数据**同源**（都出自这一批真实函证）。
+ */
+export const DEFAULT_SAMPLE_FILE = HUIHAN_CSWL0526
 
-/** 取某封函证对应的样例文件名 */
+/** 取某封函证对应的样例文件名（＝**回函件**） */
 export function sampleFileOf(confirmationNo: string): string {
   return SAMPLE_BY_CONFIRMATION[confirmationNo] ?? DEFAULT_SAMPLE_FILE
+}
+
+/** 一段页区间（1-based、含两端） */
+export interface PageRange {
+  start: number
+  end: number
+}
+
+/** 一封函证在这一对样例里的**整封页区间**（页号为文件里的绝对页号） */
+export interface LetterPages {
+  /** 发函用印件里这一封占的页区间 */
+  sent: PageRange
+  /** 回函件里这一封占的页区间 */
+  replied: PageRange
+}
+
+/**
+ * 函证编号 → 该封在这对样例里的整封页区间。
+ *
+ * 只有这三封是**真实对应**的（发函用印件里就是它们自己）；其余记录交给
+ * `LETTER_PAGES_BY_SAMPLE` 按其所用样例取（拼接件走 `DEFAULT_LETTER_PAGES`，
+ * 与识别批次 A 的三段切分同一口径；单封样例整份即这一封）。
+ *
+ * 每张**子表**落在文件哪一页由 mock 侧给出「**该封内的相对页号**」，再用这里的起点
+ * 换算成绝对页号 —— 这样同一份 `AiVerification` 常量被多封记录共用时也不会串页。
+ */
+export const CSWL_LETTER_PAGES: Record<string, LetterPages> = {
+  whzf0010002: { sent: { start: 1, end: 2 }, replied: { start: 1, end: 3 } }, // 中信证券 ← cswl05260001
+  whzf0010004: { sent: { start: 3, end: 4 }, replied: { start: 4, end: 6 } }, // 国泰君安 ← cswl05260002
+  whzf0010003: { sent: { start: 5, end: 6 }, replied: { start: 7, end: 9 } }, // 华泰证券 ← cswl05260003
+}
+
+/** 未单列的往来记录 —— 复用第一封（与识别批次 A 的段序一致） */
+export const DEFAULT_LETTER_PAGES: LetterPages = {
+  sent: { start: 1, end: 2 },
+  replied: { start: 1, end: 3 },
+}
+
+/**
+ * 各**样例文件**里「一封函证」占的页区间 —— 供没有单列页区间的记录使用。
+ *
+ * 上面这对是**多封拼接件**，必须按段取；而单封样例（`wanglai` 那份 2 页印章件、
+ * 齐商银行 4 页扫描件）**整份就是这一封** —— 若一律套用拼接件的默认段，
+ * 会出现「本封第 1-3 页」而文件总共只有 2 页这种自相矛盾的标注。
+ */
+const LETTER_PAGES_BY_SAMPLE: Record<string, LetterPages> = {
+  'wanglai-1-SJ01YF001.pdf': { sent: { start: 1, end: 2 }, replied: { start: 1, end: 2 } },
+  'bank-qishang-20240331.pdf': { sent: { start: 1, end: 4 }, replied: { start: 1, end: 4 } },
+}
+
+/** 取某封函证在该记录所用样例里的整封页区间 */
+export function letterPagesOf(confirmationNo: string): LetterPages {
+  return (
+    CSWL_LETTER_PAGES[confirmationNo] ??
+    LETTER_PAGES_BY_SAMPLE[sampleFileOf(confirmationNo)] ??
+    DEFAULT_LETTER_PAGES
+  )
+}
+
+/**
+ * 取某封函证的**发函用印件**文件名。
+ *
+ * 三段判断都不涉及函证类型 —— 银行函证要不要铺这一栏，由调用方查
+ * `TYPE_RULE[type].sentFilePreview` 决定（沿用「类型差异一律查表」的既有约定）：
+ * · 三封真实对应的 → 用这对的发函用印件；
+ * · 回函件本就走这对样例的（含未单列、走 `DEFAULT_LETTER_PAGES` 的那些）→ 发函件也用这对的；
+ * · 其余（如 `whzf0010005`，它的回函件是另一份印章样例）→ **复用该记录自己的样例**，
+ *   以免左栏两件变成「两封毫不相干的信」。真实环境按函证编号取件，不存在这一回退。
+ */
+export function sentSampleFileOf(confirmationNo: string): string {
+  if (CSWL_LETTER_PAGES[confirmationNo]) return FAHAN_CSWL0526
+  if (sampleFileOf(confirmationNo) === HUIHAN_CSWL0526) return FAHAN_CSWL0526
+  return sampleFileOf(confirmationNo)
 }
 
 /** 取某封函证对应的可下载文件地址（KKFileView 会去拉这个地址） */
@@ -138,6 +230,11 @@ export function buildKkPreviewUrl(fileUrl: string): string {
 /** 浏览器视角的样例文件地址（同源相对路径，由 Vite 伺服 public/samples/；pdf.js 渲染用） */
 export function browserSampleUrlOf(confirmationNo: string): string {
   return `/samples/${sampleFileOf(confirmationNo)}`
+}
+
+/** 发函用印件的浏览器取件地址 —— 与回函件同一套渲染链路（见 `browserSampleUrlOf`） */
+export function browserSentSampleUrlOf(confirmationNo: string): string {
+  return `/samples/${sentSampleFileOf(confirmationNo)}`
 }
 
 /**

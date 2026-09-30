@@ -37,7 +37,76 @@ export type AssignSource = 'auto' | 'manual-confirm' | 'manual-assign'
 /* AI 智能核验                                                         */
 /* ------------------------------------------------------------------ */
 
-/** 一致性比对单行 */
+/**
+ * 识别出的一个**表格**（v2.69）—— 一致性检测的主数据。
+ *
+ * ## 为什么不是「一张拍平的表」
+ *
+ * 往来函证的原件（《企业询证函》）里，除「信息证明无误 / 信息不符」签章区之外的**数据表格有多张**，
+ * 且**每张的列结构互不相同** —— 以真实样例 `wanglai-1-SJ01YF001.pdf` 为例：
+ *   ① 往来款项余额：截止日期 / 欠贵公司（已开票-含税）/ 欠贵公司（未开票-不含税）/ 贵公司欠 / 备注；
+ *   ② 交易额：所属期间 / 交易金额（含税）/ 采购内容 / 备注；
+ *   ③ 票据往来金额：所属期间 / 交易内容 / 票据结算金额 / 备注；
+ *   ④ 其他事项：一个空白填写框。
+ * 若把它们归一化成「事项 / 期间 / 科目 / 金额」一张表，就**丢掉了原件里表格的行列**，
+ * 用户没法把「文件里那张表」与「界面上这张表」对上 —— 而核验页的职责正是
+ * 「拿着 AI 结论去原件上找依据」。故本结构**逐单元格保留行列**（不归一化、不丢列、不重排）。
+ *
+ * ## 发函与回函两套行
+ *
+ * 发函件与回函件的表格**列结构相同**，只有单元格的值可能不同（回函是对方填回来的），
+ * 因此本结构持有 `sentRows` / `repliedRows` 两套行，由 `keyColumns` 把行配对。
+ */
+export interface ConsistencyTable {
+  id: string
+  /**
+   * 该表所属的**大类**（v2.70）—— 原件里的大项标题，如「1. 销售与未结算」。
+   * 真实《企业询证函》是「大类 → 子表」两级：一个大类下常有多张列结构不同的子表。
+   */
+  section?: string
+  /** 表名 —— 取原件里的表标题，如「（1）销售与应（预）收账款」 */
+  title: string
+  /** 表右上角的单位说明（如「单位：人民币元」）；原件里没有则省略 */
+  unit?: string
+  /** 列标题 —— **完全按原件识别**，不合并不省略 */
+  columns: string[]
+  /** 参与比对的列下标（金额列）；其余列（科目 / 备注 / 采购内容）只展示不比对 */
+  comparedColumns: number[]
+  /** 行配对键的列下标 —— 发函行与回函行靠这几列的值对上 */
+  keyColumns: number[]
+  /** 派生「科目余额分录」用的列下标（期间 / 截止日期），缺省取 `keyColumns[0]` */
+  periodColumn?: number
+  /** 派生「科目余额分录」用的会计科目列下标（如「备注」列里的「应付账款」） */
+  subjectColumn?: number
+  /**
+   * 该表在**这一封**发函用印件里占的页区间（v2.70，用于「点表 → 左侧定位」）。
+   *
+   * ⚠️ **相对页号**：1 = 该封的第 1 页，不是文件里的绝对页号 ——
+   * 因为同一份 `AiVerification` 常量会被**多封记录共用**（如 `VERIFY_ZX` 同时服务中信 / 华泰 / 招商），
+   * 而这三封在文件里的起始页各不相同。绝对页号由界面侧叠加
+   * `config/preview.ts` 的 `letterPagesOf(confirmationNo)` 起点算出。
+   */
+  sentPages?: { start: number; end: number }
+  /** 该表在**这一封**回函件里占的页区间（相对页号，同上） */
+  repliedPages?: { start: number; end: number }
+  /** 发函文件识别出来的行 */
+  sentRows: ConsistencyTableRow[]
+  /** 回函文件识别出来的行 */
+  repliedRows: ConsistencyTableRow[]
+}
+
+/** 表格里的一行 —— **逐列单元格文本，完全按原件识别**（长度 === 所属表的 `columns.length`） */
+export interface ConsistencyTableRow {
+  id: string
+  cells: string[]
+}
+
+/**
+ * 一致性比对的**拍平记录** —— 由 `ConsistencyTable[]` 派生（一条 = 一个「有值的金额单元格」），
+ * 供只关心「共几项、几项不一致」的既有消费者使用（`consistencyOf` 摘要、结果填写页的「科目余额分录」）。
+ *
+ * **展示一律用 `ConsistencyTable[]`**（逐表并排），本结构只为兼容既有汇总口径而存在，二者同源。
+ */
 export interface ConsistencyRow {
   id: string
   item: string
@@ -192,6 +261,12 @@ export interface HandwritingResult {
 /** AI 核验总览 */
 export interface AiVerification {
   consistency: {
+    /**
+     * **逐表识别 + 逐表比对**（v2.69）—— 一致性检测的**主数据、也是唯一展示形态**。
+     * 发函件里有几张数据表格就有几项（**张数随识别结果而定，不写死**）。
+     */
+    tables: ConsistencyTable[]
+    /** 拍平的比对记录 —— 由 `tables` 派生（见 `ConsistencyRow` 注释） */
     rows: ConsistencyRow[]
     diffCount: number
     confidence: number
@@ -251,6 +326,17 @@ export interface ReplyRecord {
   /** 最近一次修改留痕 —— 供已归档数据被修改后追溯（不改变回函进度） */
   lastEditedBy?: string
   lastEditedAt?: string
+  /**
+   * **归属来源留痕**（v2.64）—— 这份回函是**怎么被归到当前这封函证**的：
+   * · `auto` 系统自动（往来凭二维码、银行四要素全匹配）；
+   * · `manual-confirm` 人工确认了系统建议；
+   * · `manual-assign` 人工指定（包括在归属界面上手工切出来的段）。
+   *
+   * 与「核验人 / 核验时间」「最近修改」并列，展示在列表**展开行的留痕行**里 ——
+   * 它回答的是审计复核时最常被问的那句「**这封凭什么是这家银行的**」。
+   * 识别落库时由 `applyRecognizedReply` 从任务上带过来（源字段见 `RecognitionTask.assignSource`）。
+   */
+  assignSource?: AssignSource
   /** 该行是否存在 AI 识别/预填数据 */
   aiFilled: boolean
   verification?: AiVerification
@@ -334,6 +420,17 @@ export interface RecognitionTask {
   stages: RecognitionStage[]
   /** 被询证单位名称（匹配结果或人工指定时回填） */
   matchedEntity?: string
+  /**
+   * **段尾面单**条码识别出的快递单号（v2.78）。
+   *
+   * 单号物理上属于**这一段**（面单页就是本段最后一页），不属于函证 ——
+   * 同一封函证多次回函就有多个单号，所以它是**段（任务）级**字段，
+   * 而不是 `ReplyRecord.expressNo` 那个"最近一次回函"的值。
+   *
+   * 未识别到时为 `undefined`：切分结果会标「未识别到」并允许人工补
+   * （判定口径见 `@/utils/expressNo`，那里也写了为什么只标可疑的、不要求逐段核对）。
+   */
+  expressNo?: string
   /** 银行函证的四要素匹配结果（含档位、得分、候选） */
   bankMatch?: BankTextResult
   /**
@@ -413,6 +510,15 @@ export interface UploadBatch {
   pageCount: number
   type: ConfirmationType | '自动判定中'
   tasks: RecognitionTask[]
+  /**
+   * **每段尾部是否还有一页快递面单** —— 往来「① 文件识别录入」里用户指定的那一项（v2.76 起接上用途）。
+   *
+   * 它此前只是个**校验项**（收集了却没人消费）。现在：为真时，切分结果里每段的**最后一页**
+   * 被当作面单页，把面单识别出的**快递单号**带在该段上（见 `SplitPanel` 与 §5.2）——
+   * 这正是用户要的「切分之后对快递面单的快递单号进行识别」。
+   * **银行批次不带这个字段** —— 银行的面单是**独立扫描件**（`faceSheets`），不拼在回函件里。
+   */
+  faceSheetLast?: boolean
   /**
    * 本批次携带的**快递面单**（v2.42）。
    *

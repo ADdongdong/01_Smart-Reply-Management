@@ -165,6 +165,11 @@ interface TaskSeed {
   entity: string
   pageRange: string
   type: ConfirmationType
+  /**
+   * 段尾面单条码识别出的快递单号（v2.78）—— **段级**数据（面单页就是本段最后一页）。
+   * 不给（或给空）表示该段面单没读出来，切分结果会标「未识别到」并允许人工补。
+   */
+  expressNo?: string
   /** 银行函证：回函中识别出的四要素，由 bankMatch 计算归属档位 */
   bankFields?: BankFieldInput
   plannedFailure?: StageKey
@@ -210,6 +215,8 @@ function createTask(seed: TaskSeed, fileName: string, index: number): Recognitio
     pageEnd: span?.end,
     type: seed.type,
     matchedEntity: autoAssigned && best ? best.entity : seed.entity,
+    /* 段尾面单的单号（v2.78）—— 种子没给 = 该段没读出来，切成「未识别到」让人补 */
+    expressNo: seed.expressNo,
     bankMatch,
     assignSource: autoAssigned && resolved ? 'auto' : undefined,
     status: 'pending',
@@ -249,8 +256,10 @@ export function makeSegmentTask(opts: {
   /** 归属到的函证编号；`待指定` = 尚未归属（该段不会写入回函列表） */
   confirmationNo: string
   entity?: string
+  /** 段尾面单的单号（人工在切分结果里补/改的值也走这里，见 `COMMIT_SPLIT`） */
+  expressNo?: string
 }): RecognitionTask {
-  const { type, fileName, index, pageStart, pageEnd, confirmationNo, entity } = opts
+  const { type, fileName, index, pageStart, pageEnd, confirmationNo, entity, expressNo } = opts
   const resolved = confirmationNo !== '待指定'
   return {
     id: `${fileName}-seg${pageStart}-${pageEnd}-${index}`,
@@ -260,6 +269,7 @@ export function makeSegmentTask(opts: {
     pageEnd,
     type,
     matchedEntity: entity,
+    expressNo,
     /* 归属由人指定 —— 与「确认归属」一样记 manual-assign，不冒充系统自动归属 */
     assignSource: resolved ? 'manual-assign' : undefined,
     status: 'pending',
@@ -277,6 +287,7 @@ export function buildBatchA(): UploadBatch {
       entity: '广东证券股份有限公司',
       pageRange: '第 1-3 页',
       type: '往来函证',
+      expressNo: 'SF7444706557147',
       stageDetails: {
         match: '二维码解析成功 → 归属函证 whzf0010006（第 1 次回函）',
         consistency: '20 项科目逐行比对完成 · 2 项差异',
@@ -292,6 +303,7 @@ export function buildBatchA(): UploadBatch {
       entity: '海通证券股份有限公司',
       pageRange: '第 4-6 页',
       type: '往来函证',
+      expressNo: 'SF7444706556947',
       stageDetails: {
         match: '二维码解析成功 → 归属函证 whzf0010005（第 2 次回函）',
         consistency: '20 项科目逐行比对完成 · 1 项差异',

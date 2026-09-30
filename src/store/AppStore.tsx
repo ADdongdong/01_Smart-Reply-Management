@@ -102,6 +102,11 @@ type Action =
         /** `待指定` = 该段未归属（不写入回函列表） */
         confirmationNo: string
         entity?: string
+        /**
+         * 段尾面单的单号（v2.78）—— 可能是识别的、也可能是**人工在切分结果里补/改的**。
+         * 它属于段，所以随切分结果一起下发，落到任务的 `expressNo` 上。
+         */
+        expressNo?: string
       }[]
     }
   | { type: 'RETRY_TASK'; taskId: string }
@@ -204,6 +209,12 @@ function applyRecognizedReply(
     risk: twoPhase ? 'none' : (base?.risk ?? 'none'),
     verifyStatus: 'pending',
     aiFilled: true,
+    /*
+     * 归属来源留痕（v2.64）—— 从识别任务上带过来，随记录长期保留。
+     * 归属界面上手工切出的段记 `manual-assign`（见 `makeSegmentTask`），与「指定归属」同一口径，
+     * **不冒充系统自动归属** —— 这条正是审计复核时要看的那句"凭什么是这家银行"。
+     */
+    assignSource: task.assignSource,
     periodStart: base?.periodStart ?? best?.periodStart,
     periodEnd: base?.periodEnd ?? best?.periodEnd,
     recognitionPending: twoPhase,
@@ -518,7 +529,15 @@ function reducer(state: AppState, action: Action): AppState {
           )
           if (reused) {
             used.add(reused.id)
-            if (reused.confirmationNo === seg.confirmationNo) return reused
+            if (reused.confirmationNo === seg.confirmationNo) {
+              /*
+               * 单号被人工补/改过 → **只改这一个字段**（v2.78）：进度、核验数据一律原样保留。
+               * 段尾面单的单号是**段级**数据，与归属、识别进度互不影响。
+               */
+              return reused.expressNo === seg.expressNo
+                ? reused
+                : { ...reused, expressNo: seg.expressNo }
+            }
             /*
              * 归属改了 → 重新落库：原先按旧归属写进列表的那条不能再算数。
              * 注意这里**不回收旧记录** —— 演示里改归属多发生在「待指定」的段上
@@ -529,6 +548,7 @@ function reducer(state: AppState, action: Action): AppState {
               ...reused,
               confirmationNo: seg.confirmationNo,
               matchedEntity: seg.entity ?? reused.matchedEntity,
+              expressNo: seg.expressNo,
               assignSource:
                 seg.confirmationNo === '待指定' ? undefined : ('manual-assign' as const),
               applied: false,
@@ -548,6 +568,7 @@ function reducer(state: AppState, action: Action): AppState {
             pageEnd: seg.pageEnd,
             confirmationNo: seg.confirmationNo,
             entity: seg.entity,
+            expressNo: seg.expressNo,
           })
         })
 
