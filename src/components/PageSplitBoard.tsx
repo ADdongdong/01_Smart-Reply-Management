@@ -1,9 +1,18 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from 'antd'
-import { CloseOutlined, EyeOutlined, LoadingOutlined, ReloadOutlined, ScissorOutlined } from '@ant-design/icons'
-import * as pdfjsLib from 'pdfjs-dist'
+import {
+  CloseOutlined,
+  EyeOutlined,
+  LoadingOutlined,
+  PushpinFilled,
+  PushpinOutlined,
+  ReloadOutlined,
+  RotateRightOutlined,
+  ScissorOutlined,
+} from '@ant-design/icons'
+import { PDF_INIT, pdfjsLib } from '@/utils/pdfSetup'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { PageSegment } from '@/types'
 import { segmentCoversPage } from '@/utils/pageSplit'
@@ -32,6 +41,10 @@ const ZOOM_DELAY = 1000
  * 这 300ms 就是留给人**从卡片走到弹窗上**的时间；期间只要进了弹窗，收回就作废。
  */
 const ZOOM_GRACE_MS = 300
+
+/** 默认值用的**稳定空数组** —— 写成字面量 `[]` 会让下面依赖它的 effect 每次渲染都重跑 */
+const EMPTY_PAGES: number[] = []
+const EMPTY_URLS: Record<number, string | null> = {}
 
 /** 局部放大预览的窗口尺寸（CSS px）—— 横向窗口更适合读表格 */
 const ZOOM_WIN_W = 720
@@ -68,24 +81,52 @@ const ZOOM_OFF_DPR = 2
 function ZoomPreview({
   doc,
   page,
+  sourcePage,
   rect,
   fx,
   fy,
   pinned,
+  rotate,
+  pos,
   onPan,
+  onRotate,
+  onMoveTo,
   onHoverStart,
   onHoverEnd,
   onClose,
 }: {
   doc: PDFDocumentProxy | null
+  /** **展示用**页号（标题里写「第 N 页」，用户看到的是上传件的页序） */
   page: number
+  /**
+   * **取图用**页号（v2.84）—— 默认同 `page`。面单页传 `1`：
+   * 它展示的是"上传件的第 17 页"，但图来自**面单文件的第 1 页**。
+   */
+  sourcePage?: number
   rect: DOMRect
   /** 光标在页面里的归一化位置（0~1）—— 窗口以它为取景中心 */
   fx: number
   fy: number
   /** 钉住后：不再随鼠标移开收回，且**摆到不挡右侧面板的位置**（点窗口可滑动查看） */
   pinned: boolean
+  /**
+   * **临时旋转角**（0 / 90 / 180 / 270，顺时针；v2.90）—— 只作用在这块预览画布上：
+   * **不改原文件、也不动缩略图墙**。用户实景：「有的快递面单是横着或者竖着扫描的」，
+   * 不转一下，面单上的字是横躺的，单号根本读不出来。
+   */
+  rotate: number
+  /**
+   * **用户拖出来的窗口位置**（v2.92）—— `null` = 用自动摆位（钉住贴面板左缘 / 悬停贴卡片旁）。
+   *
+   * 一旦用户拖过就**一直用他拖的位置**：否则下一次渲染又回到自动位，
+   * 他刚把窗口挪开这件事等于白做 —— 而他挪开，往往正是因为自动位挡着他要看的东西。
+   */
+  pos: { left: number; top: number } | null
   onPan: (fx: number, fy: number) => void
+  /** 顺时针转 90°（累加），由父组件记在**每页各自**的角度上 */
+  onRotate: () => void
+  /** 拖窗口（按住头部）：把新位置交给父组件记住 */
+  onMoveTo: (left: number, top: number) => void
   /** 进入弹窗 → 取消"离开卡片"那次收回 */
   onHoverStart: () => void
   onHoverEnd: () => void
@@ -105,6 +146,41 @@ function ZoomPreview({
   /** 按下那一刻的鼠标位置与取景 —— 位移以它为基准算，避免逐帧累加跑飞 */
   const dragRef = useRef<{ x: number; y: number; fx: number; fy: number } | null>(null)
 
+  /**
+   * **拖动整个窗口：按住头部**（v2.92，用户要求）。
+   *
+   * 为什么放头部、而不是"哪儿都能拖"：**画布上的拖动已经被"看别处"占用了**
+   * （按住拖动平移取景，v2.82 定的）—— 同一个手势不能干两件事，必须分区。
+   * 分给头部是桌面端的通用约定（拖标题栏移动窗口），**用户不用学第二遍**。
+   */
+  const [moving, setMoving] = useState(false)
+  const moveRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const onHeadDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!pinned) return
+    /* 与画布、旋转按钮同一条规矩：**按下不能抢走输入框焦点**（那个输入框失焦即保存） */
+    e.preventDefault()
+    moveRef.current = { x: e.clientX, y: e.clientY, left, top }
+    setMoving(true)
+  }
+  useEffect(() => {
+    if (!moving) return
+    const onMove = (e: MouseEvent) => {
+      const m = moveRef.current
+      if (!m) return
+      onMoveTo(m.left + (e.clientX - m.x), m.top + (e.clientY - m.y))
+    }
+    const onUp = () => {
+      moveRef.current = null
+      setMoving(false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [moving, onMoveTo])
+
   /* ① 整页 → 离屏位图（每页一次） */
   useEffect(() => {
     offRef.current = null
@@ -113,8 +189,22 @@ function ZoomPreview({
     void (async () => {
       try {
         const real = doc.numPages
-        const p = await doc.getPage(((page - 1) % real) + 1)
-        const viewport = p.getViewport({ scale: ZOOM_SCALE * ZOOM_OFF_DPR })
+        /* 取图用 `sourcePage`（面单页为 1），展示仍用 `page` —— 见 props 里的说明 */
+        const src = sourcePage ?? page
+        const p = await doc.getPage(((src - 1) % real) + 1)
+        /*
+         * **旋转在「画离屏位图」这一步做，不在 CSS 上转**（v2.90）：
+         * 位图转好之后，下面那套"按归一化坐标裁剪 + 按住拖动"的取景逻辑**一行都不用改**；
+         * 若改用 CSS `transform: rotate()`，裁剪坐标与拖动方向映射全得跟着改，容易出歪。
+         *
+         * `rotation` 是**绝对角**：pdf.js 的默认值是 `page.rotate`（扫描件自己常带 90/270），
+         * 所以必须写 `p.rotate + rotate` —— 只写 `rotate` 会把**文件自带的旋转撤销掉**，
+         * 于是"本来就竖着的面单"被转回横躺。
+         */
+        const viewport = p.getViewport({
+          scale: ZOOM_SCALE * ZOOM_OFF_DPR,
+          rotation: (p.rotate + rotate) % 360,
+        })
         const off = document.createElement('canvas')
         off.width = Math.max(1, Math.floor(viewport.width))
         off.height = Math.max(1, Math.floor(viewport.height))
@@ -129,7 +219,8 @@ function ZoomPreview({
     return () => {
       cancelled = true
     }
-  }, [doc, page])
+    /* `rotate` 变了要**重新画一遍离屏位图**（旋转就发生在这一步，见上面注释） */
+  }, [doc, page, sourcePage, rotate])
 
   /* ② 把光标附近的区域裁进可视 canvas（纯位图搬运，跟着光标走） */
   useEffect(() => {
@@ -213,25 +304,67 @@ function ZoomPreview({
     if (rect.left - gap - ZOOM_WIN_W >= 8) return rect.left - gap - ZOOM_WIN_W
     return Math.max(8, window.innerWidth - ZOOM_WIN_W - 8)
   })()
-  const left = pinned ? Math.max(8, Math.round(paneLeft - gap - ZOOM_WIN_W)) : hoverLeft
-  const top = Math.min(
+  const autoLeft = pinned ? Math.max(8, Math.round(paneLeft - gap - ZOOM_WIN_W)) : hoverLeft
+  const autoTop = Math.min(
     Math.max(8, rect.top),
     Math.max(8, window.innerHeight - 8 - ZOOM_WIN_H - ZOOM_CHROME_H),
   )
+  /*
+   * **用户拖过就用他拖的位置**（v2.92），并在渲染时再夹一次视口 ——
+   * 夹的目的只有一个：**头（拖拽把手）永远够得着**。
+   * 允许窗口贴边部分出屏（左侧/右侧各留 160px 可见），但不允许整窗飞出屏幕：
+   * 否则用户只能刷新页面才能把它找回来。
+   */
+  const left = Math.min(Math.max(pos ? pos.left : autoLeft, 8 - ZOOM_WIN_W + 160), window.innerWidth - 160)
+  const top = Math.min(Math.max(pos ? pos.top : autoTop, 8), window.innerHeight - 44)
 
   return createPortal(
     <div
-      className="split-board__zoom"
+      className={`split-board__zoom${pinned ? ' is-pinned' : ''}`}
       style={{ left, top, width: ZOOM_WIN_W }}
       onMouseEnter={onHoverStart}
       onMouseLeave={onHoverEnd}
     >
-      <div className="split-board__zoom-head">
-        <span>
-          第 {page} 页 · 局部放大 ×{ZOOM_SCALE} ——{' '}
-          {pinned ? '已固定 · 按住拖动看别处' : '移动鼠标看其他位置 · 点缩略图固定'}
+      <div
+        className={`split-board__zoom-head${moving ? ' is-moving' : ''}`}
+        onMouseDown={onHeadDown}
+        title={pinned ? '按住这里可拖动窗口' : undefined}
+      >
+        {/*
+          **固定状态用图标表示，不用文字**（v2.92，用户要求：「固定前和固定后，希望窗口上有个固定的图标来标识，
+          而不是用文字说明」）。两态一眼可辨：**空心图钉 = 未固定**（预览跟随鼠标）、
+          **实心图钉 = 已固定**（不再随鼠标移开收回）。含义靠 `title` 补 —— 悬停说明不算"文字说明"，
+          它不占版面、也不会在读面单时干扰视线。
+        */}
+        <span
+          className={`split-board__zoom-pin${pinned ? ' is-on' : ''}`}
+          title={
+            pinned
+              ? '已固定 —— 预览不会随鼠标移开消失'
+              : '未固定 —— 预览跟随鼠标；在缩略图上点一下即可固定'
+          }
+        >
+          {pinned ? <PushpinFilled /> : <PushpinOutlined />}
+        </span>
+        <span className="split-board__zoom-title">
+          第 {page} 页 · 局部放大 ×{ZOOM_SCALE}
+          {rotate ? ` · 已旋转 ${rotate}°` : ''}
         </span>
         <span className="split-board__zoom-actions">
+          {/*
+            按下时必须 `preventDefault()` —— 否则这一下会把输入框的焦点抢走，而它是**失焦即保存**：
+            用户"点改 → 发现是横的 → 点旋转"这条最自然的路径，会在按钮上把还没敲的编辑当场提交掉
+            （v2.90 实测踩到）。与预览画布同一套处理，见 `onCanvasDown`。
+          */}
+          <Button
+            type="text"
+            size="small"
+            icon={<RotateRightOutlined />}
+            title="顺时针旋转 90°（只转这块预览，不改原文件）"
+            aria-label="旋转 90 度"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onRotate}
+          />
           <Button type="text" size="small" icon={<CloseOutlined />} aria-label="关闭预览" onClick={onClose} />
         </span>
       </div>
@@ -240,6 +373,8 @@ function ZoomPreview({
           ref={viewRef}
           className={`split-board__zoom-canvas${dragging ? ' is-dragging' : ''}`}
           onMouseDown={onCanvasDown}
+          /* 两种拖动各归其位，靠 tooltip 说清楚（不占版面） */
+          title={pinned ? '按住拖动看别处；拖标题栏可移动窗口' : undefined}
         />
       ) : (
         <div className="split-board__zoom-empty" style={{ minHeight: ZOOM_WIN_H }}>
@@ -311,6 +446,8 @@ export default function PageSplitBoard({
   onPickSegment,
   pinnedPage,
   pinnedAnchor,
+  faceSheetPages = EMPTY_PAGES,
+  faceSheetUrls = EMPTY_URLS,
 }: {
   fileUrl: string
   /** 整份文件的页数（以**数据**为准，见上方说明） */
@@ -330,9 +467,28 @@ export default function PageSplitBoard({
   pinnedPage?: number | null
   /** 请求方给的锚点（那一行）—— 弹窗纵向与它对齐 */
   pinnedAnchor?: HTMLElement | null
+  /**
+   * 哪几页是**快递面单页**（v2.84，银行侧）—— 这些页**从面单文件取图**渲染，
+   * 而不是从用户上传的那份回函件里取：上传件里根本没有这些页的清晰扫描件
+   * （演示数据按 17 页书写、样例只有 4 页，超出部分一直在循环取页凑数）。
+   */
+  faceSheetPages?: number[]
+  /**
+   * **面单页 → 面单样例地址**（v2.85 起支持一个文件多个包裹、每张面单一份文件）。
+   * 不给就不换源，行为与改动前完全一致。
+   */
+  faceSheetUrls?: Record<number, string | null>
 }) {
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([])
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
+  /**
+   * **面单文件**的 pdf 文档（v2.84 立、v2.85 支持一个文件多个包裹）：**页号 → 文档**。
+   * 用 ref 存 + 一个自增计数器触发重画 —— 面单页可能分属不同的面单文件，各加载各的、互不影响。
+   */
+  const faceDocsRef = useRef<Record<number, PDFDocumentProxy>>({})
+  const [faceLoaded, setFaceLoaded] = useState(0)
+  /** 已经取过的「页 → 面单地址」—— 去重，避免上游重渲染反复取（见下面的 effect 注释） */
+  const loadedFaceRef = useRef<Record<number, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   /** 自增即重新取件 —— 「重新加载」按钮与自动重试都走它 */
@@ -370,6 +526,18 @@ export default function PageSplitBoard({
     fy: number
     pinned: boolean
   } | null>(null)
+  /**
+   * **每一页各自的临时旋转角**（0/90/180/270，v2.90）—— 纯预览行为，不写回文件、不改缩略图墙。
+   * 按页记：同一份文件里很可能"这页横着、那页竖着"，共用一个角度会互相打架。
+   */
+  const [zoomRotations, setZoomRotations] = useState<Record<number, number>>({})
+  /**
+   * **用户拖出来的窗口位置**（v2.92）—— `null` = 还没拖过，用自动摆位。
+   *
+   * 为什么必须存在父组件：位置是"跨多次预览打开"的（用户把它挪开，往往是因为自动位挡着他要看的东西；
+   * 关掉再打开又弹回原处，等于白挪）。存在这里，只要不离开归属界面就一直有效。
+   */
+  const [zoomPos, setZoomPos] = useState<{ left: number; top: number } | null>(null)
   const zoomTimerRef = useRef<number | undefined>(undefined)
   /** 「离开卡片 → 收回」的延迟句柄 —— 留出从卡片走到弹窗上的时间（见 `disarmZoom`） */
   const hideTimerRef = useRef<number | undefined>(undefined)
@@ -404,6 +572,33 @@ export default function PageSplitBoard({
     cancelHide()
     hideTimerRef.current = window.setTimeout(() => setZoom(null), ZOOM_GRACE_MS)
   }
+
+  /**
+   * **临时旋转预览**（v2.90，用户要求：「有的快递面单是横着或者竖着扫描的」）。
+   *
+   * 转的是**这一块预览的画布**（在离屏位图那一步转，见 `ZoomPreview` 注释），
+   * 原文件、缩略图墙、切分结果都不动 —— 用户说的就是"临时旋转不修改原始 PDF"。
+   *
+   * 两个细节：
+   * · **角度按页各记一份**：同一份文件里常常"这几页横、那几页竖"，共用一个角度会互相打架；
+   *   而且关掉预览再打开**同一页还是转好的角度**（用户要连着核对好几个面单）。
+   * · **转完接着看同一处纸面**：绕中心顺时针 90°，原在 `(fx, fy)` 的那点会落到 `(1 - fy, fx)`；
+   *   不同步挪取景，用户刚对准的单号就"转没了"、还得重拖一遍。（转四次回到原处，可逆。）
+   */
+  const rotateZoom = () => {
+    if (!zoom) return
+    setZoomRotations((m) => ({ ...m, [zoom.page]: ((m[zoom.page] ?? 0) + 90) % 360 }))
+    setZoom({ ...zoom, fx: 1 - zoom.fy, fy: zoom.fx })
+  }
+
+  /**
+   * **把窗口挪到用户拖到的位置**（v2.92）。
+   *
+   * `useCallback` 是为了让引用稳定：ZoomPreview 里为此挂了 `window` 级 mousemove，
+   * 而拖动每一帧都会 setState → 重渲染 —— 回调若每帧换一次，监听器就被反复摘挂
+   * （功能不会坏，但没必要）。依赖为空：它只做一次 setState。
+   */
+  const moveZoomTo = useCallback((left: number, top: number) => setZoomPos({ left, top }), [])
 
   const closeZoom = () => {
     window.clearTimeout(zoomTimerRef.current)
@@ -456,6 +651,15 @@ export default function PageSplitBoard({
    * **用 rAF 节流**：位置先写 ref，每帧最多同步一次进 state，避免整面墙跟着每帧重渲染。
    */
   const onCardMove = (page: number, e: ReactMouseEvent<HTMLCanvasElement>) => {
+    /*
+     * **钉住后，划过缩略图不再改取景**（v2.98，用户：「到固定模式以后，就算鼠标放在原始文件缩略图上，
+     * 固定页面的预览内容也不要移动了，只有在固定模式拖动才可以移动」）。
+     *
+     * 钉住的语义是"**我看见的就是我要核对的那一格**"——之后鼠标顺路划过缩略图
+     * （去点别的段、去右侧填单号）都不该把这一格挪走。要动，就在预览窗口里**按住拖**。
+     * 顺带也把"固定后仍可用缩略图微调位置"这条旧口径正式撤掉了（它与"钉住"本就互相矛盾）。
+     */
+    if (zoom?.pinned) return
     const r = e.currentTarget.getBoundingClientRect()
     const fx = r.width ? Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) : 0.5
     const fy = r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 0.5
@@ -506,7 +710,8 @@ export default function PageSplitBoard({
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = new Uint8Array(await res.arrayBuffer())
         if (cancelled) return
-        task = pdfjsLib.getDocument({ data })
+        /* `...PDF_INIT` 必须带上：扫描件的 JBIG2 图像没有 wasm 解码器就永远解不出来（v2.87） */
+        task = pdfjsLib.getDocument({ data, ...PDF_INIT })
         const d = await task.promise
         if (cancelled) return
         setRetryNote('')
@@ -533,27 +738,74 @@ export default function PageSplitBoard({
     }
   }, [fileUrl, reloadKey])
 
-  /* 逐页画缩略图 —— 页数不多（演示里 ≤ 11 页），串行渲染即可，不必懒加载 */
+  /*
+   * 加载**面单文件**（v2.84）—— 只在这一份文件确实有"面单页"、并且给了面单地址时才去取。
+   * **失败就静默留空**：墙上那一页留白框，不弹错、不影响切分（面单图是锦上添花，缺了也能归属）。
+   *
+   * **同一份面单只取一次**（`faceLoadedRef` 去重）：这个 effect 会被上游重渲染反复触发，
+   * 实测没去重时同一份面单被取了 **17 次**（百来 KB × 17 的无谓流量）；
+   * 更要紧的是原来每次 cleanup 都 `destroy()` 当前文档 —— 反复触发时会把**已经画好的那张**一起弄没。
+   * 现在只有"换成另一份面单"时才释放上一份。
+   */
+  useEffect(() => {
+    /* 每个"面单页"各自加载自己那张面单（同一个文件里可能有多个包裹） */
+    faceSheetPages.forEach((pg) => {
+      const url = faceSheetUrls[pg]
+      if (!url) return
+      if (loadedFaceRef.current[pg] === url) return
+      loadedFaceRef.current[pg] = url
+      void (async () => {
+        try {
+          const res = await fetch(url)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const data = new Uint8Array(await res.arrayBuffer())
+          const d = await pdfjsLib.getDocument({ data, ...PDF_INIT }).promise
+          /* 换成另一张了（同一页换了面单）→ 释放旧的 */
+          const prev = faceDocsRef.current[pg]
+          if (prev) void (prev as unknown as { destroy?: () => void }).destroy?.()
+          faceDocsRef.current[pg] = d
+          setFaceLoaded((n) => n + 1)
+        } catch {
+          /* 取不到面单 → 该页留空框 */
+        }
+      })()
+    })
+  }, [faceSheetUrls, faceSheetPages])
+
+  /* 逐页画缩略图 —— 页数不多（演示里 ≤ 17 页），串行渲染即可，不必懒加载 */
   useEffect(() => {
     if (!doc) return
     let cancelled = false
 
     void (async () => {
-      const real = doc.numPages
       for (let i = 1; i <= pageCount; i++) {
         if (cancelled) return
         const canvas = canvasRefs.current[i - 1]
         if (!canvas) continue
+        /*
+         * **面单页从面单文件取图**（v2.84）：这类页在上传件里没有对应的清晰扫描件，
+         * 原先只能拿原文件循环取页凑数（看上去就是一张函证正文，与"这是面单"自相矛盾）。
+         * 面单文件通常只有一页，故恒取它的第 1 页；文档还没到就先跳过，
+         * 等它到了这个 effect 会因 `faceDoc` 变化再跑一遍把这张补画上。
+         */
+        const isFace = faceSheetPages.includes(i)
+        const srcDoc = isFace ? faceDocsRef.current[i] : doc
+        if (!srcDoc) continue
         try {
-          /* 页数超出样例实际页数时循环取页（见组件顶部说明） */
-          const page = await doc.getPage(((i - 1) % real) + 1)
+          const real = srcDoc.numPages
+          const page = await srcDoc.getPage(isFace ? 1 : ((i - 1) % real) + 1)
           const base = page.getViewport({ scale: 1 })
           const viewport = page.getViewport({ scale: (THUMB_W / base.width) * RENDER_SCALE })
           canvas.width = Math.max(1, Math.floor(viewport.width))
           canvas.height = Math.max(1, Math.floor(viewport.height))
           await page.render({ canvas, viewport }).promise
-        } catch {
-          /* 单页渲染失败不该让整墙空白 —— 跳过，该页留空框 */
+        } catch (e) {
+          /*
+           * 单页渲染失败不该让整墙空白 —— 跳过，该页留空框。
+           * **但要留下可查的痕迹**（v2.87）：这条 catch 静默吞过一次真实故障 ——
+           * 22 页的演示件里后几页一直空白，界面上没有任何提示，只能靠猜。
+           */
+          console.warn(`[PageSplitBoard] 第 ${i} 页缩略图渲染失败`, e)
         }
       }
       if (!cancelled) setLoading(false)
@@ -562,7 +814,41 @@ export default function PageSplitBoard({
     return () => {
       cancelled = true
     }
-  }, [doc, pageCount])
+    /*
+     * 依赖里**刻意不放 `faceLoaded`** —— 面单文档后到时的补画交给下面那个专门的小循环。
+     * 放进来会让整墙每次到一张面单就**从头重画**：22 页串行本就要好几秒，
+     * 反复重启的结果是"后面几页永远画不到、加载提示也一直不消失"（v2.85 实测踩到）。
+     */
+  }, [doc, pageCount, faceSheetPages])
+
+  /**
+   * 面单文档**后到**时补画那几页面单（v2.85）—— 只重画面单页，**不重启整面墙**。
+   */
+  useEffect(() => {
+    if (!faceLoaded) return
+    let cancelled = false
+    void (async () => {
+      for (const pg of faceSheetPages) {
+        if (cancelled) return
+        const srcDoc = faceDocsRef.current[pg]
+        const canvas = canvasRefs.current[pg - 1]
+        if (!srcDoc || !canvas) continue
+        try {
+          const page = await srcDoc.getPage(1)
+          const base = page.getViewport({ scale: 1 })
+          const viewport = page.getViewport({ scale: (THUMB_W / base.width) * RENDER_SCALE })
+          canvas.width = Math.max(1, Math.floor(viewport.width))
+          canvas.height = Math.max(1, Math.floor(viewport.height))
+          await page.render({ canvas, viewport }).promise
+        } catch {
+          /* 单页失败 → 该页留空框 */
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [faceLoaded, faceSheetPages])
 
   return (
     <div className="split-board">
@@ -690,13 +976,24 @@ export default function PageSplitBoard({
       {/* 悬停放大预览（portal 到 body —— 见 `ZoomPreview` 顶部说明） */}
       {zoom && (
         <ZoomPreview
-          doc={doc}
+          /*
+           * 面单页 → 用**面单文件**渲染；**面单文件还没到（或该页没有对应样例）就退回上传件** ——
+           * 宁可给"这一页的真实内容"，也不要弹个空窗：原先这里直接给 `null`，
+           * 用户在预览里只看到一行"原件未加载"，什么都看不到（v2.89 修）。
+           */
+          doc={faceDocsRef.current[zoom.page] ?? doc}
           page={zoom.page}
+          /* 取图页：用面单文档时取它的第 1 页；退回上传件时按正常页码（`undefined` = 用 `page`） */
+          sourcePage={faceDocsRef.current[zoom.page] ? 1 : undefined}
           rect={zoom.rect}
           fx={zoom.fx}
           fy={zoom.fy}
           pinned={zoom.pinned}
+          rotate={zoomRotations[zoom.page] ?? 0}
+          pos={zoomPos}
           onPan={(fx, fy) => setZoom((z) => (z ? { ...z, fx, fy } : z))}
+          onRotate={rotateZoom}
+          onMoveTo={moveZoomTo}
           onHoverStart={cancelHide}
           onHoverEnd={disarmZoom}
           onClose={closeZoom}

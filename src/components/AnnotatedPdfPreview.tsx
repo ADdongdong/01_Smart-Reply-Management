@@ -7,7 +7,7 @@ import {
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons'
-import * as pdfjsLib from 'pdfjs-dist'
+import { PDF_INIT, pdfjsLib } from '@/utils/pdfSetup'
 
 // pdf.js 6.x 的解析代码依赖若干 ES2024 新 API（Uint8Array 文本编解码、Map upsert 等），
 // 尚未普及的浏览器内核需要按官方 polyfill 惯例补齐
@@ -199,7 +199,8 @@ export default function AnnotatedPdfPreview({
         if (!res.ok) throw new Error(`样例文件请求失败：HTTP ${res.status}`)
         const data = new Uint8Array(await res.arrayBuffer())
         if (cancelled) return
-        task = pdfjsLib.getDocument({ data })
+        /* `...PDF_INIT`（wasm 解码器 + worker）—— 扫描件的 JBIG2 图像没它解不出来（v2.87） */
+      task = pdfjsLib.getDocument({ data, ...PDF_INIT })
         const d: PDFDocumentProxy = await task.promise
         if (cancelled) return
         /*

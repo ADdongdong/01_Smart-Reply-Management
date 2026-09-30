@@ -183,13 +183,27 @@ export function sampleFileUrlOf(confirmationNo: string): string {
 const FACE_SHEET_DIR = '/samples/faceSheets/'
 
 /**
- * 按函证编号**单独指定**的面单样例；`null` = 该函证明确「无面单」，左侧渲染空态
- * （银行函证回函由银行自行出具、通常不含快递面单）。
+ * 按函证编号**单独指定**的面单样例；`null` = 该函证明确「无面单」，左侧渲染空态。
+ *
+ * **银行侧自 v2.83 起也有面单了**（原注释「银行函证回函通常不含快递面单」已过期）：
+ * 一个包裹一张面单、覆盖同包裹的那几封。演示批次 B 是**齐商银行按年度回的 4 封**
+ * （21 / 22 / 23 / 24 年 1-6 月）装在**同一个快递**里寄回 —— 所以这 4 封**指向同一张面单**，
+ * 这正是「一个快递单号对应多个函证编号」在预览上的样子。
  */
 const FACE_SHEET_BY_CONFIRMATION: Record<string, string | null> = {
   whzf0010005: 'face-sheet-0010005.pdf',
   whzf0010014: 'face-sheet-0010014.pdf',
-  'QS2024-031': null,
+  /*
+   * 这一封的快递单号在演示数据里就是「**条码读不出、要人工填**」（见 `SplitPanel` 的未识别态）——
+   * 那就该给它一张**真正读不出条码**的面单（`csyhhz0010016`，文件名就叫 none），
+   * 否则界面说"条码未读出"、旁边却摊着一张清晰可读的面单，素材与文案自相矛盾。
+   */
+  whzf0010003: 'face-sheet-none.pdf',
+  /* 齐商银行按年度回的 4 封 —— 同一个快递、同一张面单（改其中一处，4 封一起换） */
+  'QS2024-016': 'face-sheet-0010014.pdf',
+  'QS2024-017': 'face-sheet-0010014.pdf',
+  'QS2024-018': 'face-sheet-0010014.pdf',
+  'QS2024-031': 'face-sheet-0010014.pdf',
 }
 
 /**
@@ -214,6 +228,54 @@ export function faceSheetUrlOf(confirmationNo: string): string | null {
   if (hit === null) return null
   const file = hit ?? FACE_SHEET_POOL[stableIndex(confirmationNo, FACE_SHEET_POOL.length)]
   return `${FACE_SHEET_DIR}${file}`
+}
+
+/**
+ * 某份**回函文件**所携带的那张面单（v2.84）—— 按文件名给。
+ *
+ * 为什么还需要一个"按文件"的入口：**银行侧一个包裹（一份文件）只有一张面单**，
+ * 而它要在**切分板**里显示 —— 那一刻用户还没指定归属，`faceSheetUrlOf(函证编号)` 根本无从查起
+ * （编号还是「待指定」）。所以墙上"哪一页是面单"只能按**文件**去找它的面单样例。
+ *
+ * 往来不需要它：往来的面单页是各段自己的尾页、与函证正文在同一份文件里，墙按原文件渲染即可。
+ */
+const FACE_SHEET_BY_FILE: Record<string, string> = {
+  '银行函证回函-20240913.pdf': 'face-sheet-0010014.pdf',
+}
+
+export function faceSheetUrlOfFile(fileName: string): string | null {
+  const file = FACE_SHEET_BY_FILE[fileName]
+  return file ? `${FACE_SHEET_DIR}${file}` : null
+}
+
+/**
+ * 演示文件里**哪几页是面单页**（v2.85）—— 页面号 → 面单样例。
+ *
+ * 为什么需要一个"页 → 面单文件"的表：银行一份件里可能有**不止一个包裹**
+ * （演示批次 B 就是两个：齐商 4 封装一个快递、另一封单独寄一个），
+ * 每个包裹各带一张面单 —— 而两张面单的**识别结局不同**（一张条码读出来了、
+ * 一张没读出来要人工填），这正是要讲的那套逻辑。
+ *
+ * 第 17 页 = 那张**读出来**的面单（顺丰，运单号 SF 512 869 015 9893）；
+ * 第 22 页 = 那张**读不出**的（`face-sheet-none.pdf`，文件名就叫 none）。
+ */
+const FACE_SHEET_PAGES_BY_FILE: Record<string, Record<number, string>> = {
+  '银行函证回函-20240913.pdf': {
+    17: 'face-sheet-0010014.pdf',
+    22: 'face-sheet-none.pdf',
+  },
+}
+
+/** 该文件里被当作**面单页**的页码（按文件给；往来为空 —— 它的面单页是各段尾页、不单独成段） */
+export function faceSheetPagesOfFile(fileName: string): number[] {
+  const map = FACE_SHEET_PAGES_BY_FILE[fileName]
+  return map ? Object.keys(map).map(Number).sort((a, b) => a - b) : []
+}
+
+/** 某一份文件的**第 N 页**该从哪个面单样例取图；`null` = 不是面单页（照常从上传件取） */
+export function faceSheetUrlOfPage(fileName: string, page: number): string | null {
+  const file = FACE_SHEET_PAGES_BY_FILE[fileName]?.[page]
+  return file ? `${FACE_SHEET_DIR}${file}` : null
 }
 
 /**

@@ -184,13 +184,14 @@ export default function ReplyList() {
    * 不再多一次「确认归属」：银行回函无需切分，上传弹窗的「确定」即用户的一次明确表态，
    * 与该类型在工作台内靠四要素算归属的机制不冲突。
    */
-  const onBankUploadConfirm = (files: BankUploadFile[]) => {
+  const onBankUploadConfirm = (files: BankUploadFile[], faceSheetLast: boolean) => {
     setBankUpload(false)
     const batch = PRESET_BATCHES[TYPE_RULE['银行函证'].presetBatchId]()
     const first = files[0]
     dispatch({
       type: 'START_BATCH',
-      batch: first ? { ...batch, fileName: first.name, fileSize: first.size } : batch,
+      /* `faceSheetLast` 由①上传弹窗指定（v2.83）：为真时②的切分初稿会把末页预切成面单段 */
+      batch: first ? { ...batch, fileName: first.name, fileSize: first.size, faceSheetLast } : { ...batch, faceSheetLast },
       uploadType: '银行函证',
     })
     message.success('已开始识别 —— 请切分这份回函并逐段指定归属，点「确定」后回列表等结果')

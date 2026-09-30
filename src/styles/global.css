@@ -1122,13 +1122,73 @@ body {
   display: flex;
   gap: 16px;
   align-items: stretch;
-  min-height: 560px;
-  margin-top: 12px;
+  /*
+   * **两栏各自独立滚动**（v2.87 用户要求：「左侧区域是固定的，右侧可以独立进行滚动，
+   * 不要右侧往下滚动，左侧也跟着往下滚动」）。
+   *
+   * 两个坑，一个是"滚"，一个是"空"：
+   * · `min-height: 560px`（**最小**高度）→ 右栏段一多就把整行撑高 → **整个弹窗**开始滚、
+   *   左墙被一起带走 → 改为 `flex: 1` 精确填满内容区（配套 `:has` 那条规则，见下）。
+   * · 先前用 `height: calc(100vh - 210px)` 估偏移 —— **估不准**：窗口一矮，面板就比内容区矮，
+   *   底下留一大片空白（用户截图）。现在由 **flex 撑满**，一分不多一分不少。
+   */
+  flex: 1;
+  min-height: 0;
+  /* 原先是 body 的 padding，现在由这一层自己给（body 的 padding 被下面那条规则清零了） */
+  padding: 16px 24px;
+}
+/*
+ * 归属界面同样走「内容区转定高 flex、两栏各自滚」这套 —— 与 `.result-workspace`（结果填写页）、
+ * `.recognition-workspace`（识别工作台）、`.verify-workspace`（核验页）是**同一个先例**，
+ * 三处都写在下面/上面，做法一致（`.ant-modal-body:has(X)` + `> .fs-body-inner`）。
+ *
+ * 为什么非要"转 flex"而不是写死高度：**写死高度一定会估错**（先前用 `calc(100vh - 210px)`
+ * 估弹窗外壳的高，窗口一矮面板就比内容区矮，底下留一大片空白 —— 用户截图）。
+ * 交给 flex 撑满，一分不多一分不少。
+ */
+.fs-modal .ant-modal-body:has(.assign-pane) {
+  display: flex;
+  flex-direction: column;
+  /* 外层不滚：滚动全部交给左右两栏各自消化 */
+  overflow: hidden;
+  padding: 0;
+}
+.fs-modal .ant-modal-body:has(.assign-pane) > .fs-body-inner {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 窄屏降级：回到整页滚动（两栏本就挤，拆分滚动没有意义）—— 与另外三处同一口径 */
+@media (max-width: 1100px) {
+  .fs-modal .ant-modal-body:has(.assign-pane) {
+    display: block;
+    overflow: auto;
+    padding: 16px 24px;
+  }
+  .fs-modal .ant-modal-body:has(.assign-pane) > .fs-body-inner {
+    display: block;
+    max-width: 1600px;
+  }
+  .assign-pane {
+    display: block;
+    padding: 0;
+  }
+  .assign-pane__board {
+    height: 420px;
+    margin-bottom: 16px;
+  }
 }
 .assign-pane__board {
   flex: 1;
   min-width: 0;
-  height: 560px;
+  /* 跟着这一行的高度走（不再写死 560px，否则行高变了它不跟） */
+  height: 100%;
   border: 1px solid var(--c-hairline);
   border-radius: var(--radius-card);
   background: var(--c-fill-light);
@@ -1140,15 +1200,17 @@ body {
    * 固定宽而非比例：这一栏的内容是「三个单选项 + 一段列表 + 下拉」，
    * 宽度需求是可预知的，余下的宽度全部让给缩略图墙 —— 那才是越宽越好用的一边。
    *
-   * **宽度恒定 360px，不随数据变**（v2.73 用户明确要求：「我希望宽度是固定的，
-   * 不要因为被审计单位名称和被询证单位名称太长就变宽」）。
+   * **宽度恒定，不随数据变**（v2.73 用户明确要求：「我希望宽度是固定的，
+   * 不要因为被审计单位名称和被询证单位名称太长就变宽」）—— v2.94 由 360px 调到 420px
+   * （用户：「右边留空白太多了，右侧可以再宽一点」），v2.97 再收到 **400px**（用户：「右侧区域稍微窄一点点」）。
+   * **"恒定"这条不变**，变的只是那个常数值；缩略图墙的列数由百分比保证，**不随栏宽变化（恒 5 列）**。
    * v2.72 曾为了把「编号 · 被审计单位 · 被询证单位」三段全塞进触发框而放到 500px ——
    * **那是本末倒置**：栏宽被数据长度牵着走，板子白白少了 140px。
    * 现在触发框只放「**被询证单位 · 函证编号**」（最长约 246px，360 下余量充足），
    * 被审计单位放浮层里，栏宽回到原值。
    */
   flex: none;
-  width: 360px;
+  width: 400px;
   min-height: 0;
   overflow-y: auto;
 }
@@ -1159,6 +1221,18 @@ body {
   position: relative;
   height: 100%;
   overflow-y: auto;
+  /*
+   * **仍是 flex 换行**（v2.94 试过改网格，行不通，见下），空白改由**卡片自身撑满**来消除：
+   * 卡片是 `flex: 1 1 184px`（见 `.split-board__pagewrap`）—— 塞不下的换到下一行，
+   * **余量由本行卡片平分**，于是每行都精确铺满，右侧不再留一块空白。
+   *
+   * 为什么不能用网格（实测踩到）：两页之间夹着**页间剪刀** `.split-board__cut`，
+   * 换成网格后剪刀也各占一个格位，于是排成"卡片 · 剪刀 · 卡片 · 剪刀"，
+   * 22 页只铺出 **3 列**、列间被拉得很开。**网格要求子项全是"内容"，而这里是"内容 + 分隔器"。**
+   * （v2.95 又踩了它的第二个后果：剪刀宽 32px 时"卡片 + 剪刀"成对占位，
+   * 行末那把剪刀塞不下就换行 → **行与行的卡片数交替成 5、4、5、4**（用户截图"太乱了"）。
+   * 解法是让剪刀在流里 **`width: 0`**，图标与虚线溢到卡片之间的缝里 —— 见 `.split-board__cut`。）
+   */
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -1204,17 +1278,28 @@ body {
   font-size: 12px;
   color: var(--c-text-3);
 }
-/* 卡片定位容器（v2.75）—— flex 与间距上移到这一层，按钮退成普通块级；
-   它同时是「查看原件」链接与悬停放大预览的锚点 */
+/* 卡片定位容器（v2.75）—— 按钮退成普通块级；
+   它同时是「查看原件」链接与悬停放大预览的锚点。
+   **恒定 5 列**（v2.96，用户：「现在是 4 张一行，我要 5 张一行」）：
+   `flex-basis: calc(20% - 32px)` + 两侧各 16px 内边距 ⇒ **每张外宽正好 20%**，
+   于是**任何板宽下都恰好放下 5 张、且正好铺满**。
+   为什么不再用"固定基准宽 + 换行"（v2.94/v2.95 的做法）：那样"一行几张"取决于窗口宽度 ——
+   板子稍窄就掉到 4 张（我按 1680 宽验证是 5 张，用户 1512 宽的屏幕上就是 4 张 ✗）。
+   `flex-shrink: 1`（不是 0）：留一点余地给亚像素舍入，避免第 5 张被 0.5px 挤到下一行；
+   `min-width: 130px`：板子极窄时允许掉到 4 张，别把卡片压成一条；
+   `max-width: 240px`：超大屏上不让缩略图无限放大。 */
 .split-board__pagewrap {
   position: relative;
-  flex: none;
-  margin: 0 4px;
+  flex: 0 1 calc(20% - 32px);
+  min-width: 130px;
+  max-width: 240px;
+  /* 两侧各 16px = 32px 的缝，正好给页间剪刀（它在流里占 0 宽，图标溢在这条缝上） */
+  margin: 0 16px;
 }
 .split-board__page {
   position: relative;
   display: block;
-  width: 150px;
+  width: 100%;
   padding: 6px 6px 2px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
@@ -1240,7 +1325,8 @@ body {
   width: 24px;
   height: 24px;
   border-radius: var(--radius-tag);
-  background: var(--card-bg);
+  /* 同上：`--card-bg` 未定义 → 实色（页面卡片上的悬浮按钮，透明会露出底下的扫描件） */
+  background: #fff;
   box-shadow: var(--shadow-card);
   color: var(--c-text-2);
   font-size: 13px;
@@ -1259,17 +1345,29 @@ body {
 /*
  * 放大预览 —— portal 到 body、fixed 定位。
  *
- * **接鼠标**（v2.79 起，此前是 `pointer-events: none`）：它要能点「固定」、能拖动平移 ——
- * 这正解决「一边看面单一边往输入框里敲单号」的场景（悬停预览会消失、还压住输入框）。
- * 收起逻辑相应加了「离开卡片后延迟 300ms」，留出从卡片走到弹窗上的时间。
+ * **悬停态不接鼠标**（`pointer-events: none`）：它是"看一眼就走"的临时浮层，
+ * 跟着光标在卡片上跑，用户根本不需要点它 —— 而一旦接鼠标，它压在缩略图/剪刀上时
+ * 会把点击**吃掉**（v2.83 实测踩到：脚本点剪刀点不动，全打在预览画布上）。
+ * **钉住态才接鼠标**（`is-pinned`）：那是用户要长期使用的窗口，得能拖动、能点 ✕。
  */
 .split-board__zoom {
   position: fixed;
   z-index: var(--z-zoom-popup);
   padding: 10px 10px 12px;
   border-radius: var(--radius-card);
-  background: var(--card-bg);
+  /*
+   * **必须是实色**（v2.89 修的一处真 bug）：这里原先写 `var(--card-bg)`，而
+   * **这个变量在本项目里从未定义过** → 声明无效 → 背景算成**完全透明** →
+   * 固定窗口变成"一行字浮在缩略图上"，看着像坏了（用户截图）。
+   * 教训：**用变量前先确认它存在** —— 不存在的自定义属性不会报错，只会静默失效。
+   */
+  background: #fff;
+  border: 1px solid var(--c-hairline);
   box-shadow: var(--shadow-pop);
+  pointer-events: none;
+}
+.split-board__zoom.is-pinned {
+  pointer-events: auto;
 }
 .split-board__zoom-head {
   display: flex;
@@ -1278,6 +1376,31 @@ body {
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--c-text-3);
+}
+/*
+ * 头部 = **窗口的拖拽把手**（v2.92，用户要求"固定模式的弹窗可以用鼠标拖动位置"）。
+ * 只给钉住态 `cursor: move` —— 悬停预览本来就不接鼠标（`pointer-events: none`）。
+ */
+.split-board__zoom.is-pinned .split-board__zoom-head {
+  cursor: move;
+}
+.split-board__zoom-head.is-moving {
+  cursor: grabbing;
+  user-select: none;
+}
+/*
+ * **固定状态用图标表示，不用文字**（v2.92，用户要求）。两态一眼可辨：
+ * 空心图钉 = 未固定（跟随鼠标）、**实心图钉 + 主色** = 已固定。
+ * 含义靠 `title` 补（悬停说明不算"文字说明"，不占版面）。
+ */
+.split-board__zoom-pin {
+  display: inline-flex;
+  flex: none;
+  font-size: 13px;
+  color: var(--c-text-3);
+}
+.split-board__zoom-pin.is-on {
+  color: var(--c-primary);
 }
 /* 头部的「固定 / 关闭」—— 贴右，不与说明文字抢位置 */
 .split-board__zoom-actions {
@@ -1311,6 +1434,10 @@ body {
   font-size: 13px;
   line-height: 1.9;
   color: var(--c-text-3);
+  /* 空态也要有"框" —— 它现在只是窗口里的一段占位文字，给个底才不像渲染失败 */
+  background: var(--c-neutral-bg);
+  border: 1px dashed var(--c-hairline);
+  border-radius: 2px;
 }
 .split-board__page:hover {
   border-color: var(--c-border);
@@ -1364,11 +1491,19 @@ body {
   position: relative;
   flex: none;
   align-self: stretch;
-  width: 32px;
+  /*
+   * **在流里占 0 宽**（v2.95）—— 这是"每行张数不一致"的根治办法：
+   * 它宽 32px 时，"卡片 + 剪刀"成对占位，行末那把剪刀塞不下就换行，
+   * 于是行与行的卡片数交替成 5、4、5、4（用户截图：「太乱了，一行就是 5 个页」）。
+   * 占 0 宽之后每行恒定放下同样多张；图标与虚线**溢出**到卡片之间那条 32px 的缝上
+   * （缝由卡片的 `margin: 0 16px` 提供，合计 32px）。
+   */
+  width: 0;
   margin: 0;
   padding: 0;
   border: 0;
   background: none;
+  overflow: visible;
   color: var(--c-text-3);
   opacity: 0.35;
   font-size: 15px;
@@ -1388,6 +1523,21 @@ body {
   opacity: 1;
   color: var(--c-primary);
 }
+/*
+ * 剪刀图标：绝对居中在"缝"上（0 宽盒子的中点 = 两卡之间），
+ * 并自带一块可见、可点的区域（0 宽的按钮本来点不到，
+ * 现在图标是它的子元素 —— 悬停/点击命中图标即命中按钮）。
+ * 底色圆点同时解决"虚线从图标里穿过去"。
+ */
+.split-board__cut .anticon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 10px;
+  border-radius: var(--radius-tag);
+  background: var(--c-fill-light);
+}
 .split-board__cut.is-on::before {
   content: '';
   position: absolute;
@@ -1396,12 +1546,6 @@ body {
   left: 50%;
   border-left: 1px dashed var(--c-primary);
   opacity: 0.5;
-}
-/* 图标压住虚线 —— 给个底色圆点，避免"圈里穿一条线" */
-.split-board__cut.is-on .anticon {
-  position: relative;
-  padding: 3px 0;
-  background: var(--c-fill-light);
 }
 
 /* ------------------------- 拆分方式与切分结果（v2.62） ------------------------- */
@@ -1466,6 +1610,56 @@ body {
   font-size: 12px;
   font-weight: 600;
   color: var(--c-text-1);
+}
+/*
+ * 包裹标签（v2.91）—— 同一个包裹的**每一行**都挂一个，颜色按包裹号分组。
+ *
+ * 它接手了原来"左侧一条主色竖线"的分组职责（那条线被用户否掉了：「左侧不要有蓝色的竖线」）。
+ * 用**实色小胶囊**而不是文字：一行里已经有段号 / 页范围 / 页数三样信息，
+ * 标签必须"一眼可辨、不抢读"，实色块的辨识度远高于灰字。
+ * 配色刻意选**鲜亮高饱和**（用户要「鲜亮的原色」），且**同一个包裹同一个色**；
+ * 4 档循环（第 5 个包裹起复用 `--0`），JS 侧用 `groupNoOf % 4` 拼接 —— 两边要一起改。
+ */
+.split-rows__pkg {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--pkg-c, var(--c-primary));
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  letter-spacing: 0.2px;
+}
+.split-rows__pkg--0 {
+  --pkg-c: #3b5bdb; /* 蓝 */
+}
+.split-rows__pkg--1 {
+  --pkg-c: #e8590c; /* 橙 */
+}
+.split-rows__pkg--2 {
+  --pkg-c: #0b7285; /* 青 */
+}
+.split-rows__pkg--3 {
+  --pkg-c: #7048e8; /* 紫 */
+}
+/*
+ * v2.93 由 4 档扩到 8 档：4 档时"包裹 5"会撞回"包裹 1"的蓝 —— 同一份件里两个包裹同色就白标了。
+ * 选色思路：**色相尽量拉开**（230° / 25° / 190° / 262° / 335° / 135° / 300° / 75°），
+ * 且保证**隔着 4 个的那一档不撞色**（1 与 5 是蓝 / 玫红、2 与 6 是橙 / 绿…），
+ * 这样即使包裹多到循环复用，相邻的仍然分得开。**数字才是主标识，颜色只是辅助。**
+ */
+.split-rows__pkg--4 {
+  --pkg-c: #c2255c; /* 玫红 */
+}
+.split-rows__pkg--5 {
+  --pkg-c: #2f9e44; /* 绿 */
+}
+.split-rows__pkg--6 {
+  --pkg-c: #b5179e; /* 品紫 */
+}
+.split-rows__pkg--7 {
+  --pkg-c: #5c940d; /* 橄榄 */
 }
 .split-rows__range {
   font-size: 13px;

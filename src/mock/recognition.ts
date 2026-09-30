@@ -344,39 +344,148 @@ export function buildBatchA(): UploadBatch {
   }
 }
 
-/** 演示批次 B：银行函证回函（无二维码，按四要素匹配，覆盖三档处置） */
+/**
+ * 演示批次 B：银行函证回函 —— **同一家银行按年度回 4 封，装在一个快递里**（v2.83）。
+ *
+ * 这正是「**多封函证 + 一张面单**」的真实形态（用户给的例子：某银行按 21 / 22 / 23 / 24 年 1-6 月
+ * 各回一封，都放在一个快递里），所以这份文件长成：
+ * `[函证 2021][函证 2022][函证 2023][函证 2024 1-6 月][面单]` = **17 页 / 4 封函证 / 1 页面单**。
+ *
+ * **v2.85 再加一个包裹**（用户要求"同屏看到两种结局"）：第 18-21 页是另一封齐商银行回函、
+ * 第 22 页是它所在包裹的面单 —— 那一张的**条码读不出来**，得人工照图填。
+ * 于是这份文件 = **22 页 / 5 封函证 / 2 张面单**，两张面单一个"读出来了"、一个"没读出来"，
+ * 面单的两种处置在同一个界面上都能看到。
+ *
+ * 四封的处置覆盖**三档**（① 自动归属 ② 自动归属 ③ 建议归属 ④ 待人工指定）：前两封四要素全匹配；
+ * 第三封落款是支行（与发函底稿的被询证单位不一致）；第四封是 24 年 1-6 月，
+ * 而本期控制表里齐商银行只有 24 年一季度那封 —— 期间对不上，只能人工指定。
+ */
 export function buildBatchB(): UploadBatch {
   const fileName = '银行函证回函-20240913.pdf'
+  const BANK = '齐商银行股份有限公司'
+  /**
+   * 一个包裹一个单号：由**面单段**持有，前面 4 封函证共用（见 ② 归属界面）。
+   *
+   * 取值**必须与切分板上那张面单图上的号一致** —— 那张图是真扫描件
+   * （`public/samples/faceSheets/face-sheet-0010014.pdf`，v2.84 起面单页从它取图），
+   * 上面印的就是 `SF 512 869 015 9893`。演示里用户会照着图去读、去核对，
+   * 数据写另一个号就是"图和话对不上"。
+   */
+  const ENVELOPE_NO = 'SF5128690159893'
   const seeds: TaskSeed[] = [
     {
       /* ① 四要素全部匹配 → 自动归属 */
       confirmationNo: '待指定',
-      entity: '齐商银行股份有限公司',
+      entity: BANK,
       pageRange: '第 1-4 页',
       type: '银行函证',
       bankFields: {
-        bankName: '齐商银行股份有限公司',
+        bankName: BANK,
         auditedEntity: AUDITED_ENTITY,
-        periodStart: '2024年1月1日',
-        periodEnd: '2024/03/31',
+        periodStart: '2021年1月1日',
+        periodEnd: '2021/12/31',
       },
       stageDetails: {
-        consistency: '回函与系统内格式一/二数据逐项核对完成 · 1 项差异（担保事项）',
-        sealExists: '未检出印章 · 建议退回补盖（仅作风险提示）',
-        crossPageSeal: '未检出骑缝章',
-        sealNameMatch: '未检出印章，无法比对名称',
+        consistency: '回函与系统内格式一/二数据逐项核对完成 · 全部一致',
+        sealExists: '已盖章 · 业务专用章',
+        crossPageSeal: '检出 1 处骑缝章',
+        sealNameMatch: `印章名称为「${BANK}」，与发函的被询证单位一致`,
         bankText: '四要素识别完成 · 与发函底稿一致',
-        expressSheet: '运单号 EMS1122334455667 已识别并关联',
+        expressSheet: `本封与同包裹另外 3 封共用一个快递单号（${ENVELOPE_NO} · 见末页面单）`,
       },
     },
     {
-      /* ② 回函落款为支行 → 建议归属，需人工确认 */
+      /* ② 四要素全部匹配 → 自动归属 */
       confirmationNo: '待指定',
-      entity: '齐商银行股份有限公司张店支行',
+      entity: BANK,
       pageRange: '第 5-8 页',
       type: '银行函证',
       bankFields: {
+        bankName: BANK,
+        auditedEntity: AUDITED_ENTITY,
+        periodStart: '2022-01-01',
+        periodEnd: '2022年12月31日',
+      },
+      stageDetails: {
+        consistency: '回函与系统内格式一/二数据逐项核对完成 · 全部一致',
+        sealExists: '已盖章 · 业务专用章',
+        crossPageSeal: '检出 1 处骑缝章',
+        sealNameMatch: `印章名称为「${BANK}」，与发函的被询证单位一致`,
+        bankText: '四要素识别完成 · 与发函底稿一致',
+        expressSheet: `本封与同包裹另外 3 封共用一个快递单号（${ENVELOPE_NO} · 见末页面单）`,
+      },
+    },
+    {
+      /* ③ 回函落款为支行 → 建议归属，需人工确认 */
+      confirmationNo: '待指定',
+      entity: '齐商银行股份有限公司张店支行',
+      pageRange: '第 9-12 页',
+      type: '银行函证',
+      bankFields: {
         bankName: '齐商银行股份有限公司张店支行',
+        auditedEntity: AUDITED_ENTITY,
+        periodStart: '2023-01-01',
+        periodEnd: '2023年12月31日',
+      },
+      stageDetails: {
+        consistency: '回函与系统内格式一/二数据逐项核对完成 · 全部一致',
+        sealExists: '已盖章 · 业务专用章',
+        crossPageSeal: '检出 1 处骑缝章',
+        sealNameMatch: '印章名称为「齐商银行张店支行」，与发函的被询证单位不一致',
+        bankText: '四要素识别完成 · 银行名称与发函底稿有差异',
+        expressSheet: `本封与同包裹另外 3 封共用一个快递单号（${ENVELOPE_NO} · 见末页面单）`,
+      },
+    },
+    {
+      /* ④ 期间不在本期控制表内（表里齐商只有 24 年一季度）→ 待人工指定 */
+      confirmationNo: '待指定',
+      entity: BANK,
+      pageRange: '第 13-16 页',
+      type: '银行函证',
+      bankFields: {
+        bankName: BANK,
+        auditedEntity: AUDITED_ENTITY,
+        periodStart: '2024年1月1日',
+        periodEnd: '2024年6月30日',
+      },
+      stageDetails: {
+        consistency: '未匹配到系统内函证数据，待确定归属后核对',
+        sealExists: '未检出印章 · 建议退回补盖（仅作风险提示）',
+        crossPageSeal: '未检出骑缝章',
+        sealNameMatch: '无法比对（未匹配到被询证单位）',
+        bankText: '四要素识别完成 · 回函期间（24 年 1-6 月）不在本期函证控制表内',
+        expressSheet: `本封与同包裹另外 3 封共用一个快递单号（${ENVELOPE_NO} · 见末页面单）`,
+      },
+    },
+    {
+      /*
+       * ⑤ **第一个包裹的面单**（第 17 页）—— 它被识别成一个独立段，只为携带那张面单上的**条形码**。
+       * **刻意不给 `bankFields`**：面单不是函证，不该参与四要素匹配、更不能被自动归属
+       * （`createTask` 里 `bankFields ? scoreBankMatch(...) : undefined` —— 不给就永远匹配不上）。
+       * 用户在 ② 归属界面把它标成「快递面单（本文件共用）」，由它管辖前面那 4 封。
+       * **这张的条码读出来了**（→ `expressNo`）。
+       */
+      confirmationNo: '待指定',
+      entity: BANK,
+      pageRange: '第 17 页',
+      type: '银行函证',
+      expressNo: ENVELOPE_NO,
+      stageDetails: {
+        expressSheet: `面单条形码读出 ${ENVELOPE_NO} · 本文件 4 封共用这一张面单`,
+      },
+    },
+    {
+      /*
+       * ⑥ **第二个包裹**：另一封齐商银行回函单独寄回（第 18-21 页）。
+       * 演示批次里放**两个包裹**，是为了在同一个界面上把面单的**两种结局**都摆出来：
+       * 这个包裹后面那张面单的条码**没读出来**，得人工照着图填。
+       */
+      confirmationNo: '待指定',
+      entity: BANK,
+      pageRange: '第 18-21 页',
+      type: '银行函证',
+      bankFields: {
+        bankName: BANK,
         auditedEntity: AUDITED_ENTITY,
         periodStart: '2024-01-01',
         periodEnd: '2024年3月31日',
@@ -385,30 +494,23 @@ export function buildBatchB(): UploadBatch {
         consistency: '回函与系统内格式一/二数据逐项核对完成 · 全部一致',
         sealExists: '已盖章 · 业务专用章',
         crossPageSeal: '检出 1 处骑缝章',
-        sealNameMatch: '印章名称为「齐商银行张店支行」，与发函的被询证单位不一致',
-        bankText: '四要素识别完成 · 银行名称与发函底稿有差异',
-        expressSheet: '运单号 EMS1122334455781 已识别并关联',
+        sealNameMatch: `印章名称为「${BANK}」，与发函的被询证单位一致`,
+        bankText: '四要素识别完成 · 与发函底稿一致',
+        expressSheet: '本封所在包裹的面单条码**未读出**（详见该面单段）',
       },
     },
     {
-      /* ③ 银行名称不在本期控制表内 → 待人工指定 */
+      /*
+       * ⑦ **第二个包裹的面单**（第 22 页）—— **刻意不给 `expressNo`**：
+       * 条码反光/模糊读不出来，界面会标「未识别到 —— 请手工填写」并给「改」，
+       * 用户点「改」时放大预览里显示的正是那张读不出的面单（`face-sheet-none.pdf`）。
+       */
       confirmationNo: '待指定',
-      entity: '淄博市农村信用合作联社',
-      pageRange: '第 9-11 页',
+      entity: BANK,
+      pageRange: '第 22 页',
       type: '银行函证',
-      bankFields: {
-        bankName: '淄博市农村信用合作联社',
-        auditedEntity: AUDITED_ENTITY,
-        periodStart: '2024-01-01',
-        periodEnd: '2024-03-31',
-      },
       stageDetails: {
-        consistency: '未匹配到系统内函证数据，待确定归属后核对',
-        sealExists: '已盖章 · 公章',
-        crossPageSeal: '未检出骑缝章',
-        sealNameMatch: '无法比对（未匹配到被询证单位）',
-        bankText: '四要素识别完成 · 不在本期函证控制表内',
-        expressSheet: '运单号 EMS1122334455902 已识别并关联',
+        expressSheet: '面单条码未读出（反光 / 模糊）—— 需人工照面单填写',
       },
     },
   ]
@@ -416,44 +518,35 @@ export function buildBatchB(): UploadBatch {
     id: 'batch-b',
     fileName,
     fileSize: '3.42 MB',
-    pageCount: 11,
+    pageCount: 22,
     type: '银行函证',
     status: 'queued',
     createdAt: '刚刚',
     tasks: seeds.map((s, i) => createTask(s, fileName, i)),
-    /* v2.42：面单一叠随批次上传（银行侧的面单不再拼在回函件里） */
+    /* v2.83：**末页是快递面单** —— ② 归属界面据此把末页预切成面单段 */
+    faceSheetLast: true,
+    /*
+     * v2.42 的"面单是随批次上传的独立扫描件"模型保留（这条支路真实存在），
+     * 但本演示批次走的是**面单拼在回函件尾部**那条 —— 所以这里只留**这一张**（一个包裹一张）。
+     */
     faceSheets: BANK_FACE_SHEETS,
   }
 }
 
 /**
- * 银行批次的**快递面单**（v2.42）—— 演示三种校验形态：
- * · 单封：寄件人与被询证单位一致（`ok`）；
- * · **一对多**：一个包裹里 3 封同一个银行回函（**正常业务形态**，只提示封数）；
- * · 配错：寄件人是另一家银行（`warn`，最可疑的那种）。
- * `matchedConfirmationNos` 留空 —— 由 `services/faceSheet.ts` 的 `pairFaceSheets`
- * 按任务的归属结果填入（不按单号猜：归属是已确认过的事实，比推断可靠）。
+ * 银行批次的**快递面单**（v2.42 立、v2.83 起改为"一个包裹一张"）。
+ *
+ * 演示批次 B 是**同一个包裹**装着同一家银行的 4 封回函，所以面单只有一张，
+ * 而 `matchedConfirmationNos` 会是**多项** —— 这正是「一张面单对多封函证」在数据上的样子。
+ * 留空由 `services/faceSheet.ts` 的 `pairFaceSheets` 按任务归属回填
+ * （不按单号猜：归属是已确认过的事实，比推断可靠）。
  */
 const BANK_FACE_SHEETS: BatchFaceSheet[] = [
   {
     id: 'fs1',
-    fileName: 'SF7444706556947.jpg',
-    expressNo: 'SF7444706556947',
-    sender: '中国工商银行股份有限公司西安分行',
-    matchedConfirmationNos: [],
-  },
-  {
-    id: 'fs2',
-    fileName: 'SF7444706556901.jpg',
-    expressNo: 'SF7444706556901',
-    sender: '招商银行股份有限公司西安分行',
-    matchedConfirmationNos: [],
-  },
-  {
-    id: 'fs3',
-    fileName: 'SF7444706557147.jpg',
-    expressNo: 'SF7444706557147',
-    sender: '中国银行股份有限公司西安高新支行',
+    fileName: 'SF5128690159893.pdf',
+    expressNo: 'SF5128690159893',
+    sender: '齐商银行股份有限公司',
     matchedConfirmationNos: [],
   },
 ]
@@ -470,5 +563,5 @@ export const PRESET_BATCHES: Record<'A' | 'B', () => UploadBatch> = {
  */
 export const DEMO_LABEL: Record<'A' | 'B', string> = {
   A: '往来函证拼接回函（9 页 / 5 封）',
-  B: '银行函证回函（11 页 / 3 封 · 三档归属）',
+  B: '银行函证回函（17 页 / 4 封 + 1 张面单 · 三档归属）',
 }

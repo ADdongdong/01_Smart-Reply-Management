@@ -37,6 +37,27 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     periodEnd: '2024-03-31',
     type: '银行函证',
   },
+  /*
+   * 齐商银行按**年度**各占一封（v2.83）—— 演示批次 B 就是同一个被询证单位按年度回 4 封
+   * （2021 / 2022 / 2023 / 2024 年 1-6 月），装在一个快递里。前三个年度在表内、
+   * 24 年 1-6 月不在（表里只有 24 年一季度那封）—— 用来看"期间对不上 → 待人工指定"。
+   */
+  {
+    confirmationNo: 'QS2024-016',
+    entity: '齐商银行股份有限公司',
+    auditedEntity: AUDITED_ENTITY,
+    periodStart: '2021-01-01',
+    periodEnd: '2021-12-31',
+    type: '银行函证',
+  },
+  {
+    confirmationNo: 'QS2024-017',
+    entity: '齐商银行股份有限公司',
+    auditedEntity: AUDITED_ENTITY,
+    periodStart: '2022-01-01',
+    periodEnd: '2022-12-31',
+    type: '银行函证',
+  },
   {
     confirmationNo: 'QS2024-018',
     entity: '齐商银行股份有限公司',

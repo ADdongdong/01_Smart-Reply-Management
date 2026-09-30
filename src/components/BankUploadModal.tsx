@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Modal, Upload } from 'antd'
+import { Button, Modal, Radio, Upload } from 'antd'
 import { CloudUploadOutlined, DeleteOutlined, FilePdfOutlined, ThunderboltOutlined } from '@ant-design/icons'
 
 /**
@@ -13,11 +13,20 @@ import { CloudUploadOutlined, DeleteOutlined, FilePdfOutlined, ThunderboltOutlin
  * 银行却是「一进去就是个空工作台」。本轮让银行侧对齐往来的节奏：
  * **弹窗负责选文件，工作台只负责看进度与结果。**
  *
- * ## 为什么这么简
+ * ## v2.83 起：银行也有「最后页是否快递面单」
  *
- * 往来那份弹窗（`SplitEntryModal`）里的「最后页是否快递面单」是**切分边界判定的输入**，
- * 银行不切分、也没有拼在回函件里的面单页（面单是随批次上传的独立扫描件），
- * 所以银行这份**没有任何字段**，只有拖拽区。
+ * 早先这条链路假设**银行的面单是随批次上传的独立扫描件**（`UploadBatch.faceSheets`），
+ * 所以这份弹窗"没有任何字段"。但真实业务里更常见的是**面单拼在回函件尾部**：
+ * 同一个银行按年度回 4 封（21 / 22 / 23 / 24 年 1-6 月），**装在同一个快递里** ——
+ * 文件长成 `[函证1][函证2][函证3][函证4][面单]`，于是**一张面单对应多个函证编号**。
+ *
+ * 所以这里补上与往来同款的开关，但**含义不同**（同一个字段，两种层级）：
+ *   · 往来「是」= **每一段**的尾部各有一页面单 → 单号带在各段自己身上（一对一，逻辑不变）；
+ *   · 银行「是」= **整份文件**的尾部有一页面单 → 它**管辖它前面的那些函证段**（一对多）。
+ * 选「是」时，② 的切分初稿会**先把末页预切成独立一段并标成面单段**，用户只需把前面切几刀。
+ *
+ * 默认给 **「是」** —— 银行回函大多是一个快递装着多个函证；若这份确实没带面单页，
+ * 切到「否」即可（不预切，末页按普通函证页处理）。
  *
  * ## 「用演示数据体验」入口从工作台搬到这里
  *
@@ -40,17 +49,21 @@ export default function BankUploadModal({
   open: boolean
   onCancel: () => void
   /** 点「下一步」—— 进入 ②「回函归属」（`AssignView`，本链路的最后一步） */
-  onConfirm: (files: BankUploadFile[]) => void
+  onConfirm: (files: BankUploadFile[], faceSheetLast: boolean) => void
   demoLabel?: string
   /** 点演示数据 —— 同上，只是用内置批次 */
   onDemo?: () => void
 }) {
   const [files, setFiles] = useState<BankUploadFile[]>([])
+  /* 默认「是」—— 银行回函大多是一个快递装着多个函证（见文件头）。它不再是"必选"，
+     所以给默认值而不是像往来那样留空等用户点 */
+  const [faceSheetLast, setFaceSheetLast] = useState<'yes' | 'no'>('yes')
   const [msg, setMsg] = useState('')
 
   /** 每次打开都回到干净状态 —— 组件不卸载，所以手动重置 */
   const reset = () => {
     setFiles([])
+    setFaceSheetLast('yes')
     setMsg('')
   }
 
@@ -67,8 +80,9 @@ export default function BankUploadModal({
     }
     setMsg('')
     const picked = files
+    const flag = faceSheetLast === 'yes'
     reset()
-    onConfirm(picked)
+    onConfirm(picked, flag)
   }
 
   return (
@@ -92,6 +106,19 @@ export default function BankUploadModal({
         </div>
       }
     >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 12, color: 'var(--c-text-2)' }}>最后页是否快递面单</span>
+        <Radio.Group value={faceSheetLast} onChange={(e) => setFaceSheetLast(e.target.value)}>
+          <Radio value="yes">是</Radio>
+          <Radio value="no">否</Radio>
+        </Radio.Group>
+      </div>
+      <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--c-text-3)', lineHeight: 1.8 }}>
+        银行常见「多封函证 + 一张面单」—— 同一家银行按年度回函（如 21 / 22 / 23 / 24 年 1-6 月），
+        几封装在一个快递里。选「是」时会把<b>末页单独切成一段面单</b>，由它管辖前面的函证段：
+        一个快递单号对应多个函证编号。
+      </p>
+
       {files.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {files.map((f, i) => (

@@ -3,10 +3,15 @@ import { Button } from 'antd'
 import { useApp } from '@/store/AppStore'
 import FullscreenModal from '@/components/FullscreenModal'
 import PageSplitBoard from '@/components/PageSplitBoard'
-import SplitPanel, { UNASSIGNED } from '@/components/SplitPanel'
+import SplitPanel, { FACE_SHEET, UNASSIGNED } from '@/components/SplitPanel'
 import type { AssignCandidate } from '@/components/SplitPanel'
 import { AUDITED_ENTITY, CANDIDATE_SOURCES } from '@/mock/confirmations'
-import { browserSampleUrlByFileName } from '@/config/preview'
+import {
+  browserSampleUrlByFileName,
+  faceSheetPagesOfFile,
+  faceSheetUrlOfFile,
+  faceSheetUrlOfPage,
+} from '@/config/preview'
 import { TYPE_RULE } from '@/services/replyRule'
 import { cutsOfSegments, segmentsOfCuts, toggleCut } from '@/utils/pageSplit'
 
@@ -25,6 +30,16 @@ interface Draft {
    * 那里也写了为什么不做"逐段人工核对"。
    */
   express: Record<number, string>
+  /**
+   * 被标成**快递面单页**的页码（v2.83，银行侧）。
+   *
+   * **按"页"记、不按"段序"记** —— 这是实测踩出来的：角色若挂在段序上，
+   * 用户接着按 4 页一切，段序 1 就从"第 17 页那一段"变成了"第 5-8 页那一段"，
+   * **面单被标到了别的页上**，而那一段还会因此在提交时被排除掉（连页一起丢）。
+   * 页不会因为切分而改变，所以"是不是面单"是**页的属性**：
+   * 由面单页组成的段才是面单段 —— 这也和纸面一致（面单就是那几页）。
+   */
+  faceSheetPages: number[]
 }
 
 /**
@@ -101,11 +116,12 @@ export default function AssignView() {
   const [previewPin, setPreviewPin] = useState<{ page: number; anchor: HTMLElement } | null>(null)
 
   /**
-   * 每段尾部是否带一页快递面单 —— 往来「① 文件识别录入」里用户指定的那一项
-   * （`UploadBatch.faceSheetLast`，v2.76 起接上用途）。为真时，切分结果里每段会带出
-   * **段尾面单识别出的快递单号**。银行批次不带此字段（它的面单是独立扫描件、不拼在回函件里）。
+   * 本文件所在批次是否**带快递面单**（`UploadBatch.faceSheetLast`）。
+   * 同一个字段，两类函证含义不同（v2.83 起银行也用它）：
+   * · 往来「是」= **每段**尾部各有一页面单 → 单号带在各段自己身上（一对一）；
+   * · 银行「是」= **整份文件**尾部有一页面单 → 它管辖前面的函证段（一对多）。
    */
-  const showSegmentExpress = useMemo(() => {
+  const batchFaceSheetLast = useMemo(() => {
     const batch = state.batches.find((b) => b.tasks.some((t) => t.fileName === currentFile))
     return batch?.faceSheetLast === true
   }, [state.batches, currentFile])
@@ -120,15 +136,48 @@ export default function AssignView() {
    *   自动预填既有识别结果（见 `assignOf`），所以从头切也不会丢演示里的归属线索。
    */
   const baseDraft: Draft = useMemo(() => {
-    if (!isTrade) return { file: currentFile ?? '', cuts: [], assigns: {}, express: {} }
+    if (!isTrade) {
+      /*
+       * 银行：默认「整份 1 段，从头手动切」（整份里可能装着多封函证，只有人能切开）。
+       * **但带面单时先把末页预切成一段面单段**（v2.83）：银行常见「多封函证 + 一张面单」，
+       * 而面单页在原件里本就是一页独立的东西 —— 预切出来，用户就只需专心把前面的函证切几刀，
+       * 不必额外记着"还要把面单也切出来"。
+       */
+      /*
+       * 文件里**已知的面单页**（演示数据给的表；v2.85 起一个文件可能有两个包裹、两张面单）。
+       * 有它们就各自预切一刀，让每张面单先是独立的一段；没有就退回「末页是面单」的旧口径。
+       */
+      const knownPages = faceSheetPagesOfFile(currentFile ?? '')
+      const facePages = knownPages.length ? knownPages : batchFaceSheetLast ? [pageCount] : []
+      return {
+        file: currentFile ?? '',
+        /*
+         * **面单页前后各切一刀**，把它单独隔成一段 —— 面单页在原件里本就是一页独立的东西。
+         * 只切"前面一刀"是不够的：那样它只是下一段的第一页，仍然不是独立段（v2.85 实测踩到，
+         * 结果第 17 页那张"已识别"的面单根本显示不出来）。
+         */
+        cuts: facePages.flatMap((p) => [p - 1, p]),
+        assigns: {},
+        express: {},
+        /* 按**页**记（用户后面随便切，它都不会跑偏 —— 见 `Draft.faceSheetPages`） */
+        faceSheetPages: facePages,
+      }
+    }
     /* 往来：把现有分段还原成切点（`flatMap` 顺便收窄掉缺页码的异常任务） */
     const segs = fileTasks.flatMap((t) =>
       t.pageStart != null && t.pageEnd != null
         ? [{ pageStart: t.pageStart, pageEnd: t.pageEnd }]
         : [],
     )
-    return { file: currentFile ?? '', cuts: cutsOfSegments(segs), assigns: {}, express: {} }
-  }, [currentFile, isTrade, fileTasks])
+    return {
+      file: currentFile ?? '',
+      cuts: cutsOfSegments(segs),
+      assigns: {},
+      express: {},
+      /* 往来不把面单页切出来（它的面单页就是各段自己的尾页）—— 故这里恒为空 */
+      faceSheetPages: [],
+    }
+  }, [currentFile, isTrade, fileTasks, batchFaceSheetLast, pageCount])
 
   const [draftState, setDraftState] = useState<Draft | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -138,6 +187,40 @@ export default function AssignView() {
     draftState && draftState.file === (currentFile ?? '') ? draftState : baseDraft
 
   const segments = useMemo(() => segmentsOfCuts(pageCount, draft.cuts), [pageCount, draft.cuts])
+
+  /** 段 i 覆盖的页码 */
+  const pagesOfSegment = (i: number): number[] => {
+    const seg = segments[i]
+    if (!seg) return []
+    return Array.from({ length: seg.pageEnd - seg.pageStart + 1 }, (_, k) => seg.pageStart + k)
+  }
+
+  /**
+   * 段 i 是不是**快递面单段**（v2.83，银行侧）—— 它不是一个函证，
+   * 而是"本文件共用的一张面单"，职责是**给前面的函证段提供快递单号**。
+   *
+   * 判据 = 「**这一段的页全都是面单页**」（页的属性，见 `Draft.faceSheetPages`）。
+   * 往来侧永远为 false：它的面单页是每段自己的尾页、不单独成段（用户明确要求往来逻辑不变）。
+   */
+  const isFaceSheetSegment = (i: number) => {
+    if (isTrade) return false
+    const pgs = pagesOfSegment(i)
+    return pgs.length > 0 && pgs.every((pg) => draft.faceSheetPages.includes(pg))
+  }
+
+  /**
+   * 段 i 由**哪一段面单**管辖 —— 规则一句话：**面单段管辖它前面的段，直到上一个面单段为止**。
+   *
+   * 所以对"我要找我的面单"这一段来说，答案是**它后面最近的那个面单段**（`j > i` 方向找）——
+   * 别顺手往前面找：面单在文件尾部时前面根本没有面单段，会一个都管不到（v2.83 实测踩到）。
+   * 取"最近的下一个"而不是"文件里唯一那张面单"，是为了让
+   * `函证…面单…函证…面单`（一个 PDF 里扫了两个包裹）也成立：后面那张面单管后半段。
+   */
+  const governedBy = (i: number): number | null => {
+    if (isFaceSheetSegment(i)) return null
+    for (let j = i + 1; j < segments.length; j++) if (isFaceSheetSegment(j)) return j
+    return null
+  }
 
   /** 可归属的候选函证 —— **按当前函证类型筛**（银行批次不列往来函证，反之亦然） */
   const candidates = useMemo<AssignCandidate[]>(() => {
@@ -187,6 +270,8 @@ export default function AssignView() {
    * 要改也随时能改。**预填值不是结论**：它只是下拉的初始选项，人仍可改。
    */
   const assignOf = (i: number): string => {
+    /* 面单段不是一个函证：它的"归属"就是那个角色本身，直接给哨兵值 */
+    if (isFaceSheetSegment(i)) return FACE_SHEET
     const picked = draft.assigns[i]
     if (picked) return picked
     const matched = taskOfSegment(i)
@@ -200,9 +285,21 @@ export default function AssignView() {
    * **它是段级数据** —— 面单页就是本段最后一页，与"这封函证最近一次回函的单号"是两回事
    * （同一封函证多次回函就有多个单号），所以不取 `ReplyRecord.expressNo`。
    */
-  const expressOf = (i: number): string | undefined => draft.express[i] ?? taskOfSegment(i)?.expressNo
+  const expressOf = (i: number): string | undefined => {
+    /*
+     * 被面单段管辖的函证段：**继承那张面单的单号**（v2.83）。
+     * 值只存在面单段那一处 —— 一个快递单号对应多个函证编号时，改一处就全都跟着改，
+     * 也不会被"与他段重复"的查重规则误报成读错。
+     */
+    const src = isFaceSheetSegment(i) ? i : (governedBy(i) ?? i)
+    return draft.express[src] ?? taskOfSegment(src)?.expressNo
+  }
 
-  const specified = segments.filter((_, i) => assignOf(i) !== UNASSIGNED).length
+  /** 面单段数量（银行侧；往来恒为 0）—— 只用于底栏计数文案 */
+  const faceSheetCount = segments.filter((_, i) => isFaceSheetSegment(i)).length
+  /** 需要归属的段 = 段数减去面单段（面单段不是函证，谈不上归属） */
+  const confirmSegments = segments.length - faceSheetCount
+  const specified = segments.filter((_, i) => !isFaceSheetSegment(i) && assignOf(i) !== UNASSIGNED).length
   const fileUrl = browserSampleUrlByFileName(currentFile ?? '')
 
   /* 编辑动作 —— 每次都把 `file` 带上，草稿才有"属于哪个文件"的身份 */
@@ -249,8 +346,9 @@ export default function AssignView() {
     )
   }
 
-  const unspecified = segments.length - specified
-  const untouched = !isTrade && segments.length === 1 && pageCount > 1
+  const unspecified = confirmSegments - specified
+  /* 银行侧"还没开始切"的判据是**函证段只有 1 段**（带面单时会预切出一段面单，段数不再是 1） */
+  const untouched = !isTrade && confirmSegments === 1 && pageCount > 1
 
   return (
     <FullscreenModal
@@ -261,8 +359,13 @@ export default function AssignView() {
       footer={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: 'var(--c-text-3)' }}>
-            共 <b className="num">{segments.length}</b> 段 · 已指定归属{' '}
-            <b className="num">{specified}</b>/{segments.length}
+            共 <b className="num">{segments.length}</b> 段
+            {faceSheetCount > 0 && (
+              <>
+                （含 <b className="num">{faceSheetCount}</b> 段快递面单）
+              </>
+            )}{' '}
+            · 已指定归属 <b className="num">{specified}</b>/{confirmSegments}
           </span>
           {unspecified > 0 && (
             <span style={{ fontSize: 13, color: 'var(--c-warn-text, var(--c-text-3))' }}>
@@ -282,16 +385,25 @@ export default function AssignView() {
               dispatch({
                 type: 'COMMIT_SPLIT',
                 fileName: currentFile,
-                segments: segments.map((seg, i) => {
-                  const confirmationNo = assignOf(i)
-                  return {
-                    ...seg,
-                    confirmationNo,
-                    entity: candidates.find((c) => c.confirmationNo === confirmationNo)?.entity,
-                    /* 段尾面单的单号随段提交（可能是识别的、也可能是人工补/改的，v2.78） */
-                    expressNo: expressOf(i),
-                  }
-                }),
+                /*
+                 * **面单段不提交**（v2.83）—— 它不是函证，不该生成任务、更不该写进回函列表。
+                 * 它的职责只是把单号交给被它管辖的函证段（那些段的 `expressNo` 由 `expressOf` 继承而来）。
+                 * 于是"一个快递单号对应多个函证编号"落到数据上就是：**多封函证各自带着同一个单号**，
+                 * 而这个单号在界面上只有一处来源、一处可改。
+                 */
+                segments: segments
+                  .map((seg, i) => ({ seg, i }))
+                  .filter(({ i }) => !isFaceSheetSegment(i))
+                  .map(({ seg, i }) => {
+                    const confirmationNo = assignOf(i)
+                    return {
+                      ...seg,
+                      confirmationNo,
+                      entity: candidates.find((c) => c.confirmationNo === confirmationNo)?.entity,
+                      /* 单号随段提交（可能是识别的、也可能是人工补/改的，v2.78） */
+                      expressNo: expressOf(i),
+                    }
+                  }),
               })
               dispatch({ type: 'CLOSE_ASSIGN' })
             }}
@@ -313,6 +425,19 @@ export default function AssignView() {
             onPickSegment={setActiveIndex}
             pinnedPage={previewPin?.page ?? null}
             pinnedAnchor={previewPin?.anchor ?? null}
+            /* 面单页从**面单文件**取图（v2.84；v2.85 一个文件里可能有多个包裹、各一张） */
+            faceSheetPages={draft.faceSheetPages}
+            faceSheetUrls={Object.fromEntries(
+              draft.faceSheetPages.map((pg) => [
+                pg,
+                /*
+                 * 该页有**专属面单样例**就用它；没有（用户自己标出来的页）就退到**本文件的那张面单**。
+                 * 不退的话会落到「原件未加载」的空态 —— 实测：把第 9 页标成快递面单后点「改」，
+                 * 预览窗里就只剩一行"原件未加载"（v2.89 修）。
+                 */
+                faceSheetUrlOfPage(currentFile ?? '', pg) ?? faceSheetUrlOfFile(currentFile ?? ''),
+              ]),
+            )}
           />
         </div>
 
@@ -328,12 +453,36 @@ export default function AssignView() {
             onPickSegment={setActiveIndex}
             onCutsChange={(cuts) => patch({ cuts })}
             assigns={Object.fromEntries(segments.map((_, i) => [i, assignOf(i)]))}
-            onAssign={(i, confirmationNo) => patch({ assigns: { ...draft.assigns, [i]: confirmationNo } })}
+            onAssign={(i, v) => {
+              /*
+               * 选「快递面单」= 把这一段覆盖的页全部标成**面单页**；选别的 = 把这些页从面单页里撤掉。
+               * **只改 `faceSheetPages` 这一处** —— 段序会随用户继续切分而变化，页不会
+               * （见 `Draft.faceSheetPages` 里那个"面单被标到别的页上"的实测教训）。
+               */
+              const pgs = pagesOfSegment(i)
+              const rest = draft.faceSheetPages.filter((pg) => !pgs.includes(pg))
+              if (v === FACE_SHEET) {
+                const next = { ...draft.assigns }
+                delete next[i]
+                patch({ faceSheetPages: [...rest, ...pgs].sort((a, b) => a - b), assigns: next })
+                return
+              }
+              patch({ faceSheetPages: rest, assigns: { ...draft.assigns, [i]: v } })
+            }}
             candidates={candidates}
             batchPanelOpenByDefault={TYPE_RULE[state.recognitionType].batchPanelOpenByDefault}
-            showSegmentExpress={showSegmentExpress}
+            showSegmentExpress={batchFaceSheetLast || faceSheetCount > 0}
             expressValues={Object.fromEntries(segments.map((_, i) => [i, expressOf(i)]))}
+            /*
+             * 把草稿里那张"人工填过的单号"表原样传下去（v2.93）——
+             * **表里有这一项 ⟹ 人填过**，切分结果据此保留「改」入口（机器识别的正常值仍只读）。
+             */
+            manualExpress={draft.express}
             onExpressChange={(i, v) => patch({ express: { ...draft.express, [i]: v } })}
+            /* 银行侧：归属下拉可把某一段标成「快递面单（本文件共用）」（v2.83；往来不提供该选项） */
+            allowFaceSheetSegment={!isTrade}
+            /* 哪几段是面单段 —— 切分板的"管辖范围/同包裹"等显示都由它自己推导 */
+            faceSheetSegments={segments.map((_, i) => i).filter(isFaceSheetSegment)}
             onRequestPreview={(page, anchor) =>
               setPreviewPin(page != null && anchor ? { page, anchor } : null)
             }
