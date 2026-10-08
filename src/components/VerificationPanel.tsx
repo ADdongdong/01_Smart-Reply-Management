@@ -26,16 +26,6 @@ import SealRecognition from '@/components/SealRecognition'
 import HandwritingRecognition from '@/components/HandwritingRecognition'
 import PdfPreview from '@/components/PdfPreview'
 
-/**
- * AI 批注图例 —— 常驻主视图下方，说明各类标注框的含义（口径与标注层一致）。
- * **按类型区分**：银行函证不检测手写体、落章区域也不参与相符性判定，图例不得出现相应表述。
- */
-function annotationLegend(record: ReplyRecord): string {
-  if (TYPE_RULE[record.type].matchBy === 'consistencyOnly') {
-    return 'AI 批注图例：蓝框＝检出的印章位置　绿框＝印章位于常规签章位置（仅作风险参考）　红框＝异常印章　（银行函证相符性由询证事项逐项核对决定，与印章位置无关，且不检测手写体）'
-  }
-  return 'AI 批注图例：蓝框＝检出的印章位置　蓝虚线＝手写体识别区　绿框＝相符判定（印章落于「信息证明无误」）　红框＝异常印章或不相符　灰虚线＝未命中的落章区域'
-}
 
 /*
  * v2.40：原 `BankItemsDiff`（扁平平表）已由 `BankItemsTable`（分组表）替代 ——
@@ -265,7 +255,19 @@ export default function VerificationPanel({ record }: { record?: ReplyRecord }) 
   const selectItem = (key: string) => {
     setActiveKey(key)
     setFocus(null)
-    if (key === 'seal') setPreviewMode('annotated')
+    /*
+     * **页签联动左侧预览的默认取景**（v3.04，用户要求）：
+     * · 「印章识别 / 手写体识别」看的是**回函件本身** —— 印章框、落章区、手写区都长在回函上，
+     *   发函用印件那边连批注都没有（`hideViewToggle`）⇒ **回函件放大、发函用印件折叠**，
+     *   把左侧整个让给真正要看的那一件；
+     * · 「发函回函一致性检测」要看**两件对照** ⇒ 回到**双栏均分**。
+     *
+     * **只改"默认值"，不锁死**：本函数只在**切页签**时跑，用户在同页签里手动展开 / 折叠
+     * （`PreviewPane` 右上角那个按钮）之后不会被覆盖回去。
+     */
+    setZoomed(key === 'consistency' ? null : 'replied')
+    /* 除了"两件对照"，其余检测项看的都是 AI 批注（手写体识别同样依赖批注层） */
+    if (key !== 'consistency') setPreviewMode('annotated')
   }
 
   return (
@@ -292,6 +294,8 @@ export default function VerificationPanel({ record }: { record?: ReplyRecord }) 
                 height="100%"
                 /* 印章 / 落章区 / 手写区都在回函件上，发函件没有批注可看 —— 连切换一起隐掉 */
                 hideViewToggle
+                /* 上下两件同步滚动（v3.01）—— 同一个分组键，滚一件另一件跟着走 */
+                scrollGroup="verify-compare"
               />
             </PreviewPane>
           )}
@@ -328,10 +332,17 @@ export default function VerificationPanel({ record }: { record?: ReplyRecord }) 
               height="100%"
               viewMode={previewMode}
               onViewModeChange={setPreviewMode}
+              /* 与上面「发函用印件」同一组 —— 两件同步上下滚动（v3.01） */
+              scrollGroup="verify-compare"
             />
           </PreviewPane>
         </div>
-        <div className="pv-legend">{annotationLegend(record)}</div>
+        {/*
+          此处原有一行「AI 批注图例」（说明蓝框 / 绿框 / 红框 / 虚线各是什么）。
+          v2.99 按用户要求删掉：「这个页面去掉红色框子中的内容」——
+          各类框的含义已经写在**框本身旁边的标签**上（标注层自己带文案），
+          常驻一整行图例既占地方、又是"要读一遍才知道"的说明。
+        */}
       </div>
 
       {/* ——— 右：检测项切换 + 明细 ——— */}

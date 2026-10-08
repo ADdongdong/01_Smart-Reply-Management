@@ -677,11 +677,21 @@ const VERIFY_GD_W: AiVerification = (() => {
   }
 })()
 
-/** 中信证券：全部相符 → 低风险 */
+/** 招商证券：**几处金额不符**（含一处整格缺失）+ 印章正常 → 中风险（待人工核对差异） */
 const VERIFY_ZX: AiVerification = (() => {
-  const consistency = buildConsistency('cswl')
+  /*
+   * v3.01：原来这里是「全部相符」（`buildConsistency('cswl')` 不带 patch）——
+   * 用户要"**做几个不一致的数据**"看标注效果，于是补三处，覆盖两种状态：
+   * · 两处**金额不符**（同一列不同行）；
+   * · 一处**整格缺失**（回函未列示）。
+   * 索引取的都是在 `VERIFY_GD` 里已验证存在的行列 ⇒ 不会越界。
+   */
+  const consistency = buildConsistency('cswl', {
+    'sales-receivable': { 1: { 3: '4,800,000' }, 3: { 3: '5,000,030' } },
+    'other-accounts': { 2: { 1: '' } },
+  })
   const seal = SEAL_NORMAL
-  const { level, reasons } = riskOf('往来函证', { diffCount: 0, seal })
+  const { level, reasons } = riskOf('往来函证', { diffCount: consistency.diffCount, seal })
   return {
     consistency: { ...consistency, confidence: 0.97 },
     seal,
@@ -1054,7 +1064,7 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     verification: VERIFY_HT,
   },
 
-  /* ---------- 招商证券：1 次回函，全部相符 → 低风险，待人工确认 ---------- */
+  /* ---------- 招商证券：1 次回函，**几处金额不符** → 中风险，待人工确认 ---------- */
   {
     id: 'whzf0010007-1',
     sendSeq: 1,

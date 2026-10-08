@@ -44,6 +44,7 @@ export default function PdfPreview({
   onViewModeChange,
   markRange,
   markLabel = '本段',
+  scrollGroup,
 }: {
   confirmationNo: string
   /**
@@ -90,6 +91,11 @@ export default function PdfPreview({
   markRange?: { start: number; end: number }
   /** 被标记页的角标前缀（默认「本段」）—— 见 `AnnotatedPdfPreview` 的同名 prop */
   markLabel?: string
+  /**
+   * **同步滚动分组键**（v3.01）—— 传同一个字符串的几份预览会同步上下滚动。
+   * 核验页把「发函用印件」与「回函件」编成一组。见 `AnnotatedPdfPreview` 的同名 prop。
+   */
+  scrollGroup?: string
 }) {
   const [internalMode, setInternalMode] = useState<PreviewMode>(DEFAULT_PREVIEW_MODE)
   const pref = forceAnnotated ? 'annotated' : (viewMode ?? internalMode)
@@ -159,6 +165,7 @@ export default function PdfPreview({
         handwriting={annotated ? handwriting : undefined}
         markRange={markRange}
         markLabel={markLabel}
+        scrollGroup={scrollGroup}
       />
       {switcher}
     </div>

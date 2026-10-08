@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Button, Segmented, Tooltip } from 'antd'
+import { Button, Segmented, Table, Tooltip } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { FileSearchOutlined } from '@ant-design/icons'
 import type { ConsistencyTable, ConsistencyTableRow } from '@/types'
 import { compareCell, parseAmount, type CellState } from '@/utils/consistency'
@@ -194,7 +195,7 @@ function makePair(
 /* 呈现                                                                */
 /* ------------------------------------------------------------------ */
 
-/** 一张表的并排对比 —— 左＝发函识别结果，右＝回函识别结果 */
+/** 一张表 —— **只展示发函侧识别结果**，回函与它不一致的地方就地标红（v2.99） */
 function TableBlock({
   align,
   onFocusTable,
@@ -236,48 +237,61 @@ function TableBlock({
           </Button>
         )}
       </header>
-      <div className="cmp-pair">
-        <TableSide align={align} side="sent" />
-        <TableSide align={align} side="replied" />
-      </div>
+      {/*
+       * **只展示发函侧那一张表，不再左右并排**（v2.99，用户：「右侧不需要这样子进行对比了，
+       * 只需要把发函的多个表格都识别出来进行展示，然后回函内容识别出来不一致的用红色标注就行了。
+       * 这样对比太丑了。而且左侧已经可以做到发回函文件进行比对了」）。
+       *
+       * 为什么并排是错的：右栏本身就不宽，两张表并排后**每张只剩一半宽**，
+       * 金额列被挤到换行；而且同一行要在左右两处来回看才能发现差异 —— 差异本来就该**就地标出来**。
+       * **发函/回函原件的正反对照交给左侧预览**（那里本来就能叠着看 AI 批注）。
+       * 回函的值没有丢：不一致的格子**悬停即给出回函值与差额**（见 `Cell`）。
+       */}
+      <TableSide align={align} />
     </section>
   )
 }
 
-function TableSide({ align, side }: { align: AlignedTable; side: Side }) {
+function TableSide({ align }: { align: AlignedTable }) {
   const { table, pairs } = align
-  const isSent = side === 'sent'
+  /*
+   * v3.01：手写 `<table>` 换成 antd **表格控件**（用户：「右侧的表格，能不能用个表格控件来展示」）——
+   * 列由发函侧模板生成（每张表列结构互不相同），单元格仍走 `Cell`（差异标红那套原样保留）。
+   *
+   * **全部左对齐**（同一批要求：「数据展示的时候，都进行左侧对齐展示」）——
+   * 连金额列也不再右对齐；数字本身靠 `tabular-nums` 对齐，不靠右对齐。
+   */
+  const columns: ColumnsType<RowPair> = table.columns.map((c, i) => ({
+    title: c,
+    key: `col-${i}`,
+    /* 列宽由「列的角色」算权重：配对键列 2 / 比对列 2 / 其余 1（与旧实现同一套算法） */
+    width: `${colWidth(table, i)}%`,
+    render: (_v: unknown, pair: RowPair) => (
+      <Cell table={table} col={i} pair={pair} side="sent" />
+    ),
+  }))
   return (
     <div className="cmp-side">
-      <div className="cmp-side__label">{isSent ? '发函文件识别结果' : '回函文件识别结果'}</div>
-      <table className="cmp-table">
-        {/* 列宽由「列的角色」算权重：配对键列 2 / 比对列 2 / 其余 1 —— 两侧同源，必然对齐 */}
-        <colgroup>
-          {table.columns.map((_, i) => (
-            <col key={i} style={{ width: `${colWidth(table, i)}%` }} />
-          ))}
-        </colgroup>
-        <thead>
-          <tr>
-            {table.columns.map((c, i) => (
-              <th key={i} className={table.comparedColumns.includes(i) ? 'is-right' : undefined}>
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {pairs.map((p) => (
-            <tr key={p.id}>
-              {table.columns.map((_, i) => (
-                <td key={i} className={table.comparedColumns.includes(i) ? 'is-right' : undefined}>
-                  <Cell table={table} col={i} pair={p} side={side} />
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/*
+        v3.03：**去掉「发函」标签**（用户：「不需要标注发函」）——
+        整块内容本来就都是发函底稿的值（核验页讲的就是"回函与发函逐格对"），
+        再挂一个「发函」标签只是噪音；组标题已经说清这是哪张表。
+      */}
+      <Table<RowPair>
+        className="cmp-antd"
+        size="small"
+        /*
+         * **带框线**（v3.02，用户：「表格要有框线」）——
+         * 与 §7.2「不使用竖向网格线」有意不同：这是**逐格核对**的对照表，
+         * 行列必须能一眼对位，框线是它的功能而不是装饰。
+         */
+        bordered
+        pagination={false}
+        rowKey="id"
+        columns={columns}
+        dataSource={pairs}
+        tableLayout="fixed"
+      />
     </div>
   )
 }
@@ -313,7 +327,13 @@ function Cell({
 }) {
   const isSent = side === 'sent'
   const state = pair.states[col] ?? 'same'
-  const text = (isSent ? pair.sent : pair.replied)?.cells[col] ?? ''
+  /*
+   * 取值：自己这一侧有行就用自己这一侧的。
+   * **发函侧没有这一行**（= 回函新增的行）时，**非比对列退回用回函的值**把行标出来（v2.99）——
+   * 否则整行只剩一个红的「无此项」，用户看不出这行说的是哪个科目、哪笔业务。
+   */
+  const own = isSent ? pair.sent : pair.replied
+  const text = own?.cells[col] ?? (isSent && !pair.sent ? (pair.replied?.cells[col] ?? '') : '')
 
   if (!table.comparedColumns.includes(col) || state === 'same') {
     return <span className={table.comparedColumns.includes(col) ? 'num' : undefined}>{text}</span>
@@ -336,7 +356,7 @@ function Cell({
   }
   if (state === 'extra') {
     return isSent ? (
-      <Tooltip title="发函底稿中无此金额（回函新增）">
+      <Tooltip title={`发函底稿中无此金额（回函新增 ${pair.replied?.cells[col] ?? ''}）`}>
         <span className="cmp-cell cmp-cell--diff cmp-cell--absent">无此项</span>
       </Tooltip>
     ) : (
@@ -349,10 +369,17 @@ function Cell({
   const s = parseAmount(pair.sent?.cells[col] ?? '')
   const r = parseAmount(pair.replied?.cells[col] ?? '')
   const gap = s != null && r != null ? r - s : null
+  /*
+   * **回函的值放进悬停说明**（v2.99）：并排的两栏取消之后，回函到底写了多少必须另有一处交代 ——
+   * 否则用户只知道"不一致"，不知道"不一致成什么样"。挂在差异格上，不占版面、需要时才出现。
+   */
+  const repliedText = pair.replied?.cells[col] ?? ''
   return (
     <Tooltip
       title={
-        gap == null ? '与发函底稿不一致' : `与发函金额相差 ${gap.toLocaleString('zh-CN')} 元`
+        gap == null
+          ? `与发函底稿不一致（回函：${repliedText || '空'}）`
+          : `回函为 ${repliedText} · 与发函相差 ${gap.toLocaleString('zh-CN')} 元`
       }
     >
       <span className="cmp-cell cmp-cell--diff num">{text}</span>

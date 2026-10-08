@@ -1831,65 +1831,88 @@ body {
 .cmp-group__sum.is-risk {
   color: var(--c-risk-high-text);
 }
-/* 并排容器 —— 嵌套区块走浅底，不叠第二层框 */
-.cmp-pair {
-  display: flex;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: var(--radius-card);
-  background: var(--c-fill-light);
-}
+/*
+ * 表体容器 —— 嵌套区块走浅底，不叠第二层框。
+ * v2.99：**不再是"并排两栏"**（`.cmp-pair` 那套 flex 并排与 `.cmp-side + .cmp-side` 的竖分隔线
+ * 已随"只展示发函一张表"一并删除）—— 右栏不宽，并排会把每张表压成一半宽、金额列被挤到换行。
+ */
 .cmp-side {
-  flex: 1;
   min-width: 0;
-}
-.cmp-side + .cmp-side {
-  margin-left: 12px;
-  padding-left: 12px;
-  border-left: 1px solid var(--c-hairline);
+  /*
+   * v3.03：**外层那圈"表格"整个去掉**（用户：「表格外面，不要再有一圈表格了」）——
+   * 原先这里是"浅底/白底 + 圆角 + 描边"的一层容器，里面再放一张带框的表格，
+   * 视觉上就是**表格套表格**。现在外层不留底色、不留边、不留内边距：
+   * 结构只剩「组标题 → 表格」两层，边框只出现在表格自己身上。
+   */
 }
 .cmp-side__label {
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--c-text-3);
 }
-.cmp-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 12px;
+/*
+ * v3.01：`.cmp-table` 一整套（手写表格）已删除 —— 右侧改用 antd `Table` 控件，
+ * 样式走全局 `.ant-table` 那套既有规范，这里只留几处"这张表特有"的微调。
+ * **全部左对齐**：连金额列也不再右对齐（用户：「数据展示的时候，都进行左侧对齐展示」），
+ * 数字靠 `tabular-nums` 对齐而非右对齐 —— 所以这里没有任何 `text-align: right`。
+ */
+.cmp-antd .ant-table {
+  /* v3.03 参考 WorkBuddy 的表格：正文 13px、行距放松（原先 12px 偏小偏挤） */
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
+  background: transparent;
 }
-/* 表头**允许换行**：原件的列名（「欠贵公司（已开票-含税）」）比列宽长得多，
-   省略号会把列名吃掉，而列名正是「这张表在核什么」的答案 */
-.cmp-table th {
-  padding: 0 3px 6px;
-  text-align: left;
-  font-size: 11px;
+/*
+ * 单元格留白：长列名（「欠贵公司（已开票-含税）」）要能换行读，行距也要松一点。
+ * `!important` 是必需的 —— antd 自己那条 `.ant-table-wrapper .ant-table.ant-table-small ...`
+ * 选择器权重更高，会把 `padding` 拽回 8px（实测过）。
+ */
+.cmp-antd .ant-table-tbody > tr > td,
+.cmp-antd .ant-table-thead > tr > th {
+  padding: 10px 10px !important;
+  word-break: break-word;
+}
+/*
+ * 表头：**浅灰底的一条**（v3.03，用户：「渲染的表格的表头底色，用别的颜色标注下」；
+ * 并点名参考 WorkBuddy 的表格样式）—— 靠**底色**把头与数据分开，
+ * 而不是靠加粗（加粗会让表头抢戏）；文字用正文墨色、常规字重、一点字距。
+ */
+.cmp-antd .ant-table-thead > tr > th {
+  background: var(--c-fill-light) !important;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 1.4;
-  color: var(--c-text-3);
-  border-bottom: 1px solid var(--c-hairline);
-  word-break: break-word;
-  vertical-align: bottom;
-}
-.cmp-table td {
-  padding: 0 3px;
-  min-height: 28px;
+  letter-spacing: 0.01em;
   color: var(--c-text-1);
-  border-bottom: 1px solid var(--c-hairline);
-  word-break: break-word;
-  vertical-align: middle;
 }
-.cmp-table tbody tr {
-  height: 28px;
+/*
+ * **本表要框线**（v3.02，用户：「表格要有框线」）—— 项目全局有一段「表格去线」
+ * （见上面同名小节：`.ant-table-tbody > tr > td { border-inline-end: none !important }`），
+ * 那是**全站口径**（列表那种数据表不需要网格线）。这里按 `.cmp-antd` 作用域**把框线要回来**：
+ * 这是**逐格核对**的对照表 —— "哪一行哪一列"必须能一眼对位，框线是它的**功能**，不是装饰。
+ */
+.cmp-antd .ant-table-thead > tr > th,
+.cmp-antd .ant-table-tbody > tr > td {
+  border-inline-end: 1px solid var(--c-border) !important;
 }
-.cmp-table tr:last-child td {
-  border-bottom: 0;
+/* 最后一列不画右线（外框由 antd 的 bordered 给出，否则右下角会出现双线） */
+.cmp-antd .ant-table-thead > tr > th:last-child,
+.cmp-antd .ant-table-tbody > tr > td:last-child {
+  border-inline-end: none !important;
 }
-.cmp-table th.is-right,
-.cmp-table td.is-right {
-  text-align: right;
+/* 末行保留底线 —— 带外框的表格里，"最后一行不画线"会让底部缺一格 */
+.cmp-antd .ant-table-tbody > tr:last-child > td {
+  border-bottom-color: var(--c-border);
+}
+/*
+ * 行线也一起加深到 `--c-border`：全局口径是 `--c-border-light`（#eaedf4），
+ * 在**白底 + 要看网格**的这张表上太淡（实测 `1px solid rgb(234,237,244)`，截图里几乎看不见）。
+ * 表头那条再重一档，保持"全表最重的一条线在表头"。
+ */
+.cmp-antd .ant-table-tbody > tr > td {
+  border-bottom-color: var(--c-border) !important;
+}
+.cmp-antd .ant-table-thead > tr > th {
+  border-bottom-color: rgba(16, 24, 40, 0.16) !important;
 }
 /* 不一致的单元格 —— 红框 + 浅红底 + 深档红字 */
 .cmp-cell {
@@ -1947,9 +1970,10 @@ body {
   width: 100%;
   max-width: 100%;
   display: flex;
-  gap: 16px;
+  /* v3.00：外围留白收紧 —— 用户「这个区域，边框窄一点…我希望显示区域能大一些」 */
+  gap: 12px;
   align-items: stretch;
-  padding: 16px 24px;
+  padding: 10px 14px;
 }
 /* 左：预览栈（固定，不参与滚动）；右：检测项明细（独立上下滚动） */
 .verify-workspace > .vw-left {
@@ -1957,7 +1981,7 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   overflow: hidden;
 }
 .verify-workspace > .vw-right {
@@ -1978,9 +2002,10 @@ body {
  * 页面底已经是白，再给每栏铺一层浅底会让「纸」与「底」打架（去线条化的既有口径）。
  */
 .pv-pane + .pv-pane {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--c-hairline);
+  /* v3.00：两件贴紧（16px → 8px），分隔线也压淡一档 —— 用户「发回函文件靠近一点」 */
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--c-border-light);
 }
 .pv-pane {
   display: flex;
@@ -2000,7 +2025,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
+  /* v3.00：30 → 26px，把高度让给下面的页面 */
+  min-height: 26px;
   padding-right: 2px;
 }
 .pv-pane.is-collapsed .pv-pane__head {
@@ -2061,12 +2087,7 @@ body {
   border-radius: var(--radius-card);
   overflow: hidden;
 }
-.pv-legend {
-  flex: none;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--c-text-3);
-}
+/* v2.99：原 `.pv-legend`（常驻的「AI 批注图例」一行）已按用户要求删除 —— 框的含义写在框自己的标签上 */
 
 /* 窄屏降级：两栏上下堆叠、整页滚动 —— 每栏给一个可用的固定高度（此时没有"半高"可言） */
 @media (max-width: 1100px) {

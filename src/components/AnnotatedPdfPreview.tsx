@@ -83,6 +83,15 @@ const clamp = (v: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v))
 
 type ZoomMode = 'fit-width' | 'fit-page' | 'custom'
 
+/*
+ * 同组滚动容器（v3.01）—— 用户要「左侧的对比预览，同步上下滚动」：
+ * 上下两件（发函用印件 / 回函件）滚一件，另一件跟着滚到同一位置，
+ * 否则对同一处页面对比时得滚两次、还得自己找同一行。
+ */
+const scrollGroups = new Map<string, Set<HTMLDivElement>>()
+/** 被同组容器"镜像"过 scrollTop 的元素 —— 用来掐掉随之而来的那次 scroll 事件，避免两端互推发抖 */
+type SyncedScroller = HTMLDivElement & { __syncedByPeer?: boolean }
+
 /**
  * 真实 PDF 渲染 + AI 批注叠加层 —— 回函预览的唯一渲染器。
  *
@@ -109,6 +118,7 @@ export default function AnnotatedPdfPreview({
   singlePage,
   markRange,
   markLabel = '本段',
+  scrollGroup,
 }: {
   fileUrl: string
   /** 定位到的页（默认第 1 页）。改这个值即触发一次定位 */
@@ -153,6 +163,15 @@ export default function AnnotatedPdfPreview({
    * 用同一个「本段」去说后者，会让人以为这里也在切分。
    */
   markLabel?: string
+  /**
+   * **同步滚动分组键**（v3.01）—— 传同一个字符串的几份预览会**同步上下滚动**：
+   * 核验页把「发函用印件」与「回函件」编成一组，用户对着同一处页面对比时只需滚一件。
+   *
+   * 为什么用**字符串分组键 + 模块级注册表**，而不是从父组件传 ref：
+   * 滚动容器长在本组件内部，外面拿不到；而"谁跟谁一起滚"是调用方才知道的事 ——
+   * 给个分组名最轻（参考滚动容器的兄弟组件自然会传同一个名字）。
+   */
+  scrollGroup?: string
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const pageElRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -445,6 +464,42 @@ export default function AnnotatedPdfPreview({
     setZoomMode('custom')
     setScale((s) => clamp(s * factor))
   }
+
+  /* ---------------------- 同组同步滚动（v3.01） ---------------------- */
+
+  useEffect(() => {
+    const el = scrollRef.current as SyncedScroller | null
+    if (!el || !scrollGroup) return
+    const peers = scrollGroups.get(scrollGroup) ?? new Set<HTMLDivElement>()
+    peers.add(el)
+    scrollGroups.set(scrollGroup, peers)
+
+    const onScroll = () => {
+      /*
+       * 自己刚被同组别的容器"镜像"过 ⇒ 这次滚动不再回写。
+       * 少了这一步，两个容器会互相推：A 滚 → B 跟着滚 → B 的事件又让 A 滚……
+       */
+      if (el.__syncedByPeer) {
+        el.__syncedByPeer = false
+        return
+      }
+      peers.forEach((p) => {
+        if (p === el) return
+        /* 已经对上了就不写（避免无意义的赋值把对方的滚动条抖一下） */
+        if (Math.abs(p.scrollTop - el.scrollTop) < 1) return
+        ;(p as SyncedScroller).__syncedByPeer = true
+        p.scrollTop = el.scrollTop
+      })
+    }
+
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      peers.delete(el)
+      /* 组内没人了就把键也清掉，别在模块级 Map 里留垃圾 */
+      if (!peers.size) scrollGroups.delete(scrollGroup)
+    }
+  }, [scrollGroup])
 
   /* ---------------------- 落章区域框 ---------------------- */
 
