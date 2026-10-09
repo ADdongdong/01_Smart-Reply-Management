@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button, Modal, Radio, Upload } from 'antd'
 import { CloudUploadOutlined, DeleteOutlined, FilePdfOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { SmartSplitAction } from '@/components/SmartSplitAction'
 
 /**
  * 「上传银行函证回函」—— **上传小弹窗**（v2.47）。
@@ -42,6 +43,7 @@ export default function BankUploadModal({
   open,
   onCancel,
   onConfirm,
+  onSmartSplit,
   /** 演示数据按钮文案（按入口类型给，如「银行函证回函（11 页 / 3 封 · 三档归属）」） */
   demoLabel,
   onDemo,
@@ -53,6 +55,14 @@ export default function BankUploadModal({
   demoLabel?: string
   /** 点演示数据 —— 同上，只是用内置批次 */
   onDemo?: () => void
+  /**
+   * 点「智能识别」（v3.26）—— 与「下一步」同路，差别只在**初稿来源**：
+   * 走这条路进去的归属界面，初稿直接是识别结果（切分 + 归属 + 快递单号都就绪）。
+   *
+   * 回调在**约 5 秒的识别过程跑完之后**才触发（过程由 `SmartSplitAction` 承担），
+   * 因此父组件这边只管"起批次 + 标记智能初稿"。
+   */
+  onSmartSplit?: (files: BankUploadFile[], faceSheetLast: boolean) => void
 }) {
   const [files, setFiles] = useState<BankUploadFile[]>([])
   /* 默认「是」—— 银行回函大多是一个快递装着多个函证（见文件头）。它不再是"必选"，
@@ -197,6 +207,31 @@ export default function BankUploadModal({
             支持单个或批量上传，仅支持 pdf 格式
           </p>
         </Upload.Dragger>
+      )}
+
+      {/*
+        v3.26：**智能识别入口** —— 银行侧切分有两条路，这是"系统替我切"那条：
+        点它 → 约 5 秒（切分 / 归属 / 快递单号一次认完）→ 进归属界面时**已经切好、归属已匹配、
+        单号已带出**，用户确认即可，也可像手动一样逐项改。
+        另一条路（手动）不受影响：不点它、走底栏「下一步」，进去就是整份一段的初稿。
+        ⚠️ 它**不要求先选文件** —— 原型没有真实解析，没选文件时按内置样例题跑（演示用）；
+        选了文件则沿用所选文件名。
+      */}
+      {onSmartSplit && (
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <SmartSplitAction
+            size="small"
+            onDone={() => {
+              const picked = files
+              const flag = faceSheetLast === 'yes'
+              reset()
+              onSmartSplit(picked, flag)
+            }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--c-text-3)' }}>
+            一次把<b>切分 · 归属 · 快递单号</b>都识别好，进切分页直接确认（识别结果全部可改）
+          </span>
+        </div>
       )}
 
       {onDemo && demoLabel && (

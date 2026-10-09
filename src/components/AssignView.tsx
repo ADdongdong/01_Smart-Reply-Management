@@ -13,6 +13,7 @@ import {
 } from '@/config/preview'
 import { TYPE_RULE } from '@/services/replyRule'
 import { StageIcon } from '@/components/recognition/shared'
+import { SmartSplitAction } from '@/components/SmartSplitAction'
 import { cutsOfSegments, segmentsOfCuts, toggleCut } from '@/utils/pageSplit'
 
 /** 切分草稿 —— 归属界面是**一次性事务**，草稿不落 store（关掉就该忘掉这次编辑） */
@@ -191,9 +192,47 @@ export default function AssignView() {
    * · 银行 —— 「整份 1 段，从头手动切」，故初稿 = **一个切点都没有**。
    *   用户用右栏的批量方式或逐页剪刀自己切；此后每段的归属下拉会按**页区间**
    *   自动预填既有识别结果（见 `assignOf`），所以从头切也不会丢演示里的归属线索。
+   *
+   * ## 银行侧的两条路（v3.26）
+   *
+   * 上面说的是**手动模式**。另一条是**智能模式**（`state.aiDraft`）：系统先认一遍，
+   * 把**切分 / 归属 / 快递单号**一次给全 —— 初稿直接**按识别出的每封页区间切好**
+   * （面单页本就各自成段），于是：
+   * · 归属不用另写 —— 每段的页区间与某封函证的识别结果**完全吻合**，`assignOf` 的下拉
+   *   自动预填那个编号（机制早就有，见那里的说明）；
+   * · 单号也不用另写 —— 面单段持有单号、被管辖的函证段自动继承（见 `expressOf`）。
+   * 所以"智能初稿"要做的只有一件事：**别再用整份一段，改用识别出的页区间**。
+   *
+   * 两条路的**共同约束**（v3.23）：一旦用户在界面上动过切分，草稿就归人工，
+   * 识别结果**不再回写**（`draftState` 一非空，本函数的结果就只是"没动过时的底稿"）。
    */
   const baseDraft: Draft = useMemo(() => {
     if (!isTrade) {
+      /*
+       * **智能模式**：初稿 = 识别结果的落点。
+       *
+       * 判据用"任务是否带页区间"（`pageStart/pageEnd`）——那正是识别给出的切分；
+       * 面单页任务自然也在其中（`faceSheetPage`），故面单段一并就位。
+       * 归属与单号由 `assignOf` / `expressOf` 从这些任务上取（无需在此重复）。
+       */
+      if (state.aiDraft) {
+        const segs = fileTasks.flatMap((t) =>
+          t.pageStart != null && t.pageEnd != null
+            ? [{ pageStart: t.pageStart, pageEnd: t.pageEnd }]
+            : [],
+        )
+        const facePageList = fileTasks
+          .filter((t) => t.faceSheetPage === true && t.pageStart != null)
+          .map((t) => t.pageStart as number)
+        return {
+          file: currentFile ?? '',
+          cuts: cutsOfSegments(segs),
+          /* 两张表都留空：预填全部由"按页区间查任务"完成（见上方说明） */
+          assigns: {},
+          express: {},
+          faceSheetPages: facePageList,
+        }
+      }
       /*
        * 银行：默认「整份 1 段，从头手动切」（整份里可能装着多封函证，只有人能切开）。
        *
@@ -231,7 +270,7 @@ export default function AssignView() {
       /* 往来不把面单页切出来（它的面单页就是各段自己的尾页）—— 故这里恒为空 */
       faceSheetPages: [],
     }
-  }, [currentFile, isTrade, fileTasks, detectedFacePages, pageCount])
+  }, [currentFile, isTrade, fileTasks, detectedFacePages, pageCount, state.aiDraft])
 
   const [draftState, setDraftState] = useState<Draft | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -394,7 +433,13 @@ export default function AssignView() {
   const recognizedOf = (i: number): string | undefined => {
     const t = taskOfSegment(i)
     if (!t) return undefined
-    const done = t.stages.some((s) => s.key === 'expressSheet' && s.status === 'done')
+    /*
+     * **智能模式下不等门控**（v3.26）：那条路的语义就是"系统已经认完了"（初稿即结果），
+     * 若还卡"检测项是否跑完"，用户会看到"已切好的面单段旁边没有单号"，
+     * 与上一行「智能识别已应用」自相矛盾。
+     */
+    const done =
+      state.aiDraft || t.stages.some((s) => s.key === 'expressSheet' && s.status === 'done')
     return done ? t.expressNo : undefined
   }
 
@@ -416,6 +461,27 @@ export default function AssignView() {
   /* 编辑动作 —— 每次都把 `file` 带上，草稿才有"属于哪个文件"的身份 */
   const patch = (next: Partial<Draft>) =>
     setDraftState({ ...draft, file: currentFile ?? '', ...next })
+
+  /* -------------------- 智能识别（v3.26）：应用 / 重跑 -------------------- */
+
+  /**
+   * 等一次"替换确认"：用户**已经动过切分**时，点智能识别不该把他的成果悄悄冲掉
+   * （v3.23 的既定口径：人工切分为准、不静默覆盖）。故先问一句，再替换。
+   */
+  const [replacingAi, setReplacingAi] = useState(false)
+
+  /** 真正应用：置标志 + **丢掉手工草稿** → 初稿换成识别结果 */
+  const runAiDraft = () => {
+    dispatch({ type: 'APPLY_AI_DRAFT' })
+    setDraftState(null)
+    setReplacingAi(false)
+  }
+
+  /** 5 秒识别跑完 —— 没动过就直接应用；动过则先确认 */
+  const handleSmartSplitDone = () => {
+    if (draftState) setReplacingAi(true)
+    else runAiDraft()
+  }
 
   const handleToggleCut = (afterPage: number) =>
     patch({ cuts: toggleCut(pageCount, draft.cuts, afterPage) })
@@ -547,13 +613,82 @@ export default function AssignView() {
       }
     >
       {/*
+       * **初稿来源一行**（v3.26）—— 银行侧切分有两条路，这里交代"当前这份切分是怎么来的"：
+       * · 手动：初稿是整份一段（**系统不替用户预判**），也可由系统先认一遍；
+       * · 智能：切分 / 归属 / 快递单号都已就绪，用户逐段确认即可，可随时改。
+       * 右侧那个动作与**上传弹窗里的入口**共用同一个组件（`SmartSplitAction`）。
+       */}
+      {!isTrade && (
+        <div
+          className="assign-draftsrc"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 12,
+            fontSize: 13,
+            color: 'var(--c-text-2)',
+          }}
+        >
+          {state.aiDraft ? (
+            <span>
+              <b style={{ color: 'var(--c-primary)' }}>✦ 智能识别已应用</b>
+              {' —— '}已切好 <b className="num">{confirmSegments}</b> 封函证 +{' '}
+              <b className="num">{faceSheetCount}</b> 段快递面单（<b className="num">{faceSheetCount}</b>{' '}
+              个包裹），归属与快递单号已带入，请逐段确认；识别结果同样可以改
+            </span>
+          ) : (
+            <span>
+              当前为<b>手动切分</b>（初稿：整份一段）—— 也可由系统先认一遍：
+              <b>切分 · 归属 · 快递单号</b>
+            </span>
+          )}
+          {replacingAi ? (
+            <>
+              <span style={{ color: 'var(--c-risk-high-text)' }}>将用识别结果替换你当前的切分</span>
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: '0 4px', height: 'auto' }}
+                onClick={runAiDraft}
+              >
+                确认替换
+              </Button>
+              <Button
+                type="text"
+                size="small"
+                style={{ padding: '0 4px', height: 'auto', color: 'var(--c-text-3)' }}
+                onClick={() => setReplacingAi(false)}
+              >
+                取消
+              </Button>
+            </>
+          ) : (
+            <span style={{ marginLeft: 'auto' }}>
+              <SmartSplitAction
+                size="small"
+                compact
+                label={state.aiDraft ? '重新智能识别' : '智能识别'}
+                onDone={handleSmartSplitDone}
+              />
+            </span>
+          )}
+        </div>
+      )}
+
+      {/*
        * 快递面单识别状态（v3.22）—— **有图标、有计数**：进行中 / 已完成 / 失败都有交代。
        *
        * 图标走全站统一的 `StageIcon`（圆形状态图标：待检测 ○ / 检测中 ⟳ / 已完成 ✓ / 失败 ✕）——
        * 同一个语言在识别界面里也在用，用户不必学第二套。**不用弹窗、不用 toast**：
        * 正在切分的人不该被打断，一行状态足够。
        */}
-      {!isTrade && (
+      {/*
+       * 面单识别状态行 —— **智能模式下不显示**（v3.26）：那条路的初稿已经包含面单段与单号，
+       * 再挂一行"正在识别快递面单…（已识别 1 张）"会与"已切好"自相矛盾；
+       * 后台识别的真实进度仍可在右下角进度卡里看，信息不丢。
+       */}
+      {!isTrade && !state.aiDraft && (
         <div
           className="assign-facesheet"
           style={{

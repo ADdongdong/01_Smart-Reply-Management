@@ -224,6 +224,26 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
   }
 
   /**
+   * 银行弹窗里的**「智能识别」**（v3.26）—— 与上传同路，差别只在 `aiDraft: true`：
+   * 归属界面的初稿直接是识别结果（切分 + 归属 + 快递单号），用户确认即可。
+   *
+   * ⚠️ 这条路的可用性取决于客户侧 AI 资源（识别率 / 速度）——**没文件也能点**，
+   * 原型按内置样例题跑；真实施时若不启用，把弹窗里这个入口去掉即可（手动路完全不受影响）。
+   */
+  const onBankSmartSplit = (files: BankUploadFile[], faceSheetLast: boolean) => {
+    setBankUpload(false)
+    const batch = PRESET_BATCHES[TYPE_RULE['银行函证'].presetBatchId]()
+    const first = files[0]
+    dispatch({
+      type: 'START_BATCH',
+      batch: first ? { ...batch, fileName: first.name, fileSize: first.size, faceSheetLast } : { ...batch, faceSheetLast },
+      uploadType: '银行函证',
+      aiDraft: true,
+    })
+    message.success('智能识别完成 —— 切分、归属与快递单号都已就绪，请核对后点「确定」')
+  }
+
+  /**
    * 往来回函：① 选好文件 → 启动批次并进**归属界面**（v2.60）。
    *
    * 此前这里是两步（① 文件识别录入 → ② 数据核对弹窗），核对点「确定」才启动识别。
@@ -325,9 +345,16 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     setFilter(EMPTY_FILTER)
   }
 
-  /** 有批次在跑，或已有银行回函处于「识别中」（阶段二尚未回填）—— 两种都意味着列表还会自动刷新 */
+  /**
+   * 有批次在跑，或已有银行回函处于「识别中」（阶段二尚未回填）—— 两种都意味着列表还会自动刷新。
+   *
+   * **批次必须是「已提交」的**（v3.27）：未提交（用户还在归属界面、没点「确定」）时
+   * **没有任何结果会写进列表**，此时挂一句「识别中，结果将自动写入列表」是错的
+   * （用户退出归属界面后，列表上会出现一句永远等不到结果的提示）。
+   */
   const recognizing =
-    state.batches.some((b) => b.status !== 'done') || state.records.some((r) => isRecognitionPending(r))
+    state.batches.some((b) => b.committed && b.status !== 'done') ||
+    state.records.some((r) => isRecognitionPending(r))
   const activeRecord = state.records.find((r) => r.id === activeModal?.recordId)
   /** 关闭时把 key 切回 idle，内容组件随之卸载，避免下一条记录残留上一条的编辑状态 */
   const modalKey = (kind: ModalKind) =>
@@ -1138,6 +1165,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
         open={bankUpload}
         onCancel={() => setBankUpload(false)}
         onConfirm={onBankUploadConfirm}
+        onSmartSplit={onBankSmartSplit}
         demoLabel={DEMO_LABEL[TYPE_RULE['银行函证'].presetBatchId]}
         onDemo={onBankDemo}
       />

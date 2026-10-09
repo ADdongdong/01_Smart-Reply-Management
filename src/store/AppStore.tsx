@@ -55,6 +55,20 @@ interface AppState {
   /** 快递数据导入结果（不做步骤化处理，直接展示匹配代入结果） */
   expressResult: ExpressImportResult | null
   expressOpen: boolean
+  /**
+   * **归属界面的初稿是否由「智能识别」给出**（v3.26）。
+   *
+   * 银行侧切分有两条路（详见 `AssignView` 的 `baseDraft` 与 5.2 的「两种模式」）：
+   * · `false`（默认，手动模式）→ 初稿 = **整份一段**，函证切点留给用户自己切；
+   * · `true`（智能模式）→ 初稿 = **识别结果直接落成的切分**：按每封的页区间切好、
+   *   归属按四要素匹配预填、快递单号随面单段带出、面单页各自成段 —— 用户确认即可，
+   *   也可以像手动一样改。
+   *
+   * 它**只在"起批次"与"用户在归属界面主动点智能识别"这两个时刻被置真**，
+   * 且**不参与后续回写**：一旦用户在界面上动过切分，草稿就归人工（v3.23 的口径
+   * 「已切分过的，识别结果到达后不再另做切分，按人工的切分为准」）。
+   */
+  aiDraft: boolean
 }
 
 type Action =
@@ -63,8 +77,21 @@ type Action =
    * `uploadType` 由**上传弹窗**给出 —— 类型在上传那一刻就已确定（v2.47 起），
    * 不必再另外发一次 `OPEN_RECOGNITION`（分两次 dispatch 会让工作台先按旧类型渲染一帧）。
    */
-  | { type: 'START_BATCH'; batch: UploadBatch; uploadType?: ConfirmationType }
+  | {
+      type: 'START_BATCH'
+      batch: UploadBatch
+      uploadType?: ConfirmationType
+      /** v3.26：本次上传是否已用「智能识别」（初稿直接落成切分结果，见 `AppState.aiDraft`） */
+      aiDraft?: boolean
+    }
   | { type: 'TICK' }
+  /**
+   * 在**归属界面里**应用「智能识别」（v3.26）—— 初稿换成识别结果（切分 + 归属 + 单号）。
+   * 只置这一个标志：真正的初稿由 `AssignView` 的 `baseDraft` 按它算出来，
+   * 因此**用户此前的手工改动会自然被丢弃**（那是用户主动点它时的预期），
+   * 而"AI 不回写人工成果"这条约束由"初稿只在没动过时生效"保证。
+   */
+  | { type: 'APPLY_AI_DRAFT' }
   /**
    * 打开**归属界面**（v2.57）。`uploadType` 由上传入口指定（缺省按「往来函证」处理）。
    */
@@ -163,6 +190,8 @@ const initialState: AppState = {
   demoLoaded: false,
   expressResult: null,
   expressOpen: false,
+  /* 默认**手动模式**（初稿 = 整份一段）：智能识别那条路要用户/上传弹窗明确点过才走 */
+  aiDraft: false,
 }
 
 /**
@@ -258,6 +287,14 @@ function findTask(state: AppState, taskId: string): RecognitionTask | undefined 
  * TICK / CONFIRM_ASSIGN / MANUAL_MATCH 三处共用本函数，保证「写入 + 标记」原子完成、不重复写入。
  */
 function finalizeTask(state: AppState, taskId: string): AppState {
+  /*
+   * ① **未提交的批次一律不落库**（v3.27）—— 闸设在这里而不是各调用点，是为了
+   * `TICK` / `CONFIRM_ASSIGN` / `MANUAL_MATCH` 三条来路口径一致、不会漏掉一条。
+   * 「切分与归属决定的是**什么时候写入回函管理列表**」（见 `UploadBatch.committed`）。
+   */
+  const batch = state.batches.find((b) => b.tasks.some((t) => t.id === taskId))
+  if (!batch?.committed) return state
+
   const task = findTask(state, taskId)
   if (!task || task.applied || !task.assignSource) return state
   if (!task.confirmationNo || task.confirmationNo === '待指定') return state
@@ -353,13 +390,19 @@ function reducer(state: AppState, action: Action): AppState {
     case 'START_BATCH':
       return {
         ...state,
-        batches: [...state.batches, action.batch],
+        /* 新批次**一律未提交**（v3.27）：切分与归属还没经用户点「确定」，结果不得写入列表 */
+        batches: [...state.batches, { ...action.batch, committed: false }],
         /* 上传即进**归属界面**（v2.57）：识别在后台照跑，但用户先做"把回函对应到函证"这一步 */
         assignOpen: true,
         /* 入口类型随批次一起定 —— 上传弹窗知道自己是哪一类，避免工作台先按旧类型渲染一帧 */
         recognitionType: action.uploadType ?? state.recognitionType,
+        /* v3.26：初稿来源随批次定 —— 走「智能识别」进来的、进来就是切好的 */
+        aiDraft: action.aiDraft === true,
         floatingVisible: true,
       }
+
+    case 'APPLY_AI_DRAFT':
+      return { ...state, aiDraft: true }
 
     case 'TICK': {
       if (!state.batches.some((b) => b.status === 'queued' || b.status === 'running')) return state
@@ -367,7 +410,13 @@ function reducer(state: AppState, action: Action): AppState {
       const batches = state.batches.map((batch) => (batch.status === 'done' ? batch : advanceBatch(batch).batch))
       let next: AppState = { ...state, batches }
 
-      const allTasks = batches.flatMap((b) => b.tasks)
+      /*
+       * ⚠️ **只对「已提交」的批次做下面三遍处理**（v3.27）——
+       * 未提交（用户还在归属界面、没点「确定」）的批次**只在后台跑阶段一**：
+       * 识别照跑、进度照走，但**结果一律不写进回函列表**（见 `UploadBatch.committed`
+       * 与 `finalizeTask` 的说明）。少了这道闸就会出现「什么都没切，列表里已经有几行」。
+       */
+      const allTasks = batches.filter((b) => b.committed).flatMap((b) => b.tasks)
 
       /*
        * 三遍**幂等**处理 —— 顺序即语义，全部按类型规则查表判分支，不写内联类型判断：
@@ -428,10 +477,26 @@ function reducer(state: AppState, action: Action): AppState {
       }
     case 'DISCARD_BATCH': {
       /* 丢掉这一批（连同它的任务）—— 识别随之停跑，卡片按剩余批次重算显隐 */
+      const dropped = state.batches.filter((b) => b.fileName === action.fileName)
       const batches = state.batches.filter((b) => b.fileName !== action.fileName)
+      /*
+       * **把本批已写进列表的记录一并撤回**（v3.27）。
+       *
+       * 「没点确定就不该有数据」由 `UploadBatch.committed` 那道闸保证，正常路径下这里
+       * 没有记录可撤 —— 它是**兜底**：闸只拦"未提交"，万一将来某条路径在提交后仍能
+       * 回到归属界面（如新增"重新切分"入口），点 ✕ 退出时这些记录必须跟着走，
+       * 否则列表里会留下**出处已消失**的孤儿行（识别任务没了、状态永远停在「识别中」）。
+       * 按 `recordId` 精确撤，不动列表里与本批无关的既有数据。
+       */
+      const recordIds = new Set(
+        dropped.flatMap((b) => b.tasks.map((t) => t.recordId).filter((id): id is string => !!id)),
+      )
       return {
         ...state,
         batches,
+        records: recordIds.size
+          ? state.records.filter((r) => !recordIds.has(r.id))
+          : state.records,
         assignOpen: false,
         floatingVisible: batches.some((b) => b.status !== 'done'),
       }
@@ -618,6 +683,11 @@ function reducer(state: AppState, action: Action): AppState {
         return {
           ...b,
           tasks,
+          /*
+           * **用户点了「确定」= 本批已提交**（v3.27）—— 闸口自此打开：
+           * TICK 的三遍处理会把归属已确定的任务写进回函列表（先「识别中」、阶段二跑完自动刷新）。
+           */
+          committed: true,
           /* 切分变了 → 批次回到 running，让 TICK 重新接管推进 */
           status: b.status === 'done' ? ('running' as const) : b.status,
         }

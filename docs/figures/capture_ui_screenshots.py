@@ -136,6 +136,24 @@ def to_assign_bank(page):
     page.wait_for_timeout(1200)
 
 
+def to_assign_bank_smart(page):
+    """走到**银行侧「智能识别」初稿态**（v3.26 新路，与 `to_assign_bank` 的手动态对照）。
+
+    差别只有一处：**不从演示数据入口进**，而是点弹窗里的「智能识别」按钮 ——
+    它跑完约 5 秒（`SmartSplitAction` 的固定演示节奏）后进归属界面，**初稿即识别结果**
+    （8 段已切好、归属与快递单号已带入、顶部写「✦ 智能识别已应用」）。
+    判据用 `.assign-draftsrc` 的文案，比"干等 6 秒"稳。
+    """
+    page.locator('button', has_text='上传银行函证回函').first.click()
+    page.locator('.ant-modal-content').wait_for(timeout=8000)
+    page.locator('.ant-modal-content button', has_text='智能识别').first.click()
+    page.locator('.assign-pane').wait_for(timeout=20000)
+    page.locator('.assign-draftsrc', has_text='智能识别已应用').wait_for(timeout=20000)
+    page.wait_for_timeout(2000)          # 等切分缩略图渲染出来
+    page.mouse.move(1660, 940)
+    page.wait_for_timeout(800)
+
+
 def to_identify(page):
     """走到「智能识别」全屏界面（＝需求点「识别工作台」）。
 
@@ -195,6 +213,8 @@ STEPS = [
     ('ui_assign', '「回函切分与归属」全屏界面 · 往来侧初稿（按二维码切分成段 → 逐段归属）', to_assign, False),
     ('ui_assign_bank', '「回函切分与归属」全屏界面 · 银行侧初稿（4 个包裹：面单页已预切成独立面单段）',
      to_assign_bank, False),
+    ('ui_assign_bank_smart', '「回函切分与归属」全屏界面 · 银行侧「智能识别」初稿态（初稿即切分结果：8 段 / 4 包裹 / 归属与单号已带入）',
+     to_assign_bank_smart, False),
     ('ui_identify', '「智能识别」全屏界面（按函证分组的检测点卡 + 建议卡）', to_identify, False),
     # 近景（第 4 项传选择器 → 只截该元素）：建议卡在整屏图的下半截，字会糊
     ('ui_identify_card', '近景：结论建议卡（风险等级标签 + 置信度胶囊 + 风险原因）',
@@ -213,7 +233,7 @@ MODES = [('ui_verify_seal', 'AI 核验 · 印章识别', '印章识别'),
          ('ui_verify_handwrite', 'AI 核验 · 手写体识别', '手写体识别')]
 
 # 这几个文件要去**银行页**抓（其余都在往来页）—— v3.05 拆页之后必须各去各的
-BANK_STEPS = {'ui_reply_list_bank', 'ui_upload_bank', 'ui_assign_bank'}
+BANK_STEPS = {'ui_reply_list_bank', 'ui_upload_bank', 'ui_assign_bank', 'ui_assign_bank_smart'}
 
 
 def main():
