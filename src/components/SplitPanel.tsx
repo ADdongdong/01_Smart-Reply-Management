@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Button, Input, InputNumber, Radio, Select } from 'antd'
 import { CarOutlined, EditOutlined } from '@ant-design/icons'
 import type { PageSegment } from '@/types'
+import { StatusTag } from '@/components/StatusTag'
 import { Section } from '@/components/recognition/shared'
 import { checkExpressNo } from '@/utils/expressNo'
 import { pageRangeOf } from '@/utils/pageRange'
@@ -75,6 +76,7 @@ export default function SplitPanel({
   showSegmentExpress,
   expressValues,
   manualExpress,
+  recognizedExpress,
   onExpressChange,
   allowFaceSheetSegment,
   faceSheetSegments,
@@ -101,11 +103,23 @@ export default function SplitPanel({
   /**
    * 段序 → **用户人工补/改过的**单号（v2.93）—— 只用来判断"这一行的值是机器读的还是人填的"。
    *
-   * 传的是草稿里那张表本身（`draft.express`）：**表里有这一项 ⟹ 人填过**（值可能是空串，
-   * 那也是人主动清空的，同样该保留「改」）。机器识别的值不在表里 —— 界面上两者应能被区分，
+   * **表里有这一项 ⟹ 人填过**（值可能是空串，那也是人主动清空的，同样该保留「改」）。
+   * 机器识别的值不在表里 —— 界面上两者应能被区分，
    * 因为**机器读的是原始证据、人要为准；人填的是判断、必须能回头改**。
+   *
+   * 注（v3.23）：草稿侧已改为**按页**存（单号物理上属于一页，段序会因切分而变化），
+   * 这一份是上游按当前段序映射好的视图，故此处仍按段序取用。
    */
-  manualExpress: Record<number, string>
+  manualExpress: Record<number, string | undefined>
+  /**
+   * 段序 → **系统识别到的**单号（v3.23）—— 只用于"人工值 ≠ 识别值"时挂一枚
+   * 「系统识别 …」提醒标签（用户要求：以标签形式给出系统识别内容作为提醒，
+   * **但不更改人手工填的单号**）。
+   *
+   * 与 `expressValues`（界面最终显示值，人工优先）**分开传**，两者才能对比；
+   * 也**不做来源收敛**（不继承面单段的值）—— 这枚标签只回答"系统在**这一段**读到了什么"。
+   */
+  recognizedExpress: Record<number, string | undefined>
   /** 人工补/改某段的单号 */
   onExpressChange: (index: number, value: string) => void
   /**
@@ -408,12 +422,23 @@ export default function SplitPanel({
                    */
                   const inherited = gov != null && !isFace
                   /*
+                   * **银行侧：单号只跟着面单走**（v3.22）。
+                   *
+                   * 银行那张"本段末页是快递面单"的假定**已不成立**（v3.21 起面单页由识别给出，
+                   * 且一张面单可以管前面好几段）—— 故对银行，**没有可继承的面单、自己又不是面单段**的段
+                   * 不显示这一行：它压根不属于任何包裹，写「快递单号 · 未识别到」等于凭空要一个值。
+                   * 面单还没识别出来时整行都不显示（`showSegmentExpress` 同理只在有面单段时为真），
+                   * 用户看到的是顶部那行「正在识别快递面单…」，而不是每段下面一串空字段。
+                   */
+                  if (allowFaceSheetSegment && !isFace && !inherited) return null
+                  /*
                    * 标签**不再写「本文件面单 / 同包裹」**（v2.93，用户：「有了包裹标签了，
                    * 下面就不需要【同包裹】【本文快递面单】这个文字说明了」）——
                    * 分组关系已经由行首那个包裹标签表达，这里只留"这一行是个什么值"。
                    * 往来的「段尾面单」保留：往来没有包裹标签可依赖，这个前缀还得承担说明职责。
                    */
-                  const label = isFace || inherited ? '快递单号' : '段尾面单 · 快递单号'
+                  const label =
+                    allowFaceSheetSegment || isFace || inherited ? '快递单号' : '段尾面单 · 快递单号'
                   /*
                    * **人工填过的值，也要一直留着「改」**（v2.93，用户：「如果是手动填入的快递单号，
                    * 填写后，仍然需要保留修改的入口」）。
@@ -481,6 +506,33 @@ export default function SplitPanel({
                       {manual && !inherited && check.status === 'ok' && (
                         <span className="split-rows__express-why">人工填写</span>
                       )}
+                      {/*
+                       * **人工填的号 ≠ 系统识别的号 → 挂一枚「系统识别 …」提醒标签**（v3.23，用户要求）：
+                       * 「人工填写了快递单号与识别快递单号不同的，后面需要以标签的形式，给出系统识别内容，
+                       * 作为提醒。**但是不更改人手填的快递单号**」。
+                       *
+                       * 三条口径：
+                       * · **只提醒、无动作** —— 因此这里**没有**"采用识别值"按钮，人工值一个字都不动；
+                       * · **挂在哪一行**：只在**人真的填过**的那一行（`manual && !inherited`）——
+                       *   被管辖的段是继承来的值，本来就只读，给它们挂标签只会把同一件事重复 N 遍；
+                       * · **样式**：走全站统一件 `StatusTag` 的 `ai` 位（虚线）＋主色档 ——
+                       *   `ai` = "这个值是 AI 产的、尚未经人工确认"，与紧邻的「人工填写」标记正好互为对照。
+                       */}
+                      {manual && !inherited && (() => {
+                        const rec = recognizedExpress[i]?.trim()
+                        const own = value?.trim()
+                        if (!rec || !own || rec === own) return null
+                        return (
+                          <StatusTag
+                            ai
+                            tone="primary"
+                            size="sm"
+                            tip={`系统在这一段读到「${rec}」，与你填写的不一致 —— 仅作提醒，不会改动你填写的单号`}
+                          >
+                            系统识别 {rec}
+                          </StatusTag>
+                        )
+                      })()}
                       {/*
                         「改」出现的两个条件，缺一不可：
                         · **值是异常的 / 没识别到** —— 机器识别的正常值只读（别让用户逐段核对一串数字）；

@@ -49,7 +49,7 @@ export interface TaskGroup {
    * 该函证自己的结论（相符 / 不相符 / 待人工判定 / 识别中）。
    * **给在组头**而不是只给一张全局结论卡 —— 多封时全局卡无法回答"这个不相符是谁的"。
    */
-  verdict?: { text: string; tone: 'high' | 'low' | 'neutral' | 'running' }
+  verdict?: { text: string; tone: 'high' | 'medium' | 'low' | 'neutral' | 'running' }
   rows: TaskRowItem[]
 }
 
@@ -165,11 +165,13 @@ function TaskGroupCard({ group }: { group: TaskGroup }) {
             className={
               group.verdict.tone === 'high'
                 ? 'group-verdict is-high'
-                : group.verdict.tone === 'low'
-                  ? 'group-verdict is-low'
-                  : group.verdict.tone === 'running'
-                    ? 'group-verdict is-running'
-                    : 'group-verdict'
+                : group.verdict.tone === 'medium'
+                  ? 'group-verdict is-medium'
+                  : group.verdict.tone === 'low'
+                    ? 'group-verdict is-low'
+                    : group.verdict.tone === 'running'
+                      ? 'group-verdict is-running'
+                      : 'group-verdict'
             }
           >
             {group.verdict.text}

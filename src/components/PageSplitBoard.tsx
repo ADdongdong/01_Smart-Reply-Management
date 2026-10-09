@@ -1,8 +1,9 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from 'antd'
 import {
+  CarOutlined,
   CloseOutlined,
   EyeOutlined,
   LoadingOutlined,
@@ -446,6 +447,7 @@ export default function PageSplitBoard({
   onPickSegment,
   pinnedPage,
   pinnedAnchor,
+  pinRequest = 0,
   faceSheetPages = EMPTY_PAGES,
   faceSheetUrls = EMPTY_URLS,
 }: {
@@ -467,6 +469,14 @@ export default function PageSplitBoard({
   pinnedPage?: number | null
   /** 请求方给的锚点（那一行）—— 弹窗纵向与它对齐 */
   pinnedAnchor?: HTMLElement | null
+  /**
+   * **本次请求的序号**（v3.08）—— 每次点「改」都递增。
+   *
+   * 只按 `pinnedPage` / `pinnedAnchor` 比依赖是不够的：同一段**每次点的都是同一个页码、
+   * 同一个行元素**，两个值都没变 → 下面那个钉预览的 effect 不重跑 → **关掉预览后再点「改」，
+   * 预览不再出现**（用户实测"只有第一次会弹出"）。带上序号，每次点击都是一次新请求。
+   */
+  pinRequest?: number
   /**
    * 哪几页是**快递面单页**（v2.84，银行侧）—— 这些页**从面单文件取图**渲染，
    * 而不是从用户上传的那份回函件里取：上传件里根本没有这些页的清晰扫描件
@@ -503,6 +513,29 @@ export default function PageSplitBoard({
     setRetryNote('')
     setReloadKey((k) => k + 1)
   }
+
+  /*
+   * ── 按「内容」稳定这两个入参（v3.07：修缩略图持续闪烁）────────────────────────
+   *
+   * 上游 `AssignView` 的 `faceSheetPages` / `faceSheetUrls` 是从「批次任务 → 切分初稿」
+   * 一路 `useMemo` 推下来的，而**识别期间 store 每 600ms 发一次 `TICK`**：批次一变，
+   * 这条链上每一级都换新引用，于是这两个入参**每 600ms 就是一份新数组 / 新对象**。
+   *
+   * 下面几个重画 effect 依赖它们 ⇒ 整面墙每 600ms 从头重画一遍。而 `canvas.width = …`
+   * 会**先清空画布**、再等 pdf.js 异步重绘，屏幕上就是**缩略图一直闪**（页数越多越明显，
+   * 22 页串行重画时几乎看不清）。
+   *
+   * 修法：把"内容其实没变的新引用"折回**上一次那个引用**（`useMemo` 按内容键缓存），
+   * 依赖自然就稳了 —— 只有面单页清单 / 地址真的变了才重画。
+   *
+   * ⚠️ **别在 effect 里加"内容没变就 return"的守卫**：React 重跑 effect 前会先执行上一次的
+   * cleanup（把 `cancelled` 置真），提前 return 等于把上一轮**画到一半就掐掉** —— 墙上会留下
+   * 永远画不完的空白页，比闪更糟。所以必须从**依赖**这层修。
+   */
+  const facePagesKey = faceSheetPages.join(',')
+  const faceUrlKey = faceSheetPages.map((pg) => `${pg}:${faceSheetUrls[pg] ?? ''}`).join('|')
+  const stableFacePages = useMemo(() => faceSheetPages, [facePagesKey])
+  const stableFaceUrls = useMemo(() => faceSheetUrls, [faceUrlKey])
 
   /* 换文件时重置自动重试 */
   useEffect(() => {
@@ -636,7 +669,8 @@ export default function PageSplitBoard({
         pinned: true,
       }
     })
-  }, [pinnedPage, pinnedAnchor])
+    /* `pinRequest` 必须进依赖：同页再次点击时，只有它会变（见 props 里的说明） */
+  }, [pinnedPage, pinnedAnchor, pinRequest])
 
   /*
    * **故意不接管 Esc**（v2.81 实测后撤掉）：整个「回函归属」是 antd 的 `FullscreenModal`，
@@ -742,15 +776,16 @@ export default function PageSplitBoard({
    * 加载**面单文件**（v2.84）—— 只在这一份文件确实有"面单页"、并且给了面单地址时才去取。
    * **失败就静默留空**：墙上那一页留白框，不弹错、不影响切分（面单图是锦上添花，缺了也能归属）。
    *
-   * **同一份面单只取一次**（`faceLoadedRef` 去重）：这个 effect 会被上游重渲染反复触发，
-   * 实测没去重时同一份面单被取了 **17 次**（百来 KB × 17 的无谓流量）；
-   * 更要紧的是原来每次 cleanup 都 `destroy()` 当前文档 —— 反复触发时会把**已经画好的那张**一起弄没。
-   * 现在只有"换成另一份面单"时才释放上一份。
+   * **同一份面单只取一次**（`faceLoadedRef` 去重）：v3.07 之前这个 effect 会被上游重渲染
+   * 反复触发（识别期间每 600ms 一次），实测没去重时同一份面单被取了 **17 次**
+   * （百来 KB × 17 的无谓流量）；更要紧的是原来每次 cleanup 都 `destroy()` 当前文档 ——
+   * 反复触发时会把**已经画好的那张**一起弄没。现在只有"换成另一份面单"时才释放上一份。
+   * （v3.07 起依赖已按内容稳定，本 effect 本身不会再每帧重跑；这道取件去重留作兜底。）
    */
   useEffect(() => {
     /* 每个"面单页"各自加载自己那张面单（同一个文件里可能有多个包裹） */
-    faceSheetPages.forEach((pg) => {
-      const url = faceSheetUrls[pg]
+    stableFacePages.forEach((pg) => {
+      const url = stableFaceUrls[pg]
       if (!url) return
       if (loadedFaceRef.current[pg] === url) return
       loadedFaceRef.current[pg] = url
@@ -770,7 +805,7 @@ export default function PageSplitBoard({
         }
       })()
     })
-  }, [faceSheetUrls, faceSheetPages])
+  }, [stableFaceUrls, stableFacePages])
 
   /* 逐页画缩略图 —— 页数不多（演示里 ≤ 17 页），串行渲染即可，不必懒加载 */
   useEffect(() => {
@@ -788,7 +823,7 @@ export default function PageSplitBoard({
          * 面单文件通常只有一页，故恒取它的第 1 页；文档还没到就先跳过，
          * 等它到了这个 effect 会因 `faceDoc` 变化再跑一遍把这张补画上。
          */
-        const isFace = faceSheetPages.includes(i)
+        const isFace = stableFacePages.includes(i)
         const srcDoc = isFace ? faceDocsRef.current[i] : doc
         if (!srcDoc) continue
         try {
@@ -819,7 +854,7 @@ export default function PageSplitBoard({
      * 放进来会让整墙每次到一张面单就**从头重画**：22 页串行本就要好几秒，
      * 反复重启的结果是"后面几页永远画不到、加载提示也一直不消失"（v2.85 实测踩到）。
      */
-  }, [doc, pageCount, faceSheetPages])
+  }, [doc, pageCount, stableFacePages])
 
   /**
    * 面单文档**后到**时补画那几页面单（v2.85）—— 只重画面单页，**不重启整面墙**。
@@ -828,7 +863,7 @@ export default function PageSplitBoard({
     if (!faceLoaded) return
     let cancelled = false
     void (async () => {
-      for (const pg of faceSheetPages) {
+      for (const pg of stableFacePages) {
         if (cancelled) return
         const srcDoc = faceDocsRef.current[pg]
         const canvas = canvasRefs.current[pg - 1]
@@ -848,7 +883,7 @@ export default function PageSplitBoard({
     return () => {
       cancelled = true
     }
-  }, [faceLoaded, faceSheetPages])
+  }, [faceLoaded, stableFacePages])
 
   return (
     <div className="split-board">
@@ -932,6 +967,20 @@ export default function PageSplitBoard({
                   onMouseMove={(e) => onCardMove(page, e)}
                 />
                 <span className="split-board__no">第 {page} 页</span>
+                {/*
+                 * **面单页角标**（v3.22）—— 此前这一页只是"悄悄换了取图来源"（v2.84 起从面单文件取图），
+                 * 画面上看不出它是什么；用户问「银行函证的快递面单自动识别的过程，和识别结束，
+                 * 是不是需要一个显示的图标来标识」⇒ 是：这里给它一枚与切分结果里**同款**的
+                 * 卡车图标 + 「面单」。识别结果到达时它就会出现 —— 这也是"过程看得见"的一半。
+                 */}
+                {stableFacePages.includes(page) && (
+                  <span
+                    className="split-board__sheet"
+                    title="这一页被识别为快递面单（运单号由它管辖前面那几段函证）"
+                  >
+                    <CarOutlined /> 面单
+                  </span>
+                )}
               </button>
               {/*
                * 「查看原件」—— **不经过本站的实时渲染**（v2.75，用户要求：「我点这里，你就默认打开展示文件

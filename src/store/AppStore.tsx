@@ -38,7 +38,13 @@ interface AppState {
    * 两个界面据此渲染标题 / 演示数据，不再靠系统事后判类型。
    */
   recognitionType: ConfirmationType
-  /** 悬浮进度卡是否显示 */
+  /**
+   * 悬浮进度卡是否显示。
+   *
+   * **只由"一次性事件"置真**（v3.09 起）：启动批次、归属确认/重切后启动阶段二、重试；
+   * 之后**只有两种情况会置假**：用户点 ✕ 收起、或全部跑完 2.6s 后自动收起。
+   * ⚠️ 别在 `TICK` 里按"还有批次在跑"重新置真 —— 那会让 ✕ 失效（每 600ms 弹回来）。
+   */
   floatingVisible: boolean
   /** 识别完成后需要高亮闪烁的函证（按函证编号） */
   flashRowId: string | null
@@ -70,6 +76,16 @@ type Action =
    * 要不要去看由用户主动点（用户明确要求「用户需要主动点击，才会去到智能识别的界面查看」）。
    */
   | { type: 'CLOSE_ASSIGN' }
+  /**
+   * **放弃本次上传**（v3.10）—— 归属界面右上角 ✕ / Esc 触发（与「确定」= 提交相对）。
+   *
+   * 退出即放弃：归属界面的切分与归属是**草稿**（不落 store，见 `AssignView` 的 `Draft`），
+   * 没点「确定」就没有提交（口径：**归属未确定绝不落库**），所以批次本身也该一起丢掉 ——
+   * 否则它会 ① 在后台把识别白跑完；② 让 `pendingAssignCount > 0`，使右下角进度卡
+   * **永远收不起来**（自动收起逻辑明确排除"还有待归属"）；③ 卡片上写着「正在对应 N 份」
+   * 却**没有任何入口回到归属界面**（`OPEN_ASSIGN` 全项目无人派发）。
+   */
+  | { type: 'DISCARD_BATCH'; fileName: string }
   /** 打开**智能识别界面**（由右下角进度卡点入） */
   | { type: 'OPEN_INSIGHT' }
   /** 关闭**智能识别界面** —— 回到主界面，识别任务不受影响 */
@@ -107,6 +123,12 @@ type Action =
          * 它属于段，所以随切分结果一起下发，落到任务的 `expressNo` 上。
          */
         expressNo?: string
+        /**
+         * 这一段**就是快递面单页**（v3.22）—— 面单段现在**照提交**（v2.83 时是不提交的，
+         * 见 `makeSegmentTask` 的入参说明）：面单页是**识别结果**，只有任务记着它；
+         * 不提交 ⇒ 识别界面看不到「快递面单」组、重开归属界面还会退化成"未识别到快递面单"。
+         */
+        faceSheetPage?: boolean
       }[]
     }
   | { type: 'RETRY_TASK'; taskId: string }
@@ -374,8 +396,16 @@ function reducer(state: AppState, action: Action): AppState {
           next = applyVerification(next, t.id)
         })
 
-      const anyRunning = next.batches.some((b) => b.status !== 'done')
-      return { ...next, floatingVisible: anyRunning ? true : next.floatingVisible }
+      /*
+       * **不再在这里强行把卡片显示回来**（v3.09 修「正在识别时关不掉」）：
+       * TICK 每 600ms 一次，原来只要还有批次在跑就把它置回 `true` ——
+       * 用户点 ✕ 收起，**600ms 后又自己弹回来**，看起来就是关不掉。
+       *
+       * 卡片该不该出现，交给**一次性事件**决定：启动批次（`START_BATCH`）、
+       * 归属确认或重切后启动阶段二（`CONFIRM_ASSIGN` / `MANUAL_MATCH` / `COMMIT_SPLIT`）、
+       * 重试 —— 那几处各自都置了 `true`；TICK 只负责推进进度，不再碰显示状态。
+       */
+      return next
     }
 
     case 'OPEN_ASSIGN':
@@ -396,6 +426,16 @@ function reducer(state: AppState, action: Action): AppState {
         assignOpen: false,
         floatingVisible: state.batches.some((b) => b.status !== 'done') || state.floatingVisible,
       }
+    case 'DISCARD_BATCH': {
+      /* 丢掉这一批（连同它的任务）—— 识别随之停跑，卡片按剩余批次重算显隐 */
+      const batches = state.batches.filter((b) => b.fileName !== action.fileName)
+      return {
+        ...state,
+        batches,
+        assignOpen: false,
+        floatingVisible: batches.some((b) => b.status !== 'done'),
+      }
+    }
     case 'OPEN_INSIGHT':
       return { ...state, insightOpen: true, assignOpen: false }
     case 'CLOSE_INSIGHT':
@@ -549,6 +589,8 @@ function reducer(state: AppState, action: Action): AppState {
               confirmationNo: seg.confirmationNo,
               matchedEntity: seg.entity ?? reused.matchedEntity,
               expressNo: seg.expressNo,
+              /* 面单页标记随切分结果走（v3.22）—— 用户可能刚把某一段标成面单段/取消标记 */
+              faceSheetPage: seg.faceSheetPage ?? reused.faceSheetPage,
               assignSource:
                 seg.confirmationNo === '待指定' ? undefined : ('manual-assign' as const),
               applied: false,
@@ -569,6 +611,7 @@ function reducer(state: AppState, action: Action): AppState {
             confirmationNo: seg.confirmationNo,
             entity: seg.entity,
             expressNo: seg.expressNo,
+            faceSheetPage: seg.faceSheetPage,
           })
         })
 
@@ -633,7 +676,12 @@ function reducer(state: AppState, action: Action): AppState {
             ? {
                 ...r,
                 ...action.patch,
-                replyProgress: '待填写回函结果',
+                /*
+                 * **两步独立、允许反序做**（v3.12）：若用户先把回函结果填了（该行已是「已完成」）、
+                 * 之后才回来确认快递信息，进度**不能倒退回「待填写回函结果」** ——
+                 * 否则列表会退回一步，而"结果已填"这件事并没有被撤销。
+                 */
+                replyProgress: r.replyProgress === '已完成' ? '已完成' : '待填写回函结果',
                 verifyStatus: 'verified',
                 verifiedBy: CURRENT_USER,
                 verifiedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
@@ -665,6 +713,19 @@ function reducer(state: AppState, action: Action): AppState {
         ),
       }
 
+    /**
+     * 提交并归档「回函结果」。
+     *
+     * **不再顺带把 `verifyStatus` 置为 `verified`、也不再打核验留痕**（v3.12 修）：
+     * 那两个字段是「**确认回函快递信息**」这一步的产物（那一步是全流程唯一的人工核验留痕动作），
+     * 与"回函结果填完没有"是**两件独立的事**、两步之间没有必然先后。
+     * 原先在这里顺手置上，后果是**结果填完、快递信息那一步在列表里也被打勾**，
+     * 而用户其实从没确认过快递信息（用户实测报「前面的快递信息也会默认勾选完成，但实际上并没有完成」）。
+     *
+     * **进度取值随之收严**：回函结果填完，只有"快递信息"那一步**也已确认**才置「已完成」，
+     * 否则**留在「待确认快递信息」**（= 第一个还没做的步骤）。这样「已完成」恒等于"两步都完成"，
+     * 而"下一步做什么"仍由进度与步骤条的当前步**一致**表达（步骤条上「回函结果」那格照常打勾）。
+     */
     case 'SUBMIT_RESULT':
       return {
         ...state,
@@ -673,10 +734,7 @@ function reducer(state: AppState, action: Action): AppState {
             ? {
                 ...r,
                 ...action.patch,
-                replyProgress: '已完成',
-                verifyStatus: 'verified',
-                verifiedBy: r.verifiedBy ?? CURRENT_USER,
-                verifiedAt: r.verifiedAt ?? dayjs().format('YYYY-MM-DD HH:mm:ss'),
+                replyProgress: r.verifyStatus === 'verified' ? '已完成' : '待确认快递信息',
               }
             : r,
         ),

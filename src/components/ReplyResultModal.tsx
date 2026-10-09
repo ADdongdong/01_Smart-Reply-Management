@@ -217,6 +217,50 @@ export default function ReplyResultModal({
   const markAdopt = (key: string) => setAdopted((p) => ({ ...p, [key]: true }))
 
   /**
+   * **一键采纳所有**（v3.11）—— 把「AI 核验结论」这一栏里**当前有建议**的项一次性带进表单。
+   *
+   * 为什么要有它：这一栏固定 5 条（函证结果是否相符 / 印章与被询证单位一致 / 是否为公章 /
+   * 是否有骑缝章 / 不相符手写内容识别），**全采是常态、个别不采是例外**，逐条点「采纳」
+   * 就是 5 次纯重复劳动 —— 与 v2.36 去掉「回函快递信息」的逐项采纳、v2.40 给询证事项表
+   * 加「一键应用 AI 值」是同一条口径：**批量动作要有一键，个别不要靠逐条不点**。
+   *
+   * 边界（**与逐条点「采纳」完全同效**，不引入第二套规则）：
+   * · **只采纳有建议的项** —— 恰好就是各条按钮里 `disabled` 的那几个（没识别到就没什么可采纳）；
+   * · 已有值会被建议值覆盖 —— 与逐条点一致，且采纳后仍可改（本栏顶部那句
+   *   「默认不填入表单，采纳后仍可修改」照旧成立）；
+   * · 银行侧不含「是否有骑缝章」（v2.39 起银行不检测该项），故这里按 `!isBank` 跳过。
+   */
+  const adoptAll = () => {
+    let n = 0
+    if (v) {
+      if (aiMatched !== null) {
+        setMatched(aiMatched)
+        markAdopt('matched')
+        n += 1
+      }
+      setSealConsistent(v.seal.nameMatched)
+      markAdopt('seal')
+      n += 1
+      if (aiOfficialSeal !== undefined) {
+        setOfficialSeal(aiOfficialSeal)
+        markAdopt('official')
+        n += 1
+      }
+      if (!isBank && aiCrossSeal !== undefined) {
+        setCrossSeal(aiCrossSeal)
+        markAdopt('cross')
+        n += 1
+      }
+      if (rule?.detectHandwriting && v.handwriting) {
+        setDiffDesc(v.handwriting.text)
+        markAdopt('desc')
+        n += 1
+      }
+    }
+    message.success(`已采纳全部 AI 建议（${n} 项）`)
+  }
+
+  /**
    * 必填 —— 未处理时保存被拦下，并明确指出是哪几项（而非按钮点不动却说不出原因）。
    *
    * **按类型分流（v2.41）**：往来 = 4 项（含「是否有骑缝章」）；**银行 = 3 项** ——
@@ -509,6 +553,14 @@ export default function ReplyResultModal({
                  */}
                 <Button size="small" onClick={() => setVerifyOpen(true)}>
                   查看完整核验
+                </Button>
+                {/*
+                 * v3.11：**一键采纳所有**（用户要求「在查看完整核验后面加上」）。
+                 * 与左边那个同为**默认小按钮** —— 理由同上：本栏的主操作是各条结论上的「采纳」，
+                 * 这里两个是辅助动作，抢主色会把注意力从"逐条看结论"上引开。
+                 */}
+                <Button size="small" onClick={adoptAll}>
+                  一键采纳所有
                 </Button>
               </div>
             </div>

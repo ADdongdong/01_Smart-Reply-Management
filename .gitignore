@@ -8,3 +8,6 @@ dist-ssr
 
 # 本地智能体数据（记忆 / 计划 / 会话产物），不参与 git 同步
 .codebuddy/
+
+# 抓图脚本的原始截图（docx 里用的是 docs/figures/ui/ 下处理过的那些；这批是中间产物，可随时重跑）
+docs/figures/_raw/

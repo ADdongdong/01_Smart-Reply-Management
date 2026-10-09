@@ -28,6 +28,20 @@ export const AUDITED_ENTITY = '山东某某科技股份有限公司'
  * 往来函证按回函右上角二维码精确命中。同一银行的不同期间各占一封，
  * 避免出现「同银行同期间多封函证」的归属歧义。
  */
+/**
+ * 演示批次 B 那 4 个年度（控制表侧统一写 ISO）—— 2021 / 2022 / 2023 / 2024 年一季度。
+ *
+ * **只给"另外三家银行"用**：齐商那 4 封沿用既有的 `QS2024-016/017/018/031`（见下）。
+ * 招商的 **2024 年一季度**是刻意的「表里最后一格」——演示批次里它那第 4 封是
+ * 「24 年 1-6 月」，**在表里找不到对应期间**，用来看「期间对不上 → 待人工指定」。
+ */
+const BANK_YEARS: { start: string; end: string }[] = [
+  { start: '2021-01-01', end: '2021-12-31' },
+  { start: '2022-01-01', end: '2022-12-31' },
+  { start: '2023-01-01', end: '2023-12-31' },
+  { start: '2024-01-01', end: '2024-03-31' },
+]
+
 export const CANDIDATE_SOURCES: BankCandidateSource[] = [
   {
     confirmationNo: 'QS2024-031',
@@ -66,6 +80,26 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
     periodEnd: '2023-12-31',
     type: '银行函证',
   },
+  /*
+   * **另外三家银行各 4 个年度**（v3.25）—— 演示批次 B 改成「四家银行各一个快递包裹、
+   * 每包 4 封 3 页」，故这三家各补 4 个编号（与 `buildBatchB` 的四个年度一一对应）。
+   * 生成而不手抄 12 条：编号、期间、被询证单位三者必须一致，抄错一处就会让某封
+   * 自动归属到别人头上，而生成式的写法让它们不可能不一致。
+   */
+  ...[
+    { prefix: 'ZX', entity: '中信银行股份有限公司' },
+    { prefix: 'PF', entity: '上海浦东发展银行股份有限公司' },
+    { prefix: 'ZS', entity: '招商银行股份有限公司' },
+  ].flatMap(({ prefix, entity }) =>
+    BANK_YEARS.map((y, i) => ({
+      confirmationNo: `${prefix}2024-0${11 + i}`,
+      entity,
+      auditedEntity: AUDITED_ENTITY,
+      periodStart: y.start,
+      periodEnd: y.end,
+      type: '银行函证' as const,
+    })),
+  ),
   {
     confirmationNo: 'QS2024-019',
     entity: '中国建设银行股份有限公司',
@@ -1144,7 +1178,13 @@ export const REPLY_RECORDS: ReplyRecord[] = [
 export const CANDIDATE_RECORDS: (BankCandidateSource & { type: ConfirmationType })[] = CANDIDATE_SOURCES.map(
   (s) => ({
     ...s,
-    type: s.confirmationNo.startsWith('QS') ? ('银行函证' as const) : ('往来函证' as const),
+    /*
+     * **类型直接取源数据自己的 `type`**（v3.25 修）。
+     * 原先按编号前缀猜（`startsWith('QS')` ⇒ 银行函证），这在"银行侧只有一个编号前缀"
+     * 时碰巧成立；v3.25 起银行侧有四个前缀（QS / ZX / PF / ZS），猜法会把中信、浦发、招商
+     * 那 12 封**当成往来函证** —— 于是银行批次的候选下拉里根本看不到它们。
+     */
+    type: s.type,
   }),
 )
 

@@ -3,10 +3,14 @@
      整站只有一个色相，收敛后用「同色相深浅 + 底/边/字分工」建立层级 */
   --c-primary: #3b5bdb;
 
-  /* 语义色 —— 只有两档，且只出现在状态标签上：
-       红 = 风险 / 不相符；绿 = 通过 / 相符。
-     中风险在数据层保留（riskLevel: 'medium'），视觉并入红档 */
+  /* 语义色 —— 三档，且只出现在状态标签上：
+       红 = 高风险 / 不相符；橙 = 中风险；绿 = 通过 / 相符。
+     **中风险自成橙档（2026-10-08）**：用户要求「这个风险，肯定是：低，中，高三个颜色」，
+     推翻此前"中风险在数据层保留、视觉并入红档"的取舍。
+     旧口径的理由（不引入第三个色相）见 `Marks.RISK_MAP` 的注释 —— 那条保留备查，
+     但**业务上"中"必须与"高"一眼可分**，这一条压过了色相数量的洁癖。 */
   --c-risk-high: #e5484d;
+  --c-risk-medium: #e8912d;
   --c-risk-low: #3fa34d;
 
   /* 底色 —— 全项目只有这几档，不再各自写 rgba(...)：
@@ -19,6 +23,7 @@
   /* 风险 / 相符底 —— 0.08 → 0.12（2026-09-20）：8% 的底色在列表里几乎看不出红绿，
      状态标签因此「饱和度太低、不清晰」。加深到 12% 后配合深档文字色，档位一眼可辨 */
   --c-risk-high-bg: rgba(229, 72, 77, 0.12);
+  --c-risk-medium-bg: rgba(232, 145, 45, 0.12);
   --c-risk-low-bg: rgba(63, 163, 77, 0.12);
   /* 标签底统一档位（比静态底略深） */
   --c-tag-bg: rgba(16, 24, 40, 0.05);
@@ -62,10 +67,11 @@
   --radius-control: 8px;
   --radius-tag: 6px;
 
-  /* 标签高度 —— 只有两档。此前 6 处小标签各写一遍 inline style，
-     高度出现了 16 / 20 两种（同一种信息形态不该有多种尺度） */
+  /* 标签高度 —— 三档：lg 26（卡片头部的结论级徽标）/ md 20（表格列内，默认）/ sm 16（行内跟随文字）。
+     此前 6 处小标签各写一遍 inline style，高度出现了 16 / 20 两种（同一种信息形态不该有多种尺度） */
   --h-tag: 20px;
   --h-tag-sm: 16px;
+  --h-tag-lg: 26px;
 
   /* 阴影 —— 多层叠加而非单层硬投影（沿用），但**改带色相、并提高对比**（v2.49）。
      此前是纯黑低透明度（rgba(0,0,0,.05~.06)），而页面底是蓝灰 —— 黑影蒙在冷色上
@@ -91,6 +97,8 @@
   /* 小字号文字专用的深色语义色 —— 在浅色底上对比度 ≥ 4.5:1（WCAG AA）
      注：图形/色块仍使用上面鲜亮的语义色，二者分工不同 */
   --c-risk-high-text: #c0292e;
+  /* 橙档深色 —— 橙比红 / 绿更亮，同档位下对比度天然更低，故取得更深：在自身 12% 浅底上 4.9:1 */
+  --c-risk-medium-text: #a85200;
   --c-risk-low-text: #237804;
 
   /* 动效：时长 + 自定义缓动曲线。
@@ -219,11 +227,22 @@ body {
   font-size: 11px;
   font-weight: 400;
 }
+/* 大档（v3.16）—— 卡片头部这类"结论级"徽标：与 17px 的结论文字并列时不显单薄。
+   只放大尺寸，字重与圆角沿用统一档（同一种信息形态不该有多种形状） */
+.status-tag--lg {
+  height: var(--h-tag-lg);
+  padding: 0 10px;
+  font-size: 13px;
+}
 /* 档位配色 —— 浅底 + 深档文字，各档在自身浅底上 ≥ 4.5:1（WCAG AA）。
    底色与文字必须成对引用，不要跨档混搭 */
 .status-tag--high {
   color: var(--c-risk-high-text);
   background: var(--c-risk-high-bg);
+}
+.status-tag--medium {
+  color: var(--c-risk-medium-text);
+  background: var(--c-risk-medium-bg);
 }
 .status-tag--low {
   color: var(--c-risk-low-text);
@@ -253,6 +272,11 @@ body {
   color: var(--c-risk-high-text);
   background: var(--c-risk-high-bg);
   border-color: rgba(229, 72, 77, 0.4);
+}
+.status-tag--ai.status-tag--medium {
+  color: var(--c-risk-medium-text);
+  background: var(--c-risk-medium-bg);
+  border-color: rgba(232, 145, 45, 0.42);
 }
 /* 标签里的 ✦ —— 更小一号，不顶高行距 */
 .status-tag__mark {
@@ -1482,6 +1506,28 @@ body {
   font-size: 11px;
   line-height: 16px;
   box-shadow: 0 1px 3px rgba(16, 24, 40, 0.18);
+}
+/*
+ * 面单页角标（v3.22）—— 「这一页是快递面单」。
+ *
+ * 与「段 N」角标同一语言、**但更轻**（主色浅底 + 主色文字，不是实心块）：段首是结构，
+ * 面单页是**属性** —— 20 页里可能出现好几张，全都实心会把画面压花。
+ * 位置放**左下**（右上被「查看原件」占着，左上被「段 N」占着，下方是页号）。
+ */
+.split-board__sheet {
+  position: absolute;
+  bottom: 26px;
+  left: 4px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: var(--radius-tag);
+  background: var(--c-primary-bg);
+  color: var(--c-primary);
+  font-size: 11px;
+  line-height: 16px;
 }
 /*
  * 页间剪刀 —— **未激活时只是淡剪影**（11 页就有 10 把，全都醒目会盖过页面本身），

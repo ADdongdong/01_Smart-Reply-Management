@@ -121,11 +121,32 @@ export function advanceBatch(batch: UploadBatch): { batch: UploadBatch; running:
   const canAdvance = (t: RecognitionTask) =>
     t.status === 'pending' && t.stages.some((s) => s.status !== 'failed' && s.status !== 'done')
 
-  const targets = new Set<number>()
-  const matchIdx = batch.tasks.findIndex((t) => t.phase === 1 && canAdvance(t))
-  if (matchIdx >= 0) targets.add(matchIdx)
-  const detailIdx = batch.tasks.findIndex((t) => t.phase === 2 && canAdvance(t))
-  if (detailIdx >= 0) targets.add(detailIdx)
+  /**
+   * 本 tick 在**每条通道上推进几份**。
+   *
+   * 原先是**固定推进一份**（"串行推进，保证正在处理哪一封清晰可见"）。这条口径在批次
+   * 只有几封时没问题，但 v3.25 的银行演示件是 **52 页 / 16 封 + 4 张面单 = 20 个任务**：
+   * 按固定一份推进，最后一张面单要等 **近 3 分钟**才出现 —— 而演示里最要紧的一刻恰恰是
+   * 「面单识别完 → 面单段被切出来」（用户 v3.22 提的就是这个过程要看得见）。
+   *
+   * 故改成**按待办份数放大**：每 tick 推进 `ceil(待办 / 3)` 份 ——
+   * · **4 份以内仍是逐份串行**（与改造前完全一致：往来演示件 3 段零回归）；
+   * · 份数越多并行度越高，整批的等待时长因此与"份数"**基本脱钩**：一封约 18s，
+   *   并行度一放大，20 封（52 页演示件）的整批时长与 9 封（旧演示件）落在同一档 ——
+   *   实测 **90s → 约 55s**，且每张面单是按包裹顺序**一批批露出**的（不是最后一起蹦出来）。
+   *
+   * 这与文档里既有的口径也是自洽的：识别的两条链路本来就**并行发起**（见 §5.1 的
+   * 「异步识别」），界面上每份自带状态点，"并行推进"并不牺牲"看得见进度"。
+   */
+  const pick = (phase: 1 | 2) => {
+    const runnable: number[] = []
+    batch.tasks.forEach((t, i) => {
+      if (t.phase === phase && canAdvance(t)) runnable.push(i)
+    })
+    return runnable.slice(0, Math.max(1, Math.ceil(runnable.length / 3)))
+  }
+
+  const targets = new Set<number>([...pick(1), ...pick(2)])
 
   if (!targets.size) {
     return { batch: { ...batch, status: 'done' }, running: false }

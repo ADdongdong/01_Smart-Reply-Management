@@ -268,17 +268,32 @@ export function StageList({ stages }: { stages: RecognitionStage[] }) {
 /* 派生（全部查表 / 复用既有口径，不写内联类型判断与新词）              */
 /* ------------------------------------------------------------------ */
 
-const RISK_LABEL: Record<RiskLevel, string> = { high: '高', medium: '中', low: '低', none: '无' }
+/* v3.16：改用与列表「AI 风险」列 / `Marks.RISK_MAP` 一致的**完整词**（高风险 / 中风险 / 低风险）——
+   识别界面的风险等级已由"染色数字"改为彩色标签，标签文字得自己说清是什么 */
+const RISK_LABEL: Record<RiskLevel, string> = {
+  high: '高风险',
+  medium: '中风险',
+  low: '低风险',
+  none: '待人工判定',
+}
 
-export function riskTone(level?: RiskLevel): 'high' | 'low' | 'neutral' {
-  if (level === 'high' || level === 'medium') return 'high'
+/**
+ * 风险等级 → 标签档位（三档三色，v3.17）。
+ *
+ * **中风险自成橙档** —— 用户 2026-10-08：「这个风险，肯定是：低，中，高三个颜色」。
+ * 此前 medium 并入 `high`（红档），旧口径与理由见 `Marks.RISK_MAP` 的注释。
+ */
+export function riskTone(level?: RiskLevel): 'high' | 'medium' | 'low' | 'neutral' {
+  if (level === 'high') return 'high'
+  if (level === 'medium') return 'medium'
   if (level === 'low') return 'low'
   return 'neutral'
 }
 
+/** 风险等级文字（高风险 / 中风险 / 低风险 / 待人工判定）—— 供标签直接呈现 */
 export function riskText(level?: RiskLevel): string {
   if (level === 'high' || level === 'medium' || level === 'low') return RISK_LABEL[level]
-  return '待人工判定'
+  return RISK_LABEL.none
 }
 
 export function matchStageOf(task: RecognitionTask): RecognitionStage | undefined {
@@ -307,12 +322,17 @@ export function canAssignOf(task: RecognitionTask): boolean {
  * **v2.39 起银行侧的「识别四要素」计入检测点**（用户决策：`bankText` 保留 key、改为
  * 「识别四要素」的语义并计入阶段一 1 项），故不再被排除：
  *   · **往来 = 6 项**：一致性 / 是否印章 / 骑缝章 / 名称一致 / 手写体 / 快递面单；
- *   · **银行 = 4 项**：**识别四要素** / 询证事项逐项核对 / 回函是否有印章 / 印章名称与被询证单位一致。
+ *   · **银行 = 5 项**：**识别四要素** / **快递面单识别**（v3.21 接回阶段一）/
+ *     询证事项逐项核对 / 回函是否有印章 / 印章名称与被询证单位一致。
+ *
+ * **v3.22：面单页任务只列「快递面单识别」一项** —— 它**不是函证**（无编号、不参与归属），
+ * 原来的写法会让它在识别界面里也列「识别四要素」「询证事项逐项核对」，读起来莫名其妙。
  *
  * 判据里的「归属确认前不列 `bankText`」在**解耦后**依然成立：识别界面只在归属确定后
  * 才会被打开，故实际上走的是"列出"这一支；保留该判断是为了让函数自身语义完整、可单独复用。
  */
 export function verifyItemsOf(task: RecognitionTask): RecognitionStage[] {
+  if (task.faceSheetPage) return task.stages.filter((s) => s.key === 'expressSheet')
   return task.stages.filter(
     (s) =>
       s.key !== 'match' &&

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button } from 'antd'
+import { Button, message } from 'antd'
 import { useApp } from '@/store/AppStore'
 import FullscreenModal from '@/components/FullscreenModal'
 import PageSplitBoard from '@/components/PageSplitBoard'
@@ -8,11 +8,11 @@ import type { AssignCandidate } from '@/components/SplitPanel'
 import { AUDITED_ENTITY, CANDIDATE_SOURCES } from '@/mock/confirmations'
 import {
   browserSampleUrlByFileName,
-  faceSheetPagesOfFile,
   faceSheetUrlOfFile,
   faceSheetUrlOfPage,
 } from '@/config/preview'
 import { TYPE_RULE } from '@/services/replyRule'
+import { StageIcon } from '@/components/recognition/shared'
 import { cutsOfSegments, segmentsOfCuts, toggleCut } from '@/utils/pageSplit'
 
 /** 切分草稿 —— 归属界面是**一次性事务**，草稿不落 store（关掉就该忘掉这次编辑） */
@@ -24,10 +24,21 @@ interface Draft {
   /** 段序 → 用户显式选定的函证编号（未选过的段不在此表，见 `assignOf`） */
   assigns: Record<number, string>
   /**
-   * 段序 → 用户**手工补/改过**的快递单号（未改过的段不在此表，见 `expressOf`）。
+   * **页号 → 用户手工补/改过的快递单号**（v3.23 由"按段序"改成"按页"）。
+   *
+   * ## 为什么必须按页记
+   *
+   * 单号物理上属于**一页**（往来的段尾面单页 / 银行的面单页），而**段序会变** ——
+   * 用户点一次剪刀、或用一次「按固定页数拆分」，段序整体移位，挂在段序上的值就跑到
+   * 别的段上去了（v3.22 实测：人工填了第 22 页那个号，随后 AI 结果到达再插两刀，
+   * 号显示到了第 17 页那一段上 —— 用户看到的就是"识别完和我的不一样了"）。
+   * 页不会因为切分而改变，所以值挂在页上就永远不会串位。
+   *
+   * 这是 `faceSheetPages` 用过的同一套做法（那次也是从段序改成的按页，见其注释）。
+   * 取用时看该段的**末页**（`manualOf`）—— 单号总在段的末尾那一页上。
    *
    * **只对"未识别到 / 异常"的段开放修改** —— 判定见 `@/utils/expressNo`，
-   * 那里也写了为什么不做"逐段人工核对"。
+   * 那里也写了为什么不做"逐段人工核对"。空串是合法值（人主动清空，仍要能改）。
    */
   express: Record<number, string>
   /**
@@ -112,8 +123,12 @@ export default function AssignView() {
    * 一处状态、两个使用者：切分板负责画，切分结果负责说"我要看哪一页、对齐到哪一行"。
    * 之所以要钉住而不是靠悬停：用户此刻要**眼睛看面单、手在输入框里敲** ——
    * 悬停预览会随鼠标移开消失、还正好压住输入框。
+   *
+   * **`n` 是请求序号（v3.08 修）** —— 见下面 `onRequestPreview` 的说明。
    */
-  const [previewPin, setPreviewPin] = useState<{ page: number; anchor: HTMLElement } | null>(null)
+  const [previewPin, setPreviewPin] = useState<{ page: number; anchor: HTMLElement; n: number } | null>(
+    null,
+  )
 
   /**
    * 本文件所在批次是否**带快递面单**（`UploadBatch.faceSheetLast`）。
@@ -125,6 +140,48 @@ export default function AssignView() {
     const batch = state.batches.find((b) => b.tasks.some((t) => t.fileName === currentFile))
     return batch?.faceSheetLast === true
   }, [state.batches, currentFile])
+
+  /**
+   * **快递面单的识别结果（异步到达）** —— 哪些页是面单页（v3.21）。
+   *
+   * 判据 = 「这一段被标成面单页」**且** 其「快递面单识别」检测项**已跑完** —— 也就是
+   * **结果真的回来了**才算数。到达前恒为空：用户先手工切他的函证段，识别在后台认面单，
+   * 两者互不等待（这正是本版要的形态：面单/条码是**纯读**的活，与人的切分动作无依赖）。
+   *
+   * 注意：**不再猜"末页是面单"**。以前靠一份静态表 + `faceSheetLast` 直接预切，
+   * 那份表只在演示环境成立；真实环境得等识别，猜错会把不是面单的页切出成"面单段"。
+   */
+  const detectedFacePages = useMemo(
+    () =>
+      fileTasks
+        .filter(
+          (t) =>
+            t.faceSheetPage === true &&
+            t.pageStart != null &&
+            t.stages.some((s) => s.key === 'expressSheet' && s.status === 'done'),
+        )
+        .map((t) => t.pageStart as number)
+        .sort((a, b) => a - b),
+    [fileTasks],
+  )
+
+  /**
+   * **快递面单识别的总体状态**（v3.22）—— 供归属界面顶部那行状态（图标 + 文字 + 计数）。
+   *
+   * 为什么需要它：面单段会**自己长出来**（识别结果到达 → 初稿自动重算），此前没有任何反馈 ——
+   * 用户既不知道"系统正在认面单"，也不知道"刚多出来的那一段是它加的"。用户原话：
+   * 「现在这个演示数据，并不能看到自动识别分包裹的过程」。
+   *
+   * 口径：以本文件各任务的「快递面单识别」检测项为准（银行批次每个任务都有这一项：
+   * 函证段给出"本封所在包裹的面单/单号"，面单页给出"这一页是面单"）。
+   */
+  const faceSheetScan = useMemo(() => {
+    const list = fileTasks.flatMap((t) => t.stages.filter((s) => s.key === 'expressSheet'))
+    return {
+      failed: list.some((s) => s.status === 'failed'),
+      allDone: list.length > 0 && list.every((s) => s.status === 'done'),
+    }
+  }, [fileTasks])
 
   /**
    * 切分草稿。
@@ -139,16 +196,13 @@ export default function AssignView() {
     if (!isTrade) {
       /*
        * 银行：默认「整份 1 段，从头手动切」（整份里可能装着多封函证，只有人能切开）。
-       * **但带面单时先把末页预切成一段面单段**（v2.83）：银行常见「多封函证 + 一张面单」，
-       * 而面单页在原件里本就是一页独立的东西 —— 预切出来，用户就只需专心把前面的函证切几刀，
-       * 不必额外记着"还要把面单也切出来"。
+       *
+       * **面单侧只认识别结果**（v3.21）：识别跑完前一个面单段都不预切 ——
+       * 用户先手工切他的函证段，识别在后台认面单，互不等待；结果到达时若用户**还没动过**切分，
+       * 这里的初稿会**自动重算**（面单页变成独立段），用户只需专心切前面的函证。
+       * 若他**已经切过**，绝不覆盖，改成界面顶部一条可一键执行的待办。
        */
-      /*
-       * 文件里**已知的面单页**（演示数据给的表；v2.85 起一个文件可能有两个包裹、两张面单）。
-       * 有它们就各自预切一刀，让每张面单先是独立的一段；没有就退回「末页是面单」的旧口径。
-       */
-      const knownPages = faceSheetPagesOfFile(currentFile ?? '')
-      const facePages = knownPages.length ? knownPages : batchFaceSheetLast ? [pageCount] : []
+      const facePages = detectedFacePages
       return {
         file: currentFile ?? '',
         /*
@@ -177,7 +231,7 @@ export default function AssignView() {
       /* 往来不把面单页切出来（它的面单页就是各段自己的尾页）—— 故这里恒为空 */
       faceSheetPages: [],
     }
-  }, [currentFile, isTrade, fileTasks, batchFaceSheetLast, pageCount])
+  }, [currentFile, isTrade, fileTasks, detectedFacePages, pageCount])
 
   const [draftState, setDraftState] = useState<Draft | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -207,6 +261,24 @@ export default function AssignView() {
     const pgs = pagesOfSegment(i)
     return pgs.length > 0 && pgs.every((pg) => draft.faceSheetPages.includes(pg))
   }
+
+  /**
+   * 识别到、但**没有被切成独立段**的面单页（v3.21 立，v3.23 改口径）——
+   * 只在"用户已经动过切分"时才会非空。
+   *
+   * ## 口径（v3.23 用户拍板）
+   *
+   * 「**如果是用户已经切分过处理过的，识别出来以后，就不再另做切分了，按人工的切分为准**」——
+   * 故它只用来出**提示**（见下面那条提示行），**不再提供「切出为面单段」这类系统改切分的入口**：
+   * · **没动过**切分 → 初稿照旧自动重算（面单页就是独立段）—— 那是给还没动过的人**出的初稿**，
+   *   不算"另做切分"；
+   * · **动过** → 一个字都不改，只提示。认同识别结果的话，用页间剪刀切一刀、
+   *   或把该段归属改成「快递面单（本文件共用）」即可（提示行里写着这句）。
+   */
+  const pendingFacePages = useMemo(() => {
+    if (!draftState) return []
+    return detectedFacePages.filter((p) => !draft.faceSheetPages.includes(p))
+  }, [draftState, detectedFacePages, draft.faceSheetPages])
 
   /**
    * 段 i 由**哪一段面单**管辖 —— 规则一句话：**面单段管辖它前面的段，直到上一个面单段为止**。
@@ -279,6 +351,18 @@ export default function AssignView() {
   }
 
   /**
+   * 段 i 上**人工填过**的单号（未填过 = `undefined`，人主动清空 = 空串）—— v3.23。
+   *
+   * 取该段**末页**那一格：单号物理上属于一页（往来的段尾面单页 / 银行的面单页），
+   * 用户改了切分之后，值只跟着**那一页**走，不会串到别的段上。
+   */
+  const manualOf = (i: number): string | undefined => {
+    const pgs = pagesOfSegment(i)
+    const last = pgs[pgs.length - 1]
+    return last == null ? undefined : draft.express[last]
+  }
+
+  /**
    * 段 i 的**段尾面单快递单号**：用户手工补/改过就用他改的，否则取该段任务上识别出的值。
    *
    * 未识别到时为 `undefined`（切分结果会标「未识别到」并允许就地补）。
@@ -292,7 +376,34 @@ export default function AssignView() {
      * 也不会被"与他段重复"的查重规则误报成读错。
      */
     const src = isFaceSheetSegment(i) ? i : (governedBy(i) ?? i)
-    return draft.express[src] ?? taskOfSegment(src)?.expressNo
+    return manualOf(src) ?? recognizedOf(src)
+  }
+
+  /**
+   * 段 i 上**系统识别到的**单号 —— 只在「快递面单识别」这一项**跑完后**才算数（v3.23）。
+   *
+   * 原先这里是直接读 `task.expressNo`，一进归属界面就有值 —— 而"识别还没结果"这件事
+   * 对用户是**没有出口**的：他标了一页面单，界面却已经显示着一个号（还是只读的），
+   * 于是「识别期间先把号填上」这条最自然的路根本走不通（用户场景原话：
+   * 「**在 ai 识别银行函证快递面单的过程中，用户已经完成了切分和快递面单快递单号录入**」）。
+   *
+   * 现在与「面单页」同一口径（都在等这个检测项）：没跑完 = 值还没到 = 该行显示「未识别到」、
+   * 给「改」入口让用户先填；识别结果到达后，**人工值优先、不覆盖**，并在旁边挂一枚
+   * 「系统识别 …」标签作为提醒（见 `SplitPanel`）。
+   */
+  const recognizedOf = (i: number): string | undefined => {
+    const t = taskOfSegment(i)
+    if (!t) return undefined
+    const done = t.stages.some((s) => s.key === 'expressSheet' && s.status === 'done')
+    return done ? t.expressNo : undefined
+  }
+
+  /** 人工填/改段 i 的单号 —— 写进**该段末页**那一格（见 `Draft.express`） */
+  const setManualExpress = (i: number, value: string) => {
+    const pgs = pagesOfSegment(i)
+    const last = pgs[pgs.length - 1]
+    if (last == null) return
+    patch({ express: { ...draft.express, [last]: value } })
   }
 
   /** 面单段数量（银行侧；往来恒为 0）—— 只用于底栏计数文案 */
@@ -350,12 +461,25 @@ export default function AssignView() {
   /* 银行侧"还没开始切"的判据是**函证段只有 1 段**（带面单时会预切出一段面单，段数不再是 1） */
   const untouched = !isTrade && confirmSegments === 1 && pageCount > 1
 
+  /**
+   * **退出（✕ / Esc）= 放弃本次上传**（v3.10）。
+   *
+   * 切分与归属都只是**草稿**（不落 store），没点「确定」就没有提交（口径：归属未确定绝不落库），
+   * 所以退出时把这批一起丢掉 —— 原来的实现里 ✕ 与「确定」在 store 层是**同一个动作**，
+   * 后果是：批次还在后台跑识别，而 `pendingAssignCount > 0` 让右下角进度卡**永远收不起来**，
+   * 卡片上还写着「正在对应 N 份」，可**没有任何入口回到本界面**（`OPEN_ASSIGN` 无人派发）。
+   */
+  const discardUpload = () => {
+    dispatch({ type: 'DISCARD_BATCH', fileName: currentFile })
+    message.info('已放弃本次上传 —— 切分与归属未提交，识别已取消')
+  }
+
   return (
     <FullscreenModal
       open={state.assignOpen}
       title="回函归属"
       subtitle={`${state.recognitionType} · ${currentFile} · 共 ${pageCount} 页`}
-      onClose={() => dispatch({ type: 'CLOSE_ASSIGN' })}
+      onClose={discardUpload}
       footer={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 13, color: 'var(--c-text-3)' }}>
@@ -386,24 +510,33 @@ export default function AssignView() {
                 type: 'COMMIT_SPLIT',
                 fileName: currentFile,
                 /*
-                 * **面单段不提交**（v2.83）—— 它不是函证，不该生成任务、更不该写进回函列表。
-                 * 它的职责只是把单号交给被它管辖的函证段（那些段的 `expressNo` 由 `expressOf` 继承而来）。
-                 * 于是"一个快递单号对应多个函证编号"落到数据上就是：**多封函证各自带着同一个单号**，
-                 * 而这个单号在界面上只有一处来源、一处可改。
+                 * **面单段现在照提交**（v3.22 改了 v2.83 的老规矩）。
+                 *
+                 * v2.83 时不提交，理由是"面单段不是函证，不该生成任务、更不该写进回函列表"——
+                 * 那时它只是用户自己划出来放单号的一段，单号已经落在被管辖函证段的 `expressNo` 上。
+                 * 但 **v3.21 起模型变了：哪几页是面单是识别结果**，而**只有任务记着它**
+                 * （`faceSheetPage`）。不提交就等于把识别结果扔掉，实测两处后果：
+                 * ① 识别界面里看不到「快递面单」那一组（用户问的正是"面单识别过程怎么没有标识"）；
+                 * ② 重开归属界面时 `detectedFacePages` 为空 → 状态行退化成"未识别到快递面单"，
+                 *   面单刀也预切不出来了。
+                 * 两条"不写进列表"的约束仍然成立：面单段的 `confirmationNo` 恒为「待指定」，
+                 * 落库只认**有归属**的段（见 `COMMIT_SPLIT` 与 `finalizeTask`）。
                  */
-                segments: segments
-                  .map((seg, i) => ({ seg, i }))
-                  .filter(({ i }) => !isFaceSheetSegment(i))
-                  .map(({ seg, i }) => {
-                    const confirmationNo = assignOf(i)
-                    return {
-                      ...seg,
-                      confirmationNo,
-                      entity: candidates.find((c) => c.confirmationNo === confirmationNo)?.entity,
-                      /* 单号随段提交（可能是识别的、也可能是人工补/改的，v2.78） */
-                      expressNo: expressOf(i),
-                    }
-                  }),
+                segments: segments.map((seg, i) => {
+                  const isFace = isFaceSheetSegment(i)
+                  /* 面单段不参与归属 —— 它不是函证，归属下拉在它那一行是隐藏的 */
+                  const confirmationNo = isFace ? '待指定' : assignOf(i)
+                  return {
+                    ...seg,
+                    confirmationNo,
+                    entity: isFace
+                      ? undefined
+                      : candidates.find((c) => c.confirmationNo === confirmationNo)?.entity,
+                    /* 单号随段提交（可能是识别的、也可能是人工补/改的，v2.78） */
+                    expressNo: expressOf(i),
+                    faceSheetPage: isFace || undefined,
+                  }
+                }),
               })
               dispatch({ type: 'CLOSE_ASSIGN' })
             }}
@@ -413,6 +546,72 @@ export default function AssignView() {
         </div>
       }
     >
+      {/*
+       * 快递面单识别状态（v3.22）—— **有图标、有计数**：进行中 / 已完成 / 失败都有交代。
+       *
+       * 图标走全站统一的 `StageIcon`（圆形状态图标：待检测 ○ / 检测中 ⟳ / 已完成 ✓ / 失败 ✕）——
+       * 同一个语言在识别界面里也在用，用户不必学第二套。**不用弹窗、不用 toast**：
+       * 正在切分的人不该被打断，一行状态足够。
+       */}
+      {!isTrade && (
+        <div
+          className="assign-facesheet"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 12,
+            fontSize: 13,
+            color: 'var(--c-text-2)',
+          }}
+        >
+          <StageIcon
+            status={faceSheetScan.failed ? 'failed' : faceSheetScan.allDone ? 'done' : 'running'}
+          />
+          <span>
+            {faceSheetScan.failed
+              ? '快递面单识别失败 —— 可在某段的归属下拉里手工标为「快递面单（本文件共用）」'
+              : !faceSheetScan.allDone
+                ? `正在识别快递面单${
+                    detectedFacePages.length ? `（已识别 ${detectedFacePages.length} 张）` : ''
+                  }…`
+                : detectedFacePages.length === 0
+                  ? '未识别到快递面单'
+                  : pendingFacePages.length
+                    ? `已识别 ${detectedFacePages.length} 张快递面单 —— 其中 ${pendingFacePages.length} 张未切成独立段，按你的切分为准`
+                    : `已识别 ${detectedFacePages.length} 张快递面单，已切成独立段 · 归入 ${faceSheetCount} 个包裹`}
+          </span>
+        </div>
+      )}
+
+      {/*
+       * 识别结果**异步到达**、而用户已经动过切分 → 出一条**只读提示**（v3.21 立，v3.23 去掉动作）。
+       *
+       * 为什么不给按钮：用户拍板「已切分过的，识别出来以后就不再另做切分了，按人工的切分为准」——
+       * 那就**没有任何"系统改切分"的入口，包括一键**。要手工切的话路径写在提示里（剪刀 / 归属下拉）。
+       */}
+      {pendingFacePages.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 12,
+            padding: '8px 12px',
+            borderRadius: 'var(--radius-control)',
+            background: 'var(--c-primary-bg)',
+            fontSize: 13,
+            color: 'var(--c-text-1)',
+          }}
+        >
+          <span>
+            系统识别到第 <b className="num">{pendingFacePages.join('、')}</b> 页是快递面单 ——
+            <b>已按你的切分为准，未做任何改动</b>
+            ；如需切成独立面单段，用页间剪刀切一刀，或把该段归属改为「快递面单（本文件共用）」。
+          </span>
+        </div>
+      )}
+
       <div className="assign-pane">
         {/* 主区：页缩略图 + 页间剪刀 —— 切分从"用页码描述"变成"在页面上直接指" */}
         <div className="assign-pane__board">
@@ -425,6 +624,8 @@ export default function AssignView() {
             onPickSegment={setActiveIndex}
             pinnedPage={previewPin?.page ?? null}
             pinnedAnchor={previewPin?.anchor ?? null}
+            /* 同一段重复点「改」时，只有这个序号会变 —— 否则切分板里的 effect 不重跑（v3.08） */
+            pinRequest={previewPin?.n ?? 0}
             /* 面单页从**面单文件**取图（v2.84；v2.85 一个文件里可能有多个包裹、各一张） */
             faceSheetPages={draft.faceSheetPages}
             faceSheetUrls={Object.fromEntries(
@@ -471,20 +672,46 @@ export default function AssignView() {
             }}
             candidates={candidates}
             batchPanelOpenByDefault={TYPE_RULE[state.recognitionType].batchPanelOpenByDefault}
-            showSegmentExpress={batchFaceSheetLast || faceSheetCount > 0}
+            /*
+             * 段下单号行（v3.22 修）——**银行侧不再看「末页是面单」那个假定**：
+             * 银行：只有已经识别出面单段、或这一段被某张面单管辖时才显示
+             * （此前 `batchFaceSheetLast || …` 让银行在**面单还没识别出来**时就对整份文件显示
+             * 「段尾面单 · 快递单号 · 未识别到」，与新的"面单页由识别给出、可不在末页"自相矛盾）；
+             * 往来：口径不变（回函末页就是面单）。
+             */
+            showSegmentExpress={isTrade ? batchFaceSheetLast : faceSheetCount > 0}
             expressValues={Object.fromEntries(segments.map((_, i) => [i, expressOf(i)]))}
             /*
-             * 把草稿里那张"人工填过的单号"表原样传下去（v2.93）——
+             * 把"人工填过的单号"按**段序**整理一份传给切分结果（v2.93；v3.23 起草稿按页存，这里映射一次）——
              * **表里有这一项 ⟹ 人填过**，切分结果据此保留「改」入口（机器识别的正常值仍只读）。
              */
-            manualExpress={draft.express}
-            onExpressChange={(i, v) => patch({ express: { ...draft.express, [i]: v } })}
+            manualExpress={Object.fromEntries(segments.map((_, i) => [i, manualOf(i)]))}
+            /*
+             * **系统识别到的单号**（v3.23）—— 与人工值**分开送**，只用于在那一行挂一枚
+             * 「系统识别 …」提醒标签（用户要求：「人工填写了快递单号与识别快递单号不同的，
+             * 后面需要以标签的形式，给出系统识别内容，作为提醒。但是不更改人手填的快递单号」）。
+             * 这里**不做来源收敛**（不继承面单段的值）：这枚标签只回答"系统在**这一段**读到了什么"。
+             */
+            recognizedExpress={Object.fromEntries(segments.map((_, i) => [i, recognizedOf(i)]))}
+            onExpressChange={setManualExpress}
             /* 银行侧：归属下拉可把某一段标成「快递面单（本文件共用）」（v2.83；往来不提供该选项） */
             allowFaceSheetSegment={!isTrade}
             /* 哪几段是面单段 —— 切分板的"管辖范围/同包裹"等显示都由它自己推导 */
             faceSheetSegments={segments.map((_, i) => i).filter(isFaceSheetSegment)}
+            /*
+             * **每次请求都递增一个序号**（v3.08 修「只有第一次会弹」）。
+             *
+             * 同一段的「改」每次请求的是**同一个页码、同一个行元素**，而切分板里那个"钉预览"
+             * 的 effect 是按「页码 / 锚点」比依赖的 —— 两个值都没变就不重跑，于是
+             * **关掉预览后再点「改」，预览不再出现**（用户实测：「只有第一次进入这个界面时会弹出」）。
+             *
+             * 带上 `n`，每次点击都是一次**新请求**；而"同一页再次请求保留原取景"那条规则
+             * （v2.79，用户拖动找到的位置不该白费）在 effect 内照旧生效。
+             */
             onRequestPreview={(page, anchor) =>
-              setPreviewPin(page != null && anchor ? { page, anchor } : null)
+              setPreviewPin((prev) =>
+                page != null && anchor ? { page, anchor, n: (prev?.n ?? 0) + 1 } : null,
+              )
             }
           />
         </div>

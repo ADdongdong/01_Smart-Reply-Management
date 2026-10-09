@@ -3,9 +3,12 @@ import type { ReactNode } from 'react'
 import { Tooltip } from 'antd'
 
 /** 标签档位 —— 与 `global.css` 的 `.status-tag--*` 一一对应 */
-export type TagTone = 'high' | 'low' | 'neutral' | 'primary'
-/** 两档尺寸：`md` = 20px（表格列内，默认）；`sm` = 16px（行内跟随文字） */
-export type TagSize = 'md' | 'sm'
+export type TagTone = 'high' | 'medium' | 'low' | 'neutral' | 'primary'
+/**
+ * 三档尺寸：`lg` = 26px（卡片头部的**结论级**徽标，v3.16）；`md` = 20px（表格列内，默认）；
+ * `sm` = 16px（行内跟随文字）
+ */
+export type TagSize = 'md' | 'sm' | 'lg'
 
 export interface StatusTagProps {
   tone?: TagTone
@@ -32,13 +35,15 @@ export interface StatusTagProps {
  * 状态标签 —— 全站统一的小标签（列表列 / 明细 / 徽标共用）。
  *
  * **收敛动因**：同一种「浅底小标签」此前在 `Marks.tsx`（4 处：风险 / 相符 / 核验 × 2）
- * 与 `ReplyList.tsx`（2 处：类型标记 / 重新发函）各写了一遍 inline style ——
+ * 与 `ReplyList.tsx`（原 2 处：类型标记 / 重新发函 —— 类型标记已随「按函证类型分页」删除，v3.05）
+ * 各写了一遍 inline style ——
  * 高度出现 **16 / 20 两种**，圆角、内边距、字重也各写各的。
  * 现在尺寸与配色**只由 `global.css` 的 `.status-tag*` 定义**，组件侧只负责选档，
  * 改一处即全局生效（此前要改 6 个文件里的 inline style）。
  *
  * **档位与语义的对应（不要跨档混搭底色与文字）**：
  * · `high`    风险高 / 不相符 —— 红档
+ * · `medium`  风险中 —— 橙档（v3.17 新增：用户要求风险"低、中、高"三个颜色）
  * · `low`     风险低 / 相符 —— 绿档
  * · `neutral` 未知 / 未核验 / 识别中 —— 中性灰，**不表达任何业务结论**
  * · `primary` 人工留痕（如「已人工核验」）—— 主色
@@ -52,7 +57,7 @@ export const StatusTag = forwardRef<HTMLSpanElement, StatusTagProps>(function St
 ) {
   const classes = ['status-tag', `status-tag--${tone}`]
   if (ai) classes.push('status-tag--ai')
-  if (size === 'sm') classes.push('status-tag--sm')
+  if (size !== 'md') classes.push(`status-tag--${size}`)
   if (className) classes.push(className)
 
   const node = (

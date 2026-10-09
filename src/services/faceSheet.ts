@@ -36,7 +36,11 @@ export function pairFaceSheets(
 ): BatchFaceSheet[] {
   return sheets.map((s) => {
     const matched = tasks
-      .filter((t) => t.confirmationNo && t.expressNo && t.expressNo === s.expressNo)
+      /*
+       * `s.expressNo` 必须非空才比（v3.24：`BatchFaceSheet.expressNo` 现在可缺 —— 条码读不出）。
+       * 少了这道判断，`undefined === undefined` 会把**所有没有单号的段**都配到这张面单上。
+       */
+      .filter((t) => t.confirmationNo && s.expressNo && t.expressNo === s.expressNo)
       .map((t) => t.confirmationNo as string)
     return { ...s, matchedConfirmationNos: Array.from(new Set(matched)) }
   })

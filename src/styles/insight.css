@@ -6,7 +6,7 @@
  *
  * 「智能识别界面」采用 **AI 原生视觉语言**（参考 beautifului.dev 的
  * Crafted primitives for AI-native interfaces）：**像素网格加载器 / 扫过式微光 /
- * 点阵底纹 / 可展开的思考轨迹 / 置信度条**。
+ * 点阵底纹 / 可展开的思考轨迹 / 置信度胶囊（v3.13 由进度条改来，见 ⑥）**。
  *
  * ## 配色口径：**浅色系**，与站内同一套令牌
  *
@@ -23,7 +23,7 @@
  * ## 令牌纪律（硬约束）
  *
  * **全部取项目既有 `:root` 令牌，不新增任何色值**：
- * 主色 `--c-primary`、风险红绿 `--c-risk-high/low`、三级文字 `--c-text-1/2/3`、
+ * 主色 `--c-primary`、风险三色 `--c-risk-high/medium/low`、三级文字 `--c-text-1/2/3`、
  * 发丝线 `--c-hairline`、浅填充 `--c-fill-light`、阴影 `--shadow-card/hover`、
  * 圆角 `--radius-*`、动效 `--motion-fast` / `--ease-out`。
  * 下面 `--in-*` 只是**语义别名**（让组件读起来知道自己在用哪一档），值全部指向既有令牌。
@@ -396,6 +396,10 @@
   background: var(--c-risk-high-bg);
   color: var(--c-risk-high-text);
 }
+.group-verdict.is-medium {
+  background: var(--c-risk-medium-bg);
+  color: var(--c-risk-medium-text);
+}
 .group-verdict.is-low {
   background: var(--c-risk-low-bg);
   color: var(--c-risk-low-text);
@@ -491,48 +495,19 @@
 }
 
 /* ---------------------------------------------------------------- */
-/* ⑥ 置信度条与来源卡                                                 */
+/* ⑥ 来源卡                                                          */
 /* ---------------------------------------------------------------- */
 
-.confidence {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 /*
- * 置信度条（v2.59：提亮并加粗）
+ * **置信度条已在 v3.13 移除，改用 `AiChip` 胶囊**（`components/Marks.tsx`，与
+ * 「回函结果填写」页同一个件）—— 用户要求「要么改成明显的颜色，要么改成彩色的标签，
+ * 标签内是文字+置信度百分比」，取了后者。
  *
- * 用户反馈「进度条颜色调整，用明亮鲜艳的颜色」—— 原先是 4px 高、填充纯 `--c-primary`
- * （#3b5bdb，偏深），在一屏文字里几乎看不出"有一条进度在走"。
- * 现改为：**6px 高**（够粗才看得到）+ **主色亮档到主色的纵向渐变**
- * （`#4A68E0 → #3B5BDB`，取自既有主色阶，不新增色相）+ 端点圆角。
- * 亮档在上、深档在下，条子有了体积感，却不是"贴了个装饰色块"。
+ * 记下原条子为什么"全灰"（免得日后有人把它做回来还照抄）：填充元素是 `<span>`
+ * （**inline**），而 `width` / `height` **对 inline 元素不生效** ⇒ 填充宽度恒为 0，
+ * 只剩轨道那条 8% 灰底可见。要留进度条形态，补一行 `.confidence__fill { display: block }`
+ * 即可（轨道是 flex 子项，会被 blockify，所以只有填充这一层踩坑）。
  */
-.confidence__track {
-  flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(16, 24, 40, 0.06);
-  overflow: hidden;
-}
-.confidence__fill {
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, #4a68e0, #3b5bdb);
-  box-shadow: 0 0 0 1px rgba(59, 91, 219, 0.12);
-  transition: width 380ms var(--ease-out);
-}
-/* 低置信度转风险红 —— 语义色仍取项目既有红档（同取亮档做渐变，保持一致的处理方式） */
-.confidence__fill.is-low {
-  background: linear-gradient(90deg, #ef5b60, var(--c-risk-high));
-  box-shadow: none;
-}
-.confidence__pct {
-  font-size: 12px;
-  color: var(--in-text-2);
-  min-width: 38px;
-  text-align: right;
-}
 
 /* 来源卡 —— 一条依据出处（来源文件 / 页或区段 / 片段摘要） */
 .source-card {

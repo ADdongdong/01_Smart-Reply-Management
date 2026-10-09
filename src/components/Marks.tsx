@@ -6,7 +6,7 @@ import {
   ExclamationCircleFilled,
   InfoCircleFilled,
 } from '@ant-design/icons'
-import type { ConfirmationType, ReplyProgress, RiskLevel, VerifyStatus } from '@/types'
+import type { ConfirmationType, RiskLevel, VerifyStatus } from '@/types'
 import { TYPE_RULE } from '@/services/replyRule'
 import { StatusTag, type TagTone } from '@/components/StatusTag'
 
@@ -78,19 +78,30 @@ export function AiChip({ confidence, label = 'AI' }: { confidence: number; label
 /* ------------------- 风险等级 ------------------- */
 
 /**
- * 风险标签 —— 只有红 / 绿两档：中风险在数据层保留（业务上要区分关注程度），
- * 视觉并入红档，档位差异由标签文字「高风险 / 中风险」表达，不引入第三个色相。
+ * 风险标签 —— **三档三色：红（高风险）/ 橙（中风险）/ 绿（低风险）**（2026-10-08 改）。
  *
- * 色彩用法（2026-09-20 调整。起因：用户反馈「AI 风险那列的标签饱和度太低，看着很不清晰」）：
- * · 底色继续走浅档（`--c-risk-*-bg`）且**无边框** —— 描边标签会在密集列表里堆出大量线条；
- * · 但**文字改用深档语义色**（`--c-risk-high-text` / `--c-risk-low-text`），不再一律用墨色。
- *   原因是「墨色文字 + 8% 浅底」的最终观感是**整片偏灰**，红绿只藏在底色里，扫视时认不出来；
- *   改用深档语义色后，红 / 绿在浅底上依然 ≥ 4.5:1（WCAG AA），且这两个色已排除橙色系，
- *   不会出现用户反感的「咖啡色」。
+ * ## 旧口径已作废（保留备查）
+ *
+ * 此前是红 / 绿两档：中风险在数据层保留，**视觉并入红档**，理由是"不引入第三个色相"。
+ * 用户 2026-10-08 明确要求「这个风险，肯定是：低，中，高三个颜色」——
+ * **业务上"中"必须与"高"一眼可分**，这一条压过了色相数量的洁癖，该取舍作废。
+ * （当年反对橙色的理由是"橙色系标签会被看成咖啡色"；这次的做法是把橙的**饱和度提上去**
+ * （`#e8912d`）而不是退回红档 —— 见 `global.css` 的 `--c-risk-medium*`。）
+ *
+ * ## 色彩用法（2026-09-20 定的那套继续有效）
+ *
+ * 起因是用户反馈「AI 风险那列的标签饱和度太低，看着很不清晰」：
+ * · 底色走浅档（`--c-risk-*-bg`）且**无边框** —— 描边标签会在密集列表里堆出大量线条；
+ * · 文字走**深档**语义色（`--c-risk-*-text`），不用墨色 ——
+ *   「墨色文字 + 12% 浅底」的最终观感是**整片偏灰**，红绿只藏在底色里，扫视时认不出来；
+ *   改深档后，三色在各自浅底上均 ≥ 4.5:1（WCAG AA）。
  */
-const RISK_MAP: Record<RiskLevel, { text: string; tone: TagTone }> = {
+/** 风险等级的展示顺序（筛选下拉等按它排）—— 从重到轻，最后是"还没核验" */
+export const RISK_ORDER: RiskLevel[] = ['high', 'medium', 'low', 'none']
+
+export const RISK_MAP: Record<RiskLevel, { text: string; tone: TagTone }> = {
   high: { text: '高风险', tone: 'high' },
-  medium: { text: '中风险', tone: 'high' },
+  medium: { text: '中风险', tone: 'medium' },
   low: { text: '低风险', tone: 'low' },
   none: { text: '未核验', tone: 'neutral' },
 }
@@ -137,13 +148,23 @@ export function RiskTag({
 /* ------------------- 回函进度步骤条 ------------------- */
 
 /**
- * 回函进度步骤条（v2.51）—— 列表「回函进度」列的呈现。
+ * 回函进度步骤条（v2.51 立，v3.12 改口径）—— 列表「回函进度」列的呈现。
  *
  * 形态取自用户提供的参考界面：`✓ 快递信息 › | ○ 回函结果 ›`。
- * 现有的三个进度值与它天然对应 —— **两个步骤的三种完成组合**：
- * · `待确认快递信息` → 两个都空圈；
- * · `待填写回函结果` → 第一个实心打勾；
- * · `已完成`         → 两个都实心打勾。
+ *
+ * ## 两个步骤**各自取证据**，不再是"一个枚举推两个勾"（v3.12）
+ *
+ * 用户实测报：「完成回函结果填写后，前面的快递信息也会默认勾选完成，但实际上并没有完成」——
+ * 这两件事是**独立的、没有必然先后**（可以先填结果、后确认快递信息，反之亦然）。
+ * 所以完成态各按自己的事实判定，**两个布尔值由调用方给**：
+ *
+ * · **快递信息** = `verifyStatus === 'verified'` —— 那一步的确认是全流程**唯一的人工核验留痕动作**；
+ * · **回函结果** = `resultInfo` 存在 —— `SUBMIT_RESULT` 写的就是这个字段。
+ *
+ * 顺带撤销了旧的隐式假设：原口径把三个进度值当作「两个步骤的三种完成组合」，
+ * 于是"只填了结果"也会把快递信息勾上（`done: progress !== '待确认快递信息'`）。
+ * 「当前该做的那一步」仍是**第一个还没做的**：前面没做完时，后面不标 `current`。
+ * 本组件因此**不再需要进度取值**（两个布尔值足够推出全部三态）。
  *
  * 相比原来的两行文字（状态 + 「下一步：xxx」），步骤条的收益是**一眼看出走到了哪一步、
  * 还剩几步**，而不必读两行字再自己折算。
@@ -153,29 +174,37 @@ export function RiskTag({
  * 点击回调由调用方注入，本组件不碰 store（`Marks` 是纯展示层）。
  */
 export function ProgressSteps({
-  progress,
+  expressConfirmed,
+  resultFilled,
   onOpenExpress,
   onOpenResult,
 }: {
-  progress: ReplyProgress
+  /** 「快递信息」那一步确认过没有 —— 证据：该行 `verifyStatus === 'verified'` */
+  expressConfirmed: boolean
+  /** 「回函结果」那一步填过没有 —— 证据：该行 `resultInfo` 存在（`SUBMIT_RESULT` 写的就是它） */
+  resultFilled: boolean
   /** 点「快递信息」—— 打开回函快递信息弹窗 */
   onOpenExpress?: () => void
   /** 点「回函结果」—— 打开回函结果填写弹窗 */
   onOpenResult?: () => void
 }) {
+  const expressDone = expressConfirmed
+  const resultDone = resultFilled
   const steps = [
     {
       label: '快递信息',
-      done: progress !== '待确认快递信息',
+      done: expressDone,
       /* 「当前该做的那一步」—— 未完成的第一个步骤。操作列的主按钮已于 v2.52 移除，
          引导职责全部落在这里，故给当前步骤加字重提示（`.is-current`）。 */
-      current: progress === '待确认快递信息',
+      /* 「当前该做的那一步」= **第一个还没做的**（本步没做就是它） */
+      current: !expressDone,
       onClick: onOpenExpress,
     },
     {
       label: '回函结果',
-      done: progress === '已完成',
-      current: progress === '待填写回函结果',
+      done: resultDone,
+      /* 前面那步没做完时不标 current —— 引导一次只给一个落点 */
+      current: expressDone && !resultDone,
       onClick: onOpenResult,
     },
   ]

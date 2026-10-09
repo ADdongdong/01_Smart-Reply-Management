@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   App,
   Breadcrumb,
@@ -9,6 +10,7 @@ import {
   Empty,
   Input,
   Row,
+  Segmented,
   Select,
   Space,
   Table,
@@ -40,7 +42,7 @@ import VerificationModal from '@/components/VerificationModal'
 import RecordDetailModal from '@/components/RecordDetailModal'
 import ReplyDocEntryModal from '@/components/ReplyDocEntryModal'
 import ReplyResultModal from '@/components/ReplyResultModal'
-import { MatchTag, ProgressSteps, RiskTag } from '@/components/Marks'
+import { MatchTag, ProgressSteps, RISK_MAP, RISK_ORDER, RiskTag } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
 import { afterPaint } from '@/utils/afterPaint'
 
@@ -129,14 +131,27 @@ interface FilterState {
   keyword?: string
   sendMethod?: string
   progress?: string
-  risk?: string
+  /** 风险筛选 = 风险等级取值（高风险 / 中风险 / 低风险 / 未核验），与「AI 风险」列同一套等级（v3.20） */
+  risk?: RiskLevel
 }
 
 const EMPTY_FILTER: FilterState = {}
 
-export default function ReplyList() {
+/**
+ * 回函管理列表 —— **按函证类型分页**（v3.05，用户要求）。
+ *
+ * 往来函证与银行函证在真实系统里是**两张控制表、两个菜单**，不会同页展示，
+ * 故这里由路由传入 `type`，一个组件渲染一类：
+ * · 列表只归并本类函证；
+ * · 主操作行只有**本类的那一个**上传入口（原来两队并列，是"同页混展示"的残留）；
+ * · 页面头写明是哪一类，并给一个到另一类的切换（原型没有外层菜单，用切换控件代表另一个菜单）。
+ */
+export default function ReplyList({ type }: { type: ConfirmationType }) {
   const { modal, message } = App.useApp()
   const { state, dispatch } = useApp()
+  const navigate = useNavigate()
+  /** 本页是银行还是往来 —— 页面头 / 列标题 / 上传入口都据此变 */
+  const isBank = type === '银行函证'
 
   const [form, setForm] = useState<FilterState>(EMPTY_FILTER)
   const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER)
@@ -234,14 +249,31 @@ export default function ReplyList() {
     message.success('已开始识别 —— 请先核对切分与归属，点「确定」后回列表等结果')
   }
 
+  /**
+   * 往来弹窗里的「用演示数据体验」（v3.06）—— 与「下一步」**同一条路**，只是用内置批次。
+   *
+   * 「最后页是否快递面单」按演示批次的**实际形态**给定（A 批 9 页 / 3 段，每段尾部各一页面单），
+   * 不在演示路径上弹这个必选项：演示的意图是"没文件也能一步看到结果"。
+   */
+  const onCurrentDemo = () => {
+    setSplit(null)
+    dispatch({
+      type: 'START_BATCH',
+      batch: { ...PRESET_BATCHES[TYPE_RULE['往来函证'].presetBatchId](), faceSheetLast: true },
+      uploadType: '往来函证',
+    })
+    message.success('已开始识别 —— 请先核对切分与归属，点「确定」后回列表等结果')
+  }
+
   /* ------------------------- 归并、筛选与排序 ------------------------- */
 
-  const rows = useMemo(() => groupByConfirmation(state.records), [state.records])
+  /* 只归并**本类**函证 —— 两类是不同的控制表，不混在一页（v3.05） */
+  const rows = useMemo(
+    () => groupByConfirmation(state.records).filter((r) => r.type === type),
+    [state.records, type],
+  )
 
-  /** 待人工确认 = 最终有效回函的 AI 核验结果尚未人工确认 */
-  const pendingVerify = rows.filter((r) => r.main.verifyStatus === 'pending').length
   const total = rows.length
-  const verifiedCount = total - pendingVerify
 
   const data = useMemo(() => {
     return rows
@@ -258,17 +290,24 @@ export default function ReplyList() {
         }
         if (filter.sendMethod && m.sendMethod !== filter.sendMethod) return false
         if (filter.progress && m.replyProgress !== filter.progress) return false
-        if (filter.risk === 'risk' && !(m.risk === 'high' || m.risk === 'medium')) return false
-        if (filter.risk === 'high' && m.risk !== 'high') return false
+        /*
+         * 风险筛选 = **按当前的风险等级逐档匹配**（高风险 / 中风险 / 低风险 / 未核验，v3.20）。
+         * 此前只有「有风险（高+中）」「仅高风险」两档 —— 那是 v2.28 中风险还并入红档年代的口径，
+         * 与「AI 风险」列的三色三档对不上（想只看中风险、或想看还没核验的行，都选不出来）。
+         */
+        if (filter.risk && m.risk !== filter.risk) return false
         return true
       })
-      .sort((a, b) => {
-        // 待人工确认的排在前面；其次按回函时间倒序（最新的先看）
-        const pa = a.main.verifyStatus === 'pending' ? 0 : 1
-        const pb = b.main.verifyStatus === 'pending' ? 0 : 1
-        if (pa !== pb) return pa - pb
-        return (b.main.replyDate ?? b.main.sendDate).localeCompare(a.main.replyDate ?? a.main.sendDate)
-      })
+      /*
+       * **只按回函时间倒序（v3.12）** —— 原来还有一条「待人工确认的排在前面」。
+       * 那一条的后果是：**某行一旦处理完就不再"待人工确认"，当场跳到列表别处**
+       * （用户要求：「如果某个函证数据完成了，也不要修改整体表单数据的顺序」）。
+       * 「还有哪几封没处理」由行内步骤条与「AI 风险」列表达即可（v3.20 起页面头不再给统计），
+       * 不需要靠"随时重排行序"来提示 —— 排序键只留**不因处理动作而变**的那一个。
+       */
+      .sort((a, b) =>
+        (b.main.replyDate ?? b.main.sendDate).localeCompare(a.main.replyDate ?? a.main.sendDate),
+      )
   }, [rows, filter])
 
   const activeChips = useMemo(() => {
@@ -276,8 +315,7 @@ export default function ReplyList() {
     if (filter.keyword) chips.push({ key: 'keyword', label: `关键字：${filter.keyword}` })
     if (filter.sendMethod) chips.push({ key: 'sendMethod', label: `发函方式：${filter.sendMethod}` })
     if (filter.progress) chips.push({ key: 'progress', label: `回函进度：${filter.progress}` })
-    if (filter.risk)
-      chips.push({ key: 'risk', label: `AI 风险：${filter.risk === 'risk' ? '有风险' : '仅高风险'}` })
+    if (filter.risk) chips.push({ key: 'risk', label: `AI 风险：${RISK_MAP[filter.risk].text}` })
     return chips
   }, [filter])
 
@@ -338,7 +376,8 @@ export default function ReplyList() {
   const columns: ColumnsType<ConfirmationRow> = [
     /* ---------- 函证信息 ---------- */
     {
-      title: '被询证单位（银行）',
+      /* 银行函证的被询证单位就是银行，故这一页把「（银行）」写进表头（v3.05） */
+      title: isBank ? '被询证单位（银行）' : '被询证单位',
       key: 'entity',
       width: 196,
       fixed: 'left',
@@ -356,15 +395,9 @@ export default function ReplyList() {
     {
       title: '函证编号',
       key: 'confirmationNo',
-      width: 148,
-      render: (_, row) => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <span className="num">{row.confirmationNo}</span>
-          <StatusTag size="sm" tone="neutral">
-            {row.type === '银行函证' ? '银行' : '往来'}
-          </StatusTag>
-        </span>
-      ),
+      /* 类型标签去掉了（v3.05）：本页只有一类函证，每行再标「往来 / 银行」是重复信息 */
+      width: 132,
+      render: (_, row) => <span className="num">{row.confirmationNo}</span>,
     },
     /* ---------- 回函是否相符 ---------- */
     /*
@@ -484,7 +517,18 @@ export default function ReplyList() {
              */}
             <span style={{ display: 'inline-flex', cursor: 'help' }}>
               <ProgressSteps
-                progress={p}
+                /*
+                 * 两步的完成证据**各自给**（v3.12）—— 见 `ProgressSteps` 的说明。
+                 * 它们与 `replyProgress` 是两回事：进度只表达"下一步做什么"。
+                 */
+                expressConfirmed={row.main.verifyStatus === 'verified'}
+                /*
+                 * 「回函结果」的完成证据 = **有 `resultInfo` 或进度已是「已完成」**。
+                 * 后半截是给**存量数据**留的：演示数据（以及历史落库的行）里"已完成"
+                 * 并不都带着 `resultInfo` —— 实测漏了这一截就会让那些行**掉勾**
+                 * （回归检查当场逮到：广东证券那行曾显示「快递信息 ✓ / 回函结果 ○」）。
+                 */
+                resultFilled={!!row.main.resultInfo || row.main.replyProgress === '已完成'}
                 onOpenExpress={() => setActiveModal({ kind: 'doc', recordId: row.main.id })}
                 onOpenResult={() => setActiveModal({ kind: 'result', recordId: row.main.id })}
               />
@@ -518,8 +562,6 @@ export default function ReplyList() {
       fixed: 'right',
       render: (_, row) => {
         const m = row.main
-        /** 待确认阶段下拉里不呈现「回函结果」（见下方注释） */
-        const awaitingExpress = m.replyProgress === '待确认快递信息'
 
         /**
          * 待核验且确有风险原因 → 需要去看依据的行，在「更多」按钮上给一句悬停说明。
@@ -546,10 +588,17 @@ export default function ReplyList() {
                 items: [
                   { key: 'doc', label: '回函快递信息' },
                   /*
-                   * 待确认阶段**不呈现**该项（不是禁用）：SUBMIT_RESULT 会把核验状态置为已核验，
-                   * 从该状态进入等于绕过「确认回函快递信息」这个唯一的核验留痕入口（审计底线）。
+                   * **「回函结果」一律呈现（v3.12 放开）**。
+                   *
+                   * 此前在「待确认快递信息」阶段**刻意不呈现**它（不是禁用），理由写在这里：
+                   * 「SUBMIT_RESULT 会把核验状态置为已核验，从该状态进入等于绕过『确认回函快递信息』
+                   * 这个唯一的核验留痕入口（审计底线）」—— 那其实是**拿隐藏入口去规避一个耦合缺陷**。
+                   *
+                   * 本轮把耦合去掉了（`SUBMIT_RESULT` 不再碰 `verifyStatus`，两步各自独立），
+                   * 这条隐藏规则随之失去依据；且它本就与「进度列的步骤条随时可点开结果」自相矛盾
+                   * （同一动作两处行为不一致）。现在两处一致：**任何阶段都能进，且都不影响另一步的完成态**。
                    */
-                  ...(awaitingExpress ? [] : [{ key: 'result', label: '回函结果' }]),
+                  { key: 'result', label: '回函结果' },
                   { key: 'verify', label: 'AI 核验', disabled: !m.verification },
                   { type: 'divider' as const },
                   { key: 'delete', label: '删除', danger: true },
@@ -735,20 +784,11 @@ export default function ReplyList() {
         description={
           <div style={{ fontSize: 14, color: 'var(--c-text-2)', lineHeight: 2.2 }}>
             <div style={{ fontWeight: 500, color: 'var(--c-text-1)' }}>还没有回函数据</div>
-            <div>上传回函文件后，匹配成功的函证会自动进入本列表</div>
-            <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'center' }}>
-              <Button
-                type="primary"
-                icon={<CloudUploadOutlined />}
-                onClick={() => openUpload('往来函证')}
-              >
-                上传往来函证回函
-              </Button>
-              <Button
-                icon={<CloudUploadOutlined />}
-                onClick={() => openUpload('银行函证')}
-              >
-                上传银行函证回函
+            <div>上传{isBank ? '银行' : '往来'}函证回函文件后，匹配成功的函证会自动进入本列表</div>
+            {/* 空态也只给本类的那一个入口（v3.05：两类各一页） */}
+            <div style={{ marginTop: 8 }}>
+              <Button type="primary" icon={<CloudUploadOutlined />} onClick={() => openUpload(type)}>
+                {isBank ? '上传银行函证回函' : '上传往来函证回函'}
               </Button>
             </div>
           </div>
@@ -767,15 +807,39 @@ export default function ReplyList() {
        */}
       <div className="page-head">
         <div style={{ minWidth: 0 }}>
-          <Breadcrumb items={[{ title: '函证系统' }, { title: '回函管理' }]} />
+          {/* 面包屑到"二级菜单"这一层 —— 两类各是一个菜单（v3.05） */}
+          <Breadcrumb
+            items={[
+              { title: '函证系统' },
+              { title: '回函管理' },
+              { title: isBank ? '银行函证回函' : '往来函证回函' },
+            ]}
+          />
           <h1 className="page-head__title">
-            回函管理
+            {isBank ? '银行函证回函' : '往来函证回函'}
+            {/*
+             * v3.20：只留总数，「待人工确认 / 已完成」两段统计去掉
+             * （用户：「上面不需要人工确认，已完成，这些字样」）——
+             * 「还有哪几封没处理」由行内进度步骤条与「AI 风险」列表达，比一个总数更具体。
+             */}
             <small>
-              共 <b className="num">{total}</b> 封函证 · 待人工确认{' '}
-              <b className="num">{pendingVerify}</b> · 已完成 <b className="num">{verifiedCount}</b>
+              共 <b className="num">{total}</b> 封函证
             </small>
           </h1>
         </div>
+        {/*
+         * 到另一类的切换（v3.05）—— 两类是**两个菜单**，真实系统由外层导航承担；
+         * 原型没有外层菜单，故在这里给一个等价的入口，否则进了一类就回不到另一类。
+         */}
+        <Segmented
+          style={{ marginLeft: 'auto' }}
+          value={isBank ? 'bank' : 'wanglai'}
+          onChange={(v) => navigate(v === 'bank' ? '/reply/bank' : '/reply/wanglai')}
+          options={[
+            { label: '往来函证', value: 'wanglai' },
+            { label: '银行函证', value: 'bank' },
+          ]}
+        />
       </div>
 
       {/* 筛选区 —— 单行高密度筛选 */}
@@ -822,10 +886,9 @@ export default function ReplyList() {
               style={{ width: '100%' }}
               value={form.risk}
               onChange={(v) => setForm({ ...form, risk: v })}
-              options={[
-                { label: '有风险（高+中）', value: 'risk' },
-                { label: '仅高风险', value: 'high' },
-              ]}
+              /* 选项 = 当前的风险等级（高风险 / 中风险 / 低风险 / 未核验，v3.20）——
+                 取值与文案都来自 `RISK_MAP`，与「AI 风险」列的标签是同一份定义 */
+              options={RISK_ORDER.map((l) => ({ label: RISK_MAP[l].text, value: l }))}
             />
           </Col>
           <Col>
@@ -887,49 +950,54 @@ export default function ReplyList() {
           }}
         >
         {/*
-         * 两个上传入口（v2.27）—— 往来函证与银行函证的智能检测事项差别很大，
-         * 从入口就分开：点哪个按钮，工作台就按哪套检测项、上传提示与演示数据呈现，
-         * 上传时类型即已确定，不再由系统事后判类型。
+         * 上传入口 —— **只留本类的那一个**（v3.05）。
+         *
+         * 原来两类按钮**并列在同一页**（v2.27 的形态），那是"两类同页混展示"的残留：
+         * 往来函证与银行函证是两张控制表，真实系统里各是一个菜单、各有各的列表与入口。
+         * 现在两类各一页，本页只有本类入口；点进去后走哪套流程由 `TYPE_RULE` 决定
+         * （往来是「文件识别录入 → 回函归属」两步，银行是单弹窗 + 手工切分）。
          */}
-        <Tooltip
-          title={
-            <div style={{ fontSize: 13, lineHeight: 1.9 }}>
-              <div style={{ fontWeight: 500, marginBottom: 2 }}>接收带二维码的往来函证回函</div>
-              <div>· 检测：发函回函一致性 / 印章 / 手写体 / 快递面单</div>
-              <div>· 按右上角二维码<b>预切分</b>；切分与归属在「回函归属」界面由你核对或改</div>
-            </div>
-          }
-        >
-          <Button
-            type="primary"
-            icon={<CloudUploadOutlined />}
-            onClick={() => openUpload('往来函证')}
-          >
-            上传往来函证回函
-          </Button>
-        </Tooltip>
-
-        <Tooltip
-          title={
-            <div style={{ fontSize: 13, lineHeight: 1.9 }}>
-              <div style={{ fontWeight: 500, marginBottom: 2 }}>接收银行函证回函（只需回函件）</div>
-              <div>· 格式一 / 格式二数据已存于函证系统，识别回函后直接与系统数据逐项核对</div>
-              <div>
-                · 检测（<b>4 项</b>）：阶段一「识别四要素」；阶段二「询证事项逐项核对 / 是否有印章 /
-                印章名称与被询证单位一致」——<b>不检测手写体</b>，也<b>不检测骑缝章</b>
+        {isBank ? (
+          <Tooltip
+            title={
+              <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+                <div style={{ fontWeight: 500, marginBottom: 2 }}>接收银行函证回函（只需回函件）</div>
+                <div>· 格式一 / 格式二数据已存于函证系统，识别回函后直接与系统数据逐项核对</div>
+                <div>
+                  · 检测（<b>4 项</b>）：阶段一「识别四要素」；阶段二「询证事项逐项核对 / 是否有印章 /
+                  印章名称与被询证单位一致」——<b>不检测手写体</b>，也<b>不检测骑缝章</b>
+                </div>
+                <div>· 无二维码，归属靠你在「回函归属」界面<b>手工切分 + 逐段指定</b>（四要素仅作参考）</div>
               </div>
-              <div>· 无二维码，归属靠你在「回函归属」界面<b>手工切分 + 逐段指定</b>（四要素仅作参考）</div>
-            </div>
-          }
-        >
-          <Button
-            type="primary"
-            icon={<CloudUploadOutlined />}
-            onClick={() => openUpload('银行函证')}
+            }
           >
-            上传银行函证回函
-          </Button>
-        </Tooltip>
+            <Button
+              type="primary"
+              icon={<CloudUploadOutlined />}
+              onClick={() => openUpload('银行函证')}
+            >
+              上传银行函证回函
+            </Button>
+          </Tooltip>
+        ) : (
+          <Tooltip
+            title={
+              <div style={{ fontSize: 13, lineHeight: 1.9 }}>
+                <div style={{ fontWeight: 500, marginBottom: 2 }}>接收带二维码的往来函证回函</div>
+                <div>· 检测：发函回函一致性 / 印章 / 手写体 / 快递面单</div>
+                <div>· 按右上角二维码<b>预切分</b>；切分与归属在「回函归属」界面由你核对或改</div>
+              </div>
+            }
+          >
+            <Button
+              type="primary"
+              icon={<CloudUploadOutlined />}
+              onClick={() => openUpload('往来函证')}
+            >
+              上传往来函证回函
+            </Button>
+          </Tooltip>
+        )}
 
         <Tooltip
           title={
@@ -994,7 +1062,7 @@ export default function ReplyList() {
             size: 'small',
             pageSize: 10,
             showSizeChanger: false,
-            /* 不再显示「共 N 条」—— 工具栏右侧已有一组统计（共 / 待人工确认 / 已完成），
+            /* 不再显示「共 N 条」—— 页面标题下已有「共 N 封函证」，
                同一个数字在一屏里出现两次属于纯冗余 */
             style: { padding: '0 16px' },
           }}
@@ -1061,6 +1129,8 @@ export default function ReplyList() {
         open={split?.step === 'entry'}
         onCancel={() => setSplit(null)}
         onNext={onSplitFileConfirm}
+        demoLabel={DEMO_LABEL[TYPE_RULE['往来函证'].presetBatchId]}
+        onDemo={onCurrentDemo}
       />
 
       {/* 「上传银行函证回函」小弹窗（v2.47）—— 银行不切分、无需额外字段，选完文件即开始识别 */}

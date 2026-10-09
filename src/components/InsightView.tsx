@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
-import { isRecognitionPending, evaluateMatch, TYPE_RULE } from '@/services/replyRule'
+import { isRecognitionPending, evaluateMatch } from '@/services/replyRule'
 import { verifyItemsOf, matchLineOf, riskTone, riskText, replySeqOf } from '@/components/recognition/shared'
 import { PixelLoader } from '@/components/ai/PixelLoader'
 import { TaskGroups, type TaskGroup, type TaskRowItem } from '@/components/ai/TaskRows'
 import { RecommendationCard } from '@/components/ai/RecommendationCard'
-import { SourceCards, type SourceItem } from '@/components/ai/SourceCards'
 import { ToolChips, type ChipItem } from '@/components/ai/ToolChips'
 
 /**
@@ -42,13 +41,23 @@ export default function InsightView() {
   const { state, dispatch } = useApp()
 
   /**
-   * 本界面要看的任务 —— 归属已确定的那些。
+   * 本界面要看的任务 —— 归属已确定的那些，**外加面单页**（v3.22）。
    *
    * 归属未定的段不该出现在这里：它们的结论还没成立（"结论不得先于归属"，
    * 见 v2.33 以来的口径），列出来只会出现"待归属"的空行。
+   *
+   * **面单页是例外，且必须例外**（v3.22）：它不是函证、本来就没有归属，
+   * 但它是银行侧一个**真跑过的检测项**（快递面单识别）—— 按"归属非空"过滤会把
+   * 它整个从识别界面抹掉，用户在这个"看识别过程"的界面里**看不到面单识别**，
+   * 只能回到归属界面才看得到它的结果。这正是用户问的
+   * 「快递面单自动识别的过程，和识别结束，是不是需要一个显示的图标来标识」。
+   * 它进来后只列 1 项检测（见 `verifyItemsOf`），结论由运单号读没读出来决定。
    */
   const tasks = useMemo(
-    () => state.batches.flatMap((b) => b.tasks).filter((t) => !!t.assignSource),
+    () =>
+      state.batches
+        .flatMap((b) => b.tasks)
+        .filter((t) => !!t.assignSource || t.faceSheetPage),
     [state.batches],
   )
 
@@ -125,9 +134,25 @@ export default function InsightView() {
           details: s.evidence,
         }))
 
-        /** 该封的结论 —— 识别未完成时不给结论（"结论不得先于归属/识别完成"，延续既有口径） */
+        /**
+         * 该封的结论 —— 识别未完成时不给结论（"结论不得先于归属/识别完成"，延续既有口径）。
+         *
+         * **面单页的"结论"是运单号读没读出来**（v3.22）：它没有回函记录、也就没有相符性可言，
+         * 原先会落到 `e?.evaluation == null` 那一支、永远不给结论 —— 一个跑完的检测项
+         * 在界面上看不出跑完了。三态与归属界面那行单号一致：
+         * 绿「已读出运单号」/ 橙「未读出运单号 · 待人工填写」/ 灰「识别中」。
+         */
         const seq = replySeqOf(task)
-        const verdict = e?.pending
+        const sheetStage = task.faceSheetPage
+          ? task.stages.find((s) => s.key === 'expressSheet')
+          : undefined
+        const verdict = task.faceSheetPage
+          ? !sheetStage || sheetStage.status === 'waiting' || sheetStage.status === 'running'
+            ? { text: '识别中', tone: 'running' as const }
+            : task.expressNo
+              ? { text: '已读出运单号', tone: 'low' as const }
+              : { text: '未读出运单号 · 待人工填写', tone: 'medium' as const }
+          : e?.pending
           ? ({ text: '识别中', tone: 'running' as const })
           : e?.evaluation == null
             ? undefined
@@ -140,13 +165,21 @@ export default function InsightView() {
                       : '待人工判定',
                 tone: riskTone(e.record?.verification?.riskLevel) as
                   | 'high'
+                  | 'medium'
                   | 'low'
                   | 'neutral',
               }
 
         return {
           id: task.id,
-          title: `${task.confirmationNo} · ${task.matchedEntity ?? '—'}`,
+          /*
+           * 组头标题 —— **面单页不是函证**（v3.22）：它没有函证编号、也不参与归属，
+           * 照旧写「待指定 · 齐商银行股份有限公司」用户读不出这是什么（识别界面里
+           * 也不该出现「待指定」这种归属态的词）。页区间仍由副标题给。
+           */
+          title: task.faceSheetPage
+            ? '快递面单'
+            : `${task.confirmationNo} · ${task.matchedEntity ?? '—'}`,
           subtitle: [
             task.pageStart != null
               ? task.pageStart === task.pageEnd
@@ -188,9 +221,6 @@ export default function InsightView() {
     [evaluated],
   )
 
-  /** 主展示段（顶栏与风险行用）—— 优先给需要关注的那一段，没有则给第一段 */
-  const primary = flagged[0] ?? evaluated[0]
-
   const chips: ChipItem[] = useMemo(() => {
     const total = rows.length
     const ok = rows.filter((r) => r.status === 'completed').length
@@ -200,32 +230,6 @@ export default function InsightView() {
     if (warn) out.push({ text: `${warn} 项需关注`, tone: 'warn' })
     return out
   }, [rows])
-
-  /**
-   * 来源卡 —— 依据出自原件的哪一部分。
-   *
-   * 只给**确有来源**的：本份回函文件与它被切出的页区间。每个检测点的依据明细
-   * 已经在该行的展开区里（不重复搬到这里），这里回答的是"这些结论是拿哪些材料算的"。
-   */
-  const sources: SourceItem[] = useMemo(() => {
-    const out: SourceItem[] = []
-    tasks.forEach((t) => {
-      if (t.pageStart == null || t.pageEnd == null) return
-      out.push({
-        /*
-         * 类型标记统一叫「回函原件」（v2.61）—— 原先往来侧写「拼接件」，那是我借来的行业俗语，
-         * 用户直接问「**拼接件是什么意思**」。取舍：**界面用能被读懂的说法**，
-         * "多封回函拼成一个文件"这件事由 `from` 里的页区间自然表达，不需要一个生词去概括它。
-         */
-        kind: '回函原件',
-        from: `${t.fileName} · ${
-          t.pageStart === t.pageEnd ? `第 ${t.pageStart} 页` : `第 ${t.pageStart}-${t.pageEnd} 页`
-        }`,
-        quote: `${t.confirmationNo}${t.matchedEntity && t.matchedEntity !== '—' ? ` · ${t.matchedEntity}` : ''}`,
-      })
-    })
-    return out
-  }, [tasks])
 
   /*
    * 只在被主动打开时挂载（`insightOpen`）。
@@ -237,8 +241,6 @@ export default function InsightView() {
    */
   if (!state.insightOpen) return null
   if (!tasks.length) return null
-
-  const rule = TYPE_RULE[state.recognitionType]
 
   return (
     <div className="insight-stage" style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
@@ -321,41 +323,25 @@ export default function InsightView() {
                 basis={f.evaluation!.basis}
                 confidence={f.record?.verification?.consistency.confidence}
                 reasons={f.record?.verification?.riskReasons}
+                /*
+                 * 风险等级随卡走（v3.14）—— 见 `RecommendationCard` 的卡头说明。
+                 * 原先这一栏在页面底部**只出现一次**（取第一段的等级），
+                 * 而"结论区"里每封各有自己的等级，放在底部既从属不明、也漏掉其余各封。
+                 */
+                riskLabel={riskText(f.record?.verification?.riskLevel)}
+                riskTone={riskTone(f.record?.verification?.riskLevel)}
               />
             ))}
 
-            {/* 风险等级 —— 一行摘要，不铺标签（标签已在列表里出现过，这里只交代结论强度） */}
-            {primary?.record?.verification && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 10,
-                  fontSize: 12,
-                  color: 'var(--in-text-3)',
-                }}
-              >
-                <span>风险等级</span>
-                <span
-                  style={{
-                    fontSize: 13,
-                    /* 浅色底上用深档语义色（与站内风险标签同口径） */
-                    color:
-                      riskTone(primary.record?.verification?.riskLevel) === 'high'
-                        ? 'var(--c-risk-high-text)'
-                        : riskTone(primary.record?.verification?.riskLevel) === 'low'
-                          ? 'var(--c-risk-low-text)'
-                          : 'var(--c-text-2)',
-                  }}
-                >
-                  {riskText(primary.record?.verification?.riskLevel)}
-                </span>
-                {rule?.matchRuleHint && <span style={{ marginLeft: 'auto' }}>{rule.matchRuleHint}</span>}
-              </div>
-            )}
-
-            {/* 来源卡 —— 这些结论是拿哪些材料算的 */}
-            <SourceCards items={sources} />
+            {/*
+             * 「来源卡」区（v2.57 起有、v3.15 移除）—— 用户：「这个区域的内容，删除，不知道是干啥的」。
+             *
+             * 它逐段列「回函原件 · 0813回函123.pdf · 第 1-3 页 · whzf0010006 · 广东证券股份有限公司」，
+             * 想回答"这些结论是拿哪些材料算的"；但**素材与归属在上一屏刚由用户自己逐段确认过**
+             * （归属界面每段都标了页区间与命中的函证），此处只是把同一件事再抄一遍 ——
+             * 既无新信息，也没有可动作之处，就成了用户眼里"不知道干啥"的一段。
+             * "结论读了哪几页"若要看，各检测点的**依据明细**（逐项展开）里本来就有。
+             */}
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Modal, Radio, Upload } from 'antd'
-import { FilePdfOutlined, InboxOutlined } from '@ant-design/icons'
+import { FilePdfOutlined, InboxOutlined, ThunderboltOutlined } from '@ant-design/icons'
 
 /**
  * 「切分」界面 · ① 文件识别录入（往来函证专属，v2.35）。
@@ -13,6 +13,18 @@ import { FilePdfOutlined, InboxOutlined } from '@ant-design/icons'
  *   · 「最后页是否快递面单」**恢复为人工指定** —— 它是切分边界判定的直接输入
  *     （告知切分逻辑「每段尾部是否还有一页没有二维码的面单页」）；
  *   · 与切分无关的字段（快递单号等）**不在这一步出现** —— 快递单号改由识别阶段的面单识别读出。
+ *
+ * ## v3.06：补上「没有文件？用演示数据体验」入口
+ *
+ * 银行弹窗自 v2.47 就有这个入口，往来这边一直缺 —— 于是"想试一下但手头没有文件"的人
+ * **只有银行那条路走得通**，往来这条得先自己去准备一个 PDF。本轮补上，与银行弹窗
+ * **同款同措辞**（同样的「没有文件？用演示数据体验：」+ 闪电图标按钮），
+ * 文案取自 `DEMO_LABEL.A`，两处共用一份、避免各写一份而漂移。
+ *
+ * 走法与「下一步」**同一条路**（`START_BATCH` 会一并置 `assignOpen`，直接进归属界面），
+ * 差别只有两点：用内置批次代替选文件；面单口径按该演示批次的**实际形态**给定
+ * （A 批每段尾部都有一页面单）—— 演示的意图是"没文件也能一步看到结果"，
+ * 不该反过来先让人回答一个他无从判断的问题。
  */
 export interface SplitFileInfo {
   name: string
@@ -29,11 +41,17 @@ export default function SplitEntryModal({
   open,
   onCancel,
   onNext,
+  /** 演示数据按钮文案（按入口类型给，如「往来函证拼接回函（9 页 / 3 段）」） */
+  demoLabel,
+  onDemo,
 }: {
   open: boolean
   onCancel: () => void
   /** 校验通过 → 进入 ②「回函归属」（`AssignView`，本链路的最后一步） */
   onNext: (value: SplitEntryValue) => void
+  demoLabel?: string
+  /** 点演示数据（v3.06）—— 与「下一步」同路，只是用内置批次 */
+  onDemo?: () => void
 }) {
   const [faceSheetLast, setFaceSheetLast] = useState<'yes' | 'no' | null>(null)
   const [file, setFile] = useState<SplitFileInfo | null>(null)
@@ -159,6 +177,23 @@ export default function SplitEntryModal({
             支持单个或批量上传，仅支持 pdf 格式
           </p>
         </Upload.Dragger>
+      )}
+
+      {/* v3.06：与银行弹窗同款入口 —— 没文件时用内置批次一键跑通（含切分与归属） */}
+      {onDemo && demoLabel && (
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--c-text-3)' }}>没有文件？用演示数据体验：</span>
+          <Button
+            size="small"
+            icon={<ThunderboltOutlined />}
+            onClick={() => {
+              reset()
+              onDemo()
+            }}
+          >
+            {demoLabel}
+          </Button>
+        </div>
       )}
     </Modal>
   )
