@@ -52,7 +52,19 @@ function canStart(stages: RecognitionStage[], key: StageKey, stages0: Recognitio
  * 返回新的任务对象与「本次是否有变化」标记。
  */
 export function advanceTask(task: RecognitionTask): { task: RecognitionTask; changed: boolean } {
-  if (task.status === 'failed') return { task, changed: false }
+  /*
+   * 只在这封**已经没有任何检测项可推进**时提前返回（v3.29 改判据）。
+   *
+   * 原判据是 `task.status === 'failed'` —— 后果是**一个检测项失败就把整封函证钉死**：
+   * 它**后面的检测项永远停在「待×××」**（既不再跑，也永远不会 `done`），这封函证于是既
+   * 进不了列表、也不在识别区里动。用户要求：「识别出错的，**不要阻塞，继续识别后面的内容**」。
+   *
+   * 故改为按「还有没有没跑完的项」判断：失败的项本身不会再被 pick（它不是 waiting / running），
+   * 其余项照常逐项跑完；全部尘埃落定后 `status` 由 `anyFailed` 决定为 `failed`
+   * （见本函数末尾），再由 store 按「已结束」入表并给「重新识别」。
+   */
+  const unsettled = task.stages.some((s) => s.status === 'waiting' || s.status === 'running')
+  if (!unsettled) return { task, changed: false }
 
   const stages = task.stages.map((s) => ({ ...s }))
   const original = task.stages
@@ -100,7 +112,21 @@ export function advanceTask(task: RecognitionTask): { task: RecognitionTask; cha
     task: {
       ...task,
       stages,
-      status: plannedFailed ? 'failed' : allSettled ? (anyFailed ? 'failed' : 'success') : 'pending',
+      /*
+       * **只有全部尘埃落定才判成败**（v3.29 修）。
+       *
+       * 原先是 `plannedFailed ? 'failed' : ...` —— 某一项一出错就**当场**把整封判成 `failed`。
+       * 那一步正是"失败会阻塞"的真正来源（比旧版那个 `status === 'failed'` 提前返回更隐蔽）：
+       * `advanceBatch.canAdvance` 只推进 `status === 'pending'` 的任务 —— 状态一旦提前翻成
+       * `failed`，这封**剩下的检测项就再没人推进**，永远停在「待×××」，
+       * 于是它既进不了列表（`stagesSettled` 为假）、也永远挂在识别区里收不起来。
+       * 实测就卡在这一处：华泰证券那封在 t=30s 起就一动不动。
+       *
+       * 现在：失败的只是**那一个检测项**，整封继续把其余项跑完，跑完才判 `failed` ——
+       * 这也正是用户要的「识别出错的，**不要阻塞，继续识别后面的内容**」。
+       * `plannedFailed` 仍参与 `needManual`（这几封要人看一眼）。
+       */
+      status: allSettled ? (anyFailed ? 'failed' : 'success') : 'pending',
       needManual: plannedFailed || anyFailed || task.needManual,
     },
     changed: true,

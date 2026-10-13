@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from 'react'
 import type {
+  AiReviewKey,
   ConfirmationType,
   ExpressImportResult,
   RecognitionTask,
@@ -48,6 +49,18 @@ interface AppState {
   floatingVisible: boolean
   /** 识别完成后需要高亮闪烁的函证（按函证编号） */
   flashRowId: string | null
+  /**
+   * **刚写入列表的那些函证**（按函证编号，v3.29）—— 「识别完成一条 → 加入回函表单」
+   * 这个动作要**看得见**（用户：「我要看见，识别完成一条数据，一条函证数据加入回函表单的交互」）。
+   *
+   * 与 `flashRowId` 的分工：那条是「**这一行变了**」（阶段二回填结论后的闪烁提醒），
+   * 本条是「**这一行是刚来的**」—— 列表据此给新行做**滑入 + 高亮一闪**的插入动效。
+   *
+   * 是个**数组**而不是单值：同一个 tick 里可能有多封一起跑完（`TICK` 的落库是 forEach），
+   * 存单值会让先落的几行没动效。由列表在动效播完后派 `CLEAR_INSERTED` 清空 ——
+   * 清掉才能让同一封（重新识别后再次入表）**再播一次**。
+   */
+  insertedRowIds: string[]
   /** 操作指引弹窗是否展开 —— **不自动弹出**，只由「操作指引」入口 / 顶部问号图标手动打开 */
   onboardingVisible: boolean
   /** 演示数据是否已加载 */
@@ -119,6 +132,8 @@ type Action =
   | { type: 'CLOSE_INSIGHT' }
   | { type: 'SET_FLOATING'; visible: boolean }
   | { type: 'CLEAR_FLASH' }
+  /** 插入动效播完 —— 由列表在过渡结束后派发（见 `AppState.insertedRowIds`） */
+  | { type: 'CLEAR_INSERTED' }
   | { type: 'OPEN_ONBOARDING' }
   | { type: 'CLOSE_ONBOARDING' }
   | { type: 'IMPORT_EXPRESS'; result: ExpressImportResult }
@@ -160,6 +175,13 @@ type Action =
     }
   | { type: 'RETRY_TASK'; taskId: string }
   | { type: 'SKIP_TASK'; taskId: string }
+  /**
+   * 人工对列表「AI 核验事项」某一项的处置（v3.28）—— 采纳 / 不采纳。
+   *
+   * 采纳 = 采用 AI 结论（在「回函结果填写」页自动带出）；不采纳 = 只标记「已看过、不采用」、
+   * 不带入任何值。两者都写 `ReplyRecord.aiReview` 与处理留痕，列表上该项随即呈已处理态。
+   */
+  | { type: 'REVIEW_AI_ITEM'; recordId: string; key: AiReviewKey; status: 'adopted' | 'ignored' }
   | { type: 'CONFIRM_DOC'; recordId: string; patch?: Partial<ReplyRecord> }
   /**
    * 编辑态：修改**已确认过**的回函快递信息。
@@ -181,6 +203,7 @@ const initialState: AppState = {
   recognitionType: '往来函证',
   floatingVisible: false,
   flashRowId: null,
+  insertedRowIds: [],
   /**
    * 操作指引**不自动弹出**（默认关闭）。
    * 进入页面即弹会打断正在用它的人，而且刷新一次弹一次；
@@ -238,6 +261,20 @@ function applyRecognizedReply(
   const best = task.bankMatch?.candidates?.[0]
   const twoPhase = TYPE_RULE[task.type].twoPhase
   const recordId = `${task.confirmationNo}-${same.length + 1}`
+  /*
+   * **识别有失败项**（v3.29）—— 这封照样入表，但**任何核验结论都不写**：
+   * 识别没过，结论就是无源的。风险等级同理记 `none`（否则会继承上一条回函的风险，
+   * 让"识别失败"这一行看起来像已经判过）。
+   */
+  const failed = task.status === 'failed'
+  /*
+   * 本条的**核验结论**（两阶段类型落库时留空、等阶段二回填；其余沿用历史回函或取兜底，
+   * 见 `lookupVerification`）。**风险等级与它同源** —— 见下面 `risk` 的说明。
+   */
+  const verification =
+    twoPhase || failed
+      ? undefined
+      : (base?.verification ?? lookupVerification(task.confirmationNo, task.type))
 
   const created: ReplyRecord = {
     id: recordId,
@@ -257,7 +294,19 @@ function applyRecognizedReply(
      * 刻意**不继承** `base?.verification`：否则同一函证的第二次回函在阶段一会
      * 立刻显示上一份回函的结论，「识别中」态就无法成立（本改造最容易踩的坑）。
      */
-    risk: twoPhase ? 'none' : (base?.risk ?? 'none'),
+    /*
+     * **AI 风险与核验结论同源**（v3.29 修）。
+     *
+     * 原先是 `base?.risk ?? 'none'` —— 只看历史回函。于是**首次回函的往来函证**
+     * （没有历史回函，演示里上传的那几封全是）风险恒写成 `none`，列表上一直显示「未核验」——
+     * 而同一行为的 `verification.riskLevel` 明明已有结论、「回函是否相符」也已给出结论，
+     * 一格里说"有结论"、另一格里说"没核验"，自相矛盾。
+     *
+     * 现在与 `verification` 走同一个来源：有历史就沿用它的风险（与沿用它的结论是同一口径），
+     * 没有就用本条拿到的核验结论里的风险等级。
+     * 识别失败的那封仍然记 `none` —— 识别没过，任何结论都是无源的。
+     */
+    risk: twoPhase || failed ? 'none' : (base?.risk ?? verification?.riskLevel ?? 'none'),
     verifyStatus: 'pending',
     aiFilled: true,
     /*
@@ -268,9 +317,16 @@ function applyRecognizedReply(
     assignSource: task.assignSource,
     periodStart: base?.periodStart ?? best?.periodStart,
     periodEnd: base?.periodEnd ?? best?.periodEnd,
-    recognitionPending: twoPhase,
+    /*
+     * 「识别中」标记**失败的那封不置真**（v3.29）—— 它的识别已经结束了（只是没成功），
+     * 置真会让这行在列表里永远显示「识别中」（阶段二是"成功才回填"，失败本就不会回填）。
+     */
+    recognitionPending: twoPhase && !failed,
     /* `bankItems`（询证事项逐项核对）由阶段二回填，两种类型在落库时都不写 */
-    verification: twoPhase ? undefined : (base?.verification ?? lookupVerification(task.confirmationNo, task.type)),
+    verification,
+    /* 识别失败标记 + 原因 —— 列表据此把那行标成「识别失败」并给「重新识别」 */
+    recognitionFailed: failed || undefined,
+    recognitionFailReason: failed ? task.failReason : undefined,
   }
   return { records: [...records, created], recordId }
 }
@@ -280,16 +336,64 @@ function findTask(state: AppState, taskId: string): RecognitionTask | undefined 
 }
 
 /**
+ * 这封函证的**全部检测项是否都跑完了**（v3.28 立，v3.29 改判据）。
+ *
+ * **判据**：单阶段类型（往来函证）—— 全部检测项**尘埃落定**即可（成功或失败都算，见 `stagesSettled`）；
+ * 两阶段类型（银行函证）—— 还必须**已经跑到阶段二并且阶段二也尘埃落定**。
+ *
+ * ## 为什么把闸加到这一层
+ *
+ * 原口径是「阶段一跑完就落库、行上标『识别中』、阶段二跑完再刷新结论」。用户看过实际界面后
+ * 判定这样不对：**「哪个函证完成智能识别，哪个函证的数据才会在下方展示，而非直接展示所有
+ * 上传的回函数据」** —— 半成品的行（结论还没出来、列上全是「识别中」）不该出现在列表里。
+ * 于是入表时机后移到「全部检测项跑完」，识别过程中的那一封改为在**列表页顶部的识别区**
+ * 逐封展示（见 `RecognitionProgressBoard`）。
+ *
+ * 这**不是**把 v3.27 的闸拆掉，而是在其之上再加一层：
+ * ① 未提交（`UploadBatch.committed !== true`）→ 一个字都不写；
+ * ② 已提交但没跑完 → 仍在写列表这件事上等着（识别照跑、进度照走）。
+ */
+function isFullyRecognized(task: RecognitionTask): boolean {
+  /* v3.29：判据由「成功」改为「**尘埃落定**」—— 失败的那封也要入表（见 `stagesSettled`） */
+  if (!stagesSettled(task)) return false
+  return TYPE_RULE[task.type].twoPhase ? task.phase === 2 : true
+}
+
+/**
+ * 这封函证的检测项**是否都已尘埃落定**（v3.29）—— 每一项要么 `done`、要么 `failed`，
+ * 没有还在跑的、也没有还没轮到的。
+ *
+ * ## 为什么把入表判据从「`status === 'success'`」改成它
+ *
+ * 旧判据的后果是**失败的那封永远进不了列表** —— 它只能一直挂在识别区里（识别区因此也
+ * 永远收不起来）。用户的要求是：「识别出错的回函数据，**也落入表单中，支持重新识别**」，
+ * 并且「不要阻塞，继续识别后面的内容」。
+ *
+ * 于是：**失败 = 这次识别的结果之一，不是"没有结果"**。失败的那封照样入表（行上标「识别失败」、
+ * 不写核验结论），「操作」列给「重新识别」—— 重跑时它会被撤出列表、回到识别区，跑完再入表。
+ *
+ * 与「半成品不进列表」并不矛盾：半成品是**还在跑**（有 waiting / running），
+ * 而这里要的是**跑完了、只是其中某项没成功**。
+ */
+function stagesSettled(task: RecognitionTask): boolean {
+  return !task.stages.some((s) => s.status === 'waiting' || s.status === 'running')
+}
+
+/**
  * 把某个任务的结果写入回函列表，并打上 applied 标记。
  *
- * 只有**归属已确定**的任务才会落库：往来函证在建批次时即确定（二维码精确命中），
- * 银行函证需 auto 档自动归属、或人工「确认归属 / 指定归属」后才确定。
+ * 只有**归属已确定**、**批次已提交**、且**全部检测项已跑完**的任务才会落库：
+ * · 归属 —— 往来函证在建批次时即确定（二维码精确命中），银行函证需 auto 档自动归属、
+ *   或人工「确认归属 / 指定归属」后才确定；
+ * · 批次已提交 —— 见 `UploadBatch.committed`（v3.27）；
+ * · 检测项跑完 —— 见 `isFullyRecognized`（v3.28）。
+ *
  * TICK / CONFIRM_ASSIGN / MANUAL_MATCH 三处共用本函数，保证「写入 + 标记」原子完成、不重复写入。
+ * 三道闸**都设在这里**而不是各调用点，是为了三条来路口径一致、不会漏掉一条。
  */
 function finalizeTask(state: AppState, taskId: string): AppState {
   /*
-   * ① **未提交的批次一律不落库**（v3.27）—— 闸设在这里而不是各调用点，是为了
-   * `TICK` / `CONFIRM_ASSIGN` / `MANUAL_MATCH` 三条来路口径一致、不会漏掉一条。
+   * ① **未提交的批次一律不落库**（v3.27）——
    * 「切分与归属决定的是**什么时候写入回函管理列表**」（见 `UploadBatch.committed`）。
    */
   const batch = state.batches.find((b) => b.tasks.some((t) => t.id === taskId))
@@ -298,13 +402,33 @@ function finalizeTask(state: AppState, taskId: string): AppState {
   const task = findTask(state, taskId)
   if (!task || task.applied || !task.assignSource) return state
   if (!task.confirmationNo || task.confirmationNo === '待指定') return state
+  /* ② **全部检测项跑完才落库**（v3.28）—— 半成品的行不进列表 */
+  if (!isFullyRecognized(task)) return state
+
+  /*
+   * 落库前先看这封函证**在列表里有没有**（v3.29）—— 决定用哪种动效：
+   * · **没有** ⇒ 这是"一条新的函证数据加入表单"，走**插入动效**（`insertedRowIds`）；
+   * · **已有** ⇒ 这是同一封函证的**又一次回函**，行不会新增，只是内容变了 ——
+   *   走 `flashRowId`（闪烁提醒"这一行变了"）。硬给它播插入动效是骗人的：
+   *   行在原地没动过，位置也没变。
+   */
+  const existed = state.records.some((r) => r.confirmationNo === task.confirmationNo)
 
   const { records, recordId } = applyRecognizedReply(state.records, task)
   const batches = state.batches.map((b) => ({
     ...b,
     tasks: b.tasks.map((t) => (t.id === taskId ? { ...t, applied: true, recordId } : t)),
   }))
-  return { ...state, records, batches, flashRowId: task.confirmationNo }
+  return {
+    ...state,
+    records,
+    batches,
+    flashRowId: task.confirmationNo,
+    insertedRowIds:
+      !existed && !state.insertedRowIds.includes(task.confirmationNo)
+        ? [...state.insertedRowIds, task.confirmationNo]
+        : state.insertedRowIds,
+  }
 }
 
 /**
@@ -420,21 +544,32 @@ function reducer(state: AppState, action: Action): AppState {
 
       /*
        * 三遍**幂等**处理 —— 顺序即语义，全部按类型规则查表判分支，不写内联类型判断：
-       *   ① 归属已确定的成功任务 → **先落库**（`applied` 门控保证只写一次）——
-       *      必须在启动阶段二**之前**执行：银行回函在阶段一完成时就该出现在列表上
-       *      并显示「识别中」，若先 `extendToPhase2` 会把状态打回 pending、落库被推迟到
-       *      阶段二完成，「识别中」态就不存在了；
+       *   ① **全部检测项跑完**的任务 → **落库**（`applied` 门控保证只写一次）——
+       *      闸门细节见 `finalizeTask` / `isFullyRecognized`（v3.28：银行要等阶段二也跑完，
+       *      列表里因此**不再有「识别中」的行**；v3.29：**失败的那封也算跑完** ——
+       *      带着失败标记入表，"操作"列可「重新识别」，不再永远挂在识别区里）；
        *   ② 阶段一完成且归属已确定 → 银行函证**再启动阶段二**（「先对应、后细查」的自动衔接）；
-       *   ③ 阶段二完成 → 回填核验数据并清「识别中」（`verificationApplied` 门控）。
+       *   ③ 阶段二完成 → 回填核验数据（`verificationApplied` 门控）。
+       *
+       * ② 必须先于 ① 生效：银行任务在阶段一 `success` 的那个 tick 里由 ② 打进阶段二
+       * （`status` 打回 `pending`），于是本 tick 的 ① 自然不满足 `isFullyRecognized` ——
+       * 落库被推到阶段二跑完那一 tick；届时 ① 与 ③ 在同一次 `next` 串联里先后执行，
+       * 核验数据随记录一起就位（`applyVerification` 依赖 `task.recordId`，必须在 ① 之后）。
        */
       allTasks
-        .filter((t) => t.status === 'success' && !!t.assignSource)
+        .filter((t) => stagesSettled(t) && !!t.assignSource)
         .forEach((t) => {
           next = finalizeTask(next, t.id)
         })
 
       allTasks
-        .filter((t) => TYPE_RULE[t.type].twoPhase && t.phase === 1 && t.status === 'success' && !!t.assignSource)
+        /*
+         * 阶段一**尘埃落定**就进阶段二（v3.29 由「阶段一成功」放宽到「落定」）——
+         * 阶段一某一项失败不该把「询证事项逐项核对」这些后面的事一起卡掉
+         * （用户：「不要阻塞，继续识别后面的内容」）。判决仍由最终状态承担：
+         * 任一项失败 ⇒ 整封为 `failed`，只是**跑完**这件事照常发生。
+         */
+        .filter((t) => TYPE_RULE[t.type].twoPhase && t.phase === 1 && stagesSettled(t) && !!t.assignSource)
         .forEach((t) => {
           next = startDetailPhase(next, t.id)
         })
@@ -509,6 +644,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, floatingVisible: action.visible }
     case 'CLEAR_FLASH':
       return { ...state, flashRowId: null }
+    case 'CLEAR_INSERTED':
+      return state.insertedRowIds.length ? { ...state, insertedRowIds: [] } : state
     case 'OPEN_ONBOARDING':
       return { ...state, onboardingVisible: true }
     case 'CLOSE_ONBOARDING':
@@ -518,6 +655,32 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, expressResult: action.result, expressOpen: true }
     case 'CLOSE_EXPRESS':
       return { ...state, expressOpen: false }
+
+    /**
+     * 采纳 / 不采纳某一项 AI 识别结论（v3.28）—— 列表「AI 核验事项」列那枚待办标签的落点。
+     *
+     * **只写 `aiReview`（"人对 AI 结论的表态"）与处理留痕，不动 `resultInfo`**：
+     * 表单最终值只能由人在「回函结果填写」页保存时写入（AI 不外写这条底线不变），
+     * 采纳的影响体现为那一页的**初值**（见 `config/aiReview.ts` 的 `aiReviewPrefill`）。
+     * 重复点同一状态即原样写回、时间更新 —— 那是"最近一次处理"的正确语义。
+     */
+    case 'REVIEW_AI_ITEM': {
+      const at = dayjs().format('YYYY-MM-DD HH:mm:ss')
+      return {
+        ...state,
+        records: state.records.map((r) =>
+          r.id === action.recordId
+            ? {
+                ...r,
+                aiReview: {
+                  ...r.aiReview,
+                  [action.key]: { status: action.status, by: CURRENT_USER, at },
+                },
+              }
+            : r,
+        ),
+      }
+    }
 
     /** 人工采纳系统建议的归属（confirm 档） */
     case 'CONFIRM_ASSIGN': {
@@ -704,23 +867,62 @@ function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'RETRY_TASK': {
-      const batches = state.batches.map((b) => ({
-        ...b,
-        status: b.status === 'done' ? ('running' as const) : b.status,
-        tasks: b.tasks.map((t) =>
-          t.id === action.taskId
-            ? {
-                ...t,
-                status: 'pending' as const,
-                needManual: false,
-                plannedFailure: undefined,
-                failReason: undefined,
-                stages: t.stages.map((s) => ({ ...s, status: 'waiting' as const, percent: 0 })),
-              }
-            : t,
-        ),
-      }))
-      return { ...state, batches, floatingVisible: true }
+      /*
+       * **重新识别**（v3.29 起这条不再只是识别区里失败行的按钮 —— 表格里失败的那一行也有它）。
+       *
+       * 四件事一起做，缺一件就不成立：
+       * ① **把任务重打回起点** —— 各检测项回到 `waiting`、清掉预设失败与原因，
+       *    否则重跑会在同一项上**立刻再失败一次**（`plannedFailure` 是演示注入的）；
+       * ② **阶段也退回阶段一** —— 两阶段类型若已在阶段二，只把 stages 重置为 waiting 是没用的：
+       *    `advanceBatch` 按 `t.phase` 分通道挑任务，`phase === 2` 的那封**永远不会被阶段一的
+       *    通道挑中**，于是它那几项会永远停在"待×××"。故这里砍掉阶段二追加的那些项并把
+       *    `phase` 退回 1，跑完后由 `startDetailPhase` 重新追加（既有机制，不必重写）。
+       * ③ **把已落库的那条记录撤下** —— 它正是要"重新识别"的数据，重跑期间不该还留在列表里
+       *    （与 v3.27「没识别完不写列表」同一条口径）；跑完会再次入表、并重播插入动效，
+       *    所以 `insertedRowIds` 里也要先摘掉它（否则第二次入表不会重新挂上动画类）。
+       * ④ **让批次重新跑起来** —— 批次多半已是 `done`，不打回 `running` 就没人推进它。
+       */
+      const target = findTask(state, action.taskId)
+      if (!target) return state
+      const phase1Count = makeStages(target.type, 1, target.detailPlan).length
+
+      const batches = state.batches.map((b) =>
+        b.tasks.some((t) => t.id === action.taskId)
+          ? {
+              ...b,
+              status: 'running' as const,
+              tasks: b.tasks.map((t) =>
+                t.id === action.taskId
+                  ? {
+                      ...t,
+                      status: 'pending' as const,
+                      phase: 1 as const,
+                      needManual: false,
+                      plannedFailure: undefined,
+                      failReason: undefined,
+                      /* 落库标记一并清掉，跑完会作为"新的一行"重新写入 */
+                      applied: false,
+                      recordId: undefined,
+                      verificationApplied: false,
+                      stages: t.stages
+                        .slice(0, phase1Count)
+                        .map((s) => ({ ...s, status: 'waiting' as const, percent: 0 })),
+                    }
+                  : t,
+              ),
+            }
+          : b,
+      )
+
+      return {
+        ...state,
+        batches,
+        records: target.recordId
+          ? state.records.filter((r) => r.id !== target.recordId)
+          : state.records,
+        insertedRowIds: state.insertedRowIds.filter((no) => no !== target.confirmationNo),
+        floatingVisible: true,
+      }
     }
 
     case 'SKIP_TASK': {

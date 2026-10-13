@@ -1,12 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   App,
-  Breadcrumb,
   Button,
   Col,
-  Dropdown,
   Empty,
   Input,
   Row,
@@ -20,7 +18,6 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import {
   CloudUploadOutlined,
-  DownOutlined,
   FileExcelOutlined,
   QuestionCircleOutlined,
   ReloadOutlined,
@@ -32,12 +29,15 @@ import { EXPRESS_IMPORT_RESULT } from '@/mock/expressImport'
 import { DEMO_LABEL, PRESET_BATCHES } from '@/mock/recognition'
 import { TYPE_RULE, consistencyOf, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
 import { ASSIGN_SOURCE_LABEL } from '@/services/bankMatch'
+import { AI_REVIEW_MATCH_CARRIER, aiReviewItemsOf, aiReviewStateOf } from '@/config/aiReview'
+import AiReviewCell from '@/components/AiReviewCell'
+import RecognitionProgressBoard from '@/components/RecognitionProgressBoard'
 import SplitEntryModal from '@/components/SplitEntryModal'
 import type { SplitFileInfo } from '@/components/SplitEntryModal'
 import BankUploadModal from '@/components/BankUploadModal'
 import type { BankUploadFile } from '@/components/BankUploadModal'
 import ExpressImportDrawer from '@/components/ExpressImportDrawer'
-import type { ConfirmationType, ReplyProgress, ReplyRecord, RiskLevel } from '@/types'
+import type { AiReviewKey, ConfirmationType, ReplyProgress, ReplyRecord, RiskLevel } from '@/types'
 import VerificationModal from '@/components/VerificationModal'
 import RecordDetailModal from '@/components/RecordDetailModal'
 import ReplyDocEntryModal from '@/components/ReplyDocEntryModal'
@@ -61,8 +61,9 @@ type ModalKind = 'view' | 'verify' | 'doc' | 'result'
  */
 const PROGRESS_HINT: Record<ReplyProgress, string> = {
   待确认快递信息: '确认即完成核验留痕',
-  待填写回函结果: 'AI 结论已带入表单，采纳或修改后保存即归档',
-  已完成: '如需修正，在「更多」里打开对应入口；改后仍保持「已完成」并记录修改人与时间',
+  待填写回函结果: '「AI 核验事项」里采纳的值已带入表单，采纳或修改后保存即归档',
+  /* v3.28：「更多」已移除 —— 步骤条本身随时可点开（回看 / 补正都走它） */
+  已完成: '如需修正，点本列的步骤条打开对应步骤；改后仍保持「已完成」并记录修改人与时间',
 }
 
 /* ------------------------------------------------------------------ */
@@ -147,7 +148,8 @@ const EMPTY_FILTER: FilterState = {}
  * · 页面头写明是哪一类，并给一个到另一类的切换（原型没有外层菜单，用切换控件代表另一个菜单）。
  */
 export default function ReplyList({ type }: { type: ConfirmationType }) {
-  const { modal, message } = App.useApp()
+  /* `modal` 随删除入口一并移除（v3.28）—— 列表已没有二次确认类动作 */
+  const { message } = App.useApp()
   const { state, dispatch } = useApp()
   const navigate = useNavigate()
   /** 本页是银行还是往来 —— 页面头 / 列标题 / 上传入口都据此变 */
@@ -163,8 +165,27 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     kind: ModalKind
     recordId: string
     note?: ReactNode
+    /**
+     * 从「AI 核验事项」列某一项打开核验详情时携带（v3.28）——
+     * 详情页据此**直接落在被点的那一项**上，省掉"进去再在页签里找一遍"。
+     */
+    itemKey?: AiReviewKey
   } | null>(null)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+
+  /*
+   * 新入表的行播完插入动效后**清掉标记**（v3.29）。
+   *
+   * 为什么必须有这一步、而不是让标记一直挂着：动效本身是一次性的（`animation` 播完即止），
+   * 但**不清理就没法再播**—— 同一封函证走「重新识别」会再次入表，那时 `insertedRowIds`
+   * 里若已有它，`row-insert` 类不会重新挂上，行就"悄悄出现"了。
+   * 清除放在**过渡结束后**（1600ms > CSS 里 900ms 的动效时长），避免动画途中被摘掉。
+   */
+  useEffect(() => {
+    if (!state.insertedRowIds.length) return
+    const t = window.setTimeout(() => dispatch({ type: 'CLEAR_INSERTED' }), 1600)
+    return () => window.clearTimeout(t)
+  }, [state.insertedRowIds, dispatch])
   /**
    * 「切分」两步弹窗（往来函证专属，v2.35）—— 与四个业务弹窗互斥。
    *
@@ -345,16 +366,6 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     setFilter(EMPTY_FILTER)
   }
 
-  /**
-   * 有批次在跑，或已有银行回函处于「识别中」（阶段二尚未回填）—— 两种都意味着列表还会自动刷新。
-   *
-   * **批次必须是「已提交」的**（v3.27）：未提交（用户还在归属界面、没点「确定」）时
-   * **没有任何结果会写进列表**，此时挂一句「识别中，结果将自动写入列表」是错的
-   * （用户退出归属界面后，列表上会出现一句永远等不到结果的提示）。
-   */
-  const recognizing =
-    state.batches.some((b) => b.committed && b.status !== 'done') ||
-    state.records.some((r) => isRecognitionPending(r))
   const activeRecord = state.records.find((r) => r.id === activeModal?.recordId)
   /** 关闭时把 key 切回 idle，内容组件随之卸载，避免下一条记录残留上一条的编辑状态 */
   const modalKey = (kind: ModalKind) =>
@@ -370,18 +381,12 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
    */
   const closeModal = () => afterPaint(() => setActiveModal(null))
 
-  const confirmDelete = (row: ConfirmationRow) =>
-    modal.confirm({
-      title: '确认删除该函证的回函记录？',
-      content:
-        row.history.length > 1
-          ? `函证编号 ${row.confirmationNo}（${row.entity}）共 ${row.history.length} 次回函记录，将一并删除且不可恢复。`
-          : `函证编号 ${row.confirmationNo}（${row.entity}）· 发函记录 ${row.main.sendRecordNo}，删除后不可恢复。`,
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: () => dispatch({ type: 'REMOVE_CONFIRMATION', confirmationNo: row.confirmationNo }),
-    })
+  /*
+   * 删除入口随「更多」一并移除（v3.28，用户要求"去掉更多和更多下的所有操作"）——
+   * 原先这里的 `confirmDelete` 与 `REMOVE_CONFIRMATION` 已无人调用。
+   * 动作本身在 store 里保留备用，将来若改用别处承载删除（如查看详情内的次要动作），
+   * 把这段确认弹窗接回去即可，不必重写。
+   */
 
   /* ------------------------------------------------------------------ */
   /* 「回函是否相符」取值 —— 列表列用                                     */
@@ -392,8 +397,10 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
    * · 人工填写过回函结果 → 以人工值为准；
    * · 银行函证 → 只看「回函 × 系统内询证事项逐项核对」（印章不作相符性依据）；
    * · 往来函证 → 印章落章区域判定（口径不变）。
-   * 返回 `byAi` 让标签能区分「AI 建议」与「已人工确认」——
-   * 这是「AI 只出建议、人工确认才算数」这条底线在列表上的表达。
+   * 返回值里仍有 `byAi`，但**列表的「回函是否相符」已不再用它**（v3.29）：
+   * 那一格现在只分「未确认 / 待人工判定 / 已确认后的结论」三态，不再靠 `✦` 与虚线教人读来源
+   * （用户：「是否相符，不需要 ai 标识和虚线，这个是否相符，就是用户确认之后的结果」）。
+   * `byAi` 仍供「回函结果填写」页等处使用。
    */
   const matchOf = evaluateMatch
 
@@ -440,15 +447,44 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
       key: 'match',
       width: 132,
       render: (_, row) => {
+        /*
+         * **识别失败**的行（v3.29）—— 不显示相符性结论：识别没过，结论无源，
+         * 硬套一个「相符 / 不相符」比留空更误导。用中性档（不是红档）：
+         * 红在站内是"判定了不相符"的意思，而这里恰恰是**没判出来**（见 `MatchTag` 的档位口径）。
+         */
+        if (row.main.recognitionFailed) {
+          return (
+            <StatusTag
+              tone="neutral"
+              tip={
+                <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                  <div>{row.main.recognitionFailReason ?? '识别失败'}</div>
+                  <div style={{ marginTop: 2 }}>
+                    该封未得出识别结论 —— 可在「操作」列点「重新识别」重跑，或直接人工核对
+                  </div>
+                </div>
+              }
+            >
+              识别失败
+            </StatusTag>
+          )
+        }
         const m = matchOf(row.main)
         return (
           <MatchTag
             matched={m.matched}
-            byAi={m.byAi}
             basis={m.basis}
             reasons={m.reasons}
             type={row.main.type}
             pending={isRecognitionPending(row.main)}
+            /*
+             * 这一格是「**用户确认之后的那个结果**」（v3.29）—— 故把承载相符性的那一项
+             * （往来＝印章识别 / 银行＝回函是否相符检测）在「AI 核验事项」里的处置结果传给它：
+             * 未处理 ⇒ 「未确认」，不采纳 ⇒ 「待人工判定」，采纳 ⇒ 如实给结论。
+             * 结果页自己填过 `resultInfo.matched` 也算确认过（人工值优先，与 `evaluateMatch` 一致）。
+             */
+            review={aiReviewStateOf(row.main, AI_REVIEW_MATCH_CARRIER[row.main.type])?.status}
+            filled={row.main.resultInfo?.matched != null}
           />
         )
       },
@@ -457,13 +493,45 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
       title: 'AI 风险',
       key: 'risk',
       width: 84,
-      render: (_, row) => (
-        <RiskTag
-          level={row.main.risk as RiskLevel}
-          reasons={row.main.verification?.riskReasons}
-          pending={isRecognitionPending(row.main)}
-        />
-      ),
+      render: (_, row) => {
+        /*
+         * **识别错误 / 未识别到结论**的行（v3.29，用户要求）——
+         * 用户原话：「AI 风险列还是保持不变，如果存在 AI 未识别到或者识别错误的，
+         * 则用灰色标签标注：**识别错误**」。
+         *
+         * 为什么**替代**而不是与风险标签并排：这种行的风险等级在 store 里记 `none`
+         * （识别没过，任何结论都无源，见 `finalizeTask`），渲染 `RiskTag` 会显示「未核验」——
+         * 读起来像"还没轮到人工看"，而事实是**这一封没认出来**；两枚标签并排则是一件事说两遍。
+         *
+         * 灰色（`neutral`）是刻意的：红在站内是"判定了高风险"的意思，而这里恰恰是**没判出来**；
+         * 与「回函是否相符」列那枚「识别失败」同一个档位口径（同为中性、同为"结论无源"），
+         * 只是各自回答本列的问题：那边答"相符性没有结论"，这边答"风险等级没有依据"。
+         */
+        if (row.main.recognitionFailed) {
+          return (
+            <StatusTag
+              tone="neutral"
+              tip={
+                <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                  <div>{row.main.recognitionFailReason ?? '未识别到该项结论'}</div>
+                  <div style={{ marginTop: 2 }}>
+                    本封识别未得出结果，不记风险等级 —— 可在「操作」列点「重新识别」重跑
+                  </div>
+                </div>
+              }
+            >
+              识别错误
+            </StatusTag>
+          )
+        }
+        return (
+          <RiskTag
+            level={row.main.risk as RiskLevel}
+            reasons={row.main.verification?.riskReasons}
+            pending={isRecognitionPending(row.main)}
+          />
+        )
+      },
     },
     /*
      * v2.37 移除「人工核验」列 —— 它与「回函进度」列是**同一事实的两种画法**：
@@ -476,50 +544,66 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
      * 核验人 / 核验时间**下沉到展开行的「留痕」区块**（审计要留痕，列表不必占一列）。
      */
 
-    /* ---------- 是否重新发函 ---------- */
+    /* ---------- AI 核验事项（v3.28 立，v3.29 定名） ---------- */
     /*
-     * 用户诉求（v2.26）：「还需要增加一列：是否重新发函。如果，有历史的回函记录，则就标记为重新发函。」
+     * 用户口径：「表单数据，需要增加一个 ai 识别字段区域，该区域包含 1、回函一致性识别
+     * 2、印章识别 3、手写体识别……每一条回函数据，是由多个需要用户完成的 todo 事项完成的，
+     * 完成所有的核验事项，这个回函数据任务就完成」。
      *
-     * **判定口径**：该函证**存在历史回函记录**（回函次数 > 1）→ 「重新发函」；只有一次回函 → 「未重新发函」。
-     * 它是**客观事实标记**、不是状态结论，故两个取值都走中性灰阶（不占用红 / 绿两档语义色），
-     * 差异由**文字**表达，而不是由色彩表达 —— 这一列回答的是「是 / 否」，不是「好 / 坏」。
+     * 位置：**紧邻「AI 风险」之后、回函进度之前** —— 阅读主线是「谁（被询证单位）→ 结论
+     * （相符 / 风险）→ **AI 给了什么、我处理了没有** → 下一步做什么」。放在进度之前，
+     * 是因为这些待办正是"往下走"之前必须先过的关；进度列只回答"流程走到哪一步"。
      *
-     * 悬停说明「共几次回函、本次是第几次」，避免留下一个「没有解释的标记」。
+     * 清单按类型取（往来三项 / 银行两项），见 `config/aiReview` —— 那里是单一数据源，
+     * 事项详情页与「回函结果填写」页读的是同一份，不各写一套。
      *
-     * 位置（用户指定）：**倒数第二个字段** —— 前面依次是「定位（谁）→ 结论（相符 / 风险 / 核验）」，
-     * 这个事实标记收在流程状态之前，不打断前面的阅读主线。
+     * **列名（v3.29 定稿「AI 核验事项」）** —— 这一格的名字改过三轮，第三轮才落定：
+     *
+     * ① 原名「AI 识别」：用户判定它"看不出这件事要人来定"——
+     *    「**AI 识别这个字段，这个名字，用户不能直接感知到这个是需要人去确定的**」；
+     * ② 改为「AI 待确认」：保留来源、点明要你点头，但只说了"机器给的东西要你确认"，
+     *    **没说完这件事的终局**；
+     * ③ 试过**随复核进度动态翻转**（未做完＝「AI 核验事项（待复核）」、全做完＝
+     *    「AI 核验事项（已人工复核 ✓）」，按本类全部函证的处置情况算）——
+     *    用户否掉：「**样子也不太对，列名还叫 AI 核验事项吧，然后也不动态变化了**」。
+     *    否得有道理：列名是**列的标识**，不是一枚会变的仪表 —— 表头随数据变脸，
+     *    用户两次看同一列会以为换了列；而且"做完没有"本就是**逐行**的事实，
+     *    行内的圆环（`AiReviewCell`）已经逐项说了，表头再汇总一次是第二处表达。
+     *
+     * 现名「**AI 核验事项**」：说明来源（AI 认出来的）、说明对象（核验事项）、
+     * 且**不预设**它已办还是待办 —— 状态由行内逐项的圆环表达，表头只管"这一列是什么"。
      */
     {
-      title: '是否重新发函',
-      key: 'resend',
-      /* 「未重新发函」比原先的「—」宽，列宽 104 → 112 */
-      width: 112,
-      render: (_, row) => {
-        const times = row.history.length
-        const resent = times > 1
-        /*
-         * v2.53：**两种取值都给标识**（用户要求）。
-         *
-         * 原先「否」是破折号 `—` —— 那是表格里表示「无数据 / 不适用」的记号，
-         * 而这里它实际表达的是「**否**」：语义完全不同，用户看到 `—` 无从判断
-         * 是「没有重发」还是「这列没这个数据」。同一列里一行有标签、一行只有记号，
-         * 结构也不齐。现在两个取值都是同一种标签，**读法统一为「是 / 否」**。
-         */
-        return (
-          <StatusTag
-            tone="neutral"
-            /* v2.45 精简：去掉「已被覆盖」的重复说明（展开行的行内标记已表达） */
-            tip={
-              resent
-                ? `该函证共 ${times} 次回函，本行呈现最新一次；历次回函在展开行`
-                : '本函证仅一次回函，未重新发函'
-            }
-          >
-            {resent ? '重新发函' : '未重新发函'}
-          </StatusTag>
-        )
-      },
+      title: 'AI 核验事项',
+      key: 'aiReview',
+      /*
+       * v3.29 由 236 加宽到 **300** —— 事项现在是**一行文字链**（「印章识别 / 发函回函一致性检测 /
+       * 手写体识别」，含间隔实测约 300px），用户明确要求两件事：「这里要**更宽一些**」、
+       * 「**不要换行，一行搞定**」。故给足宽度一次放完，不再靠折行救。
+       * （各列按比例分摊剩余宽度，见表格 `scroll` 处的说明。）
+       */
+      width: 300,
+      render: (_, row) => (
+        <AiReviewCell
+          record={row.main}
+          items={aiReviewItemsOf(row.main.type)}
+          onOpen={(itemKey) =>
+            setActiveModal({ kind: 'verify', recordId: row.main.id, itemKey })
+          }
+        />
+      ),
     },
+    /* ---------- 是否重新发函 —— 该列已移除（v3.28） ---------- */
+    /*
+     * 用户要求：「是否重新发函字段，不展示，因为下方的下拉内容，用户点开后可以看到是否重新发函」。
+     *
+     * 它表达的是「该函证有几次回函」这一**客观事实**，而展开行的「回函记录」表本就逐次列出
+     * （第 N 次 / 当前有效），v3.28 起又在「回函次序」列补了一枚「重新发函」标签 ——
+     * 信息一点没少，却省下 112px 的常驻列。
+     *
+     * 沿革（v2.26 立、v2.53 两种取值都给标识、v3.28 移除）：它一度是**倒数第二个字段**，
+     * 那是"列表要承担全部事实"的思路；现在列表承担的是**待办与结论**，事实类信息下沉到展开行。
+     */
     /* ---------- 回函进度 ---------- */
     /*
      * 位置（用户指定）：**倒数第一个字段、紧邻操作列**。
@@ -566,92 +650,62 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     },
     /* ---------- 操作 ---------- */
     /*
-     * 「查看 + 更多」—— **每行结构完全一致**（v2.52：主按钮已移除）。
+     * 「查看」—— **每行只剩这一个**（v3.28：连「更多」也去掉了）。
      *
-     * **为什么删主按钮**：它与「回函进度」列的步骤条是**同一动作的第二处入口**，
-     * 而步骤条表达得更完整（走到哪一步、还剩几步一眼可见）。同一件事在两处各给一个入口，
-     * 正是本项目一路在清理的重复（同 v2.45 的文案精简）。「下一步该做什么」的引导职责
-     * 现在**只在步骤条**：未完成的那一步加字重提示（`ProgressSteps` 的 `.is-current`）。
+     * 用户原话：「操作界面，去掉更多和更多下的所有操作」。那四项的去处各自都有落点，
+     * 所以不是"功能被删掉"，而是**同一件事不再有第二处入口**：
+     *   · **AI 核验** → 并进「AI 核验事项」列 —— 点某一项直接落在那一项上，比从下拉里先进门、
+     *     再在页签里找一项少两步；
+     *   · **回函快递信息 / 回函结果** → 「回函进度」列的步骤条本来就能点（v2.51 起，
+     *     v3.12 起两步各自独立、任何阶段都可进），下拉里那两个入口是它的第二处副本；
+     *   · **删除** → 一并去掉（用户明确要求"去掉更多下的所有操作"）。
+     *     动作 `REMOVE_CONFIRMATION` 在 store 里**保留备用**（将来若改用别处承载删除，不必重写）。
      *
-     * 于是每行只剩两个固定位置：
-     *   ① 查看 —— 只读看函证；
-     *   ② 更多 —— 其余入口（回函快递信息 / 回函结果 / AI 核验 / 删除）。
-     * 下拉里**不放「查看」** —— 外部已有，重复入口正是 v2.15 用户亲自否决过的问题。
-     *
-     * 下拉里**保留**「回函快递信息 / 回函结果」：它们是**补正入口** —— 已完成的行要改
-     * 已填内容属补正、不是流程推进，与步骤条「照着往下走」的职责不在同一层。
+     * 沿革：主按钮在 v2.52 移除（与步骤条重复）→ v3.28 把「更多」也移除，操作列由 120 收到 60 →
+     * **v3.29 收回 120**：识别失败的行要多一枚「重新识别」（那是它唯一的出路），60 放不下两枚。
      */
     {
       title: '操作',
       key: 'action',
-      /* v2.52：只剩两个链接按钮 —— 220 → 120（原宽度是为那个主按钮留的） */
+      /* 失败行要多一枚「重新识别」—— 60 → 120（两枚链接并排的实际宽度） */
       width: 120,
       fixed: 'right',
-      render: (_, row) => {
-        const m = row.main
-
-        /**
-         * 待核验且确有风险原因 → 需要去看依据的行，在「更多」按钮上给一句悬停说明。
-         * 入口虽然收进了下拉，但「哪几封必须看依据」不该完全无声；
-         * 不过**不再用图标标记** —— 操作列里的感叹号被判为视觉噪音，
-         * 风险等级已在「AI 风险」列用标签表达，此处不重复。
-         */
-        const needsVerifyAttention =
-          m.verifyStatus === 'pending' && (m.verification?.riskReasons.length ?? 0) > 0
-
-        return (
-          <Space size={2}>
+      render: (_, row) => (
+        <Space size={4}>
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: '0 2px' }}
+            onClick={() => setActiveModal({ kind: 'view', recordId: row.main.id })}
+          >
+            查看
+          </Button>
+          {/*
+           * 「重新识别」（v3.29）—— 只给**识别失败**的行。
+           *
+           * 它把这一封退回识别队列重跑（见 `RETRY_TASK`）：行**当即从列表撤下**、回到页面顶部的
+           * 识别区逐项再走一遍，跑完再作为"新的一行"入表并播插入动效。
+           * 撤下而不是原地刷新，是为了让"这行数据正在被重新识别"这件事没有歧义 ——
+           * 它的结论已经作废，留在列表里只会让人以为它还有效。
+           */}
+          {row.main.recognitionFailed && (
             <Button
               type="link"
               size="small"
-              style={{ padding: '0 4px' }}
-              onClick={() => setActiveModal({ kind: 'view', recordId: m.id })}
-            >
-              查看
-            </Button>
-
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'doc', label: '回函快递信息' },
-                  /*
-                   * **「回函结果」一律呈现（v3.12 放开）**。
-                   *
-                   * 此前在「待确认快递信息」阶段**刻意不呈现**它（不是禁用），理由写在这里：
-                   * 「SUBMIT_RESULT 会把核验状态置为已核验，从该状态进入等于绕过『确认回函快递信息』
-                   * 这个唯一的核验留痕入口（审计底线）」—— 那其实是**拿隐藏入口去规避一个耦合缺陷**。
-                   *
-                   * 本轮把耦合去掉了（`SUBMIT_RESULT` 不再碰 `verifyStatus`，两步各自独立），
-                   * 这条隐藏规则随之失去依据；且它本就与「进度列的步骤条随时可点开结果」自相矛盾
-                   * （同一动作两处行为不一致）。现在两处一致：**任何阶段都能进，且都不影响另一步的完成态**。
-                   */
-                  { key: 'result', label: '回函结果' },
-                  { key: 'verify', label: 'AI 核验', disabled: !m.verification },
-                  { type: 'divider' as const },
-                  { key: 'delete', label: '删除', danger: true },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'delete') confirmDelete(row)
-                  else setActiveModal({ kind: key as ModalKind, recordId: m.id })
-                },
+              style={{ padding: '0 2px' }}
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                const task = state.batches
+                  .flatMap((b) => b.tasks)
+                  .find((t) => t.recordId === row.main.id)
+                if (task) dispatch({ type: 'RETRY_TASK', taskId: task.id })
               }}
             >
-              <Button
-                type="link"
-                size="small"
-                style={{ padding: '0 4px' }}
-                title={
-                  needsVerifyAttention
-                    ? `存在 ${m.verification?.riskReasons.length ?? 0} 项风险提示，建议先核对依据`
-                    : undefined
-                }
-              >
-                更多 <DownOutlined style={{ fontSize: 10 }} />
-              </Button>
-            </Dropdown>
-          </Space>
-        )
-      },
+              重新识别
+            </Button>
+          )}
+        </Space>
+      ),
     },
   ]
 
@@ -729,6 +783,21 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
                       当前有效
                     </StatusTag>
                   )}
+                  {/*
+                   * 「重新发函」标签（v3.28）—— 列表上那列已移除（用户：「是否重新发函字段，
+                   * 不展示，因为下方的下拉内容，用户点开后可以看到是否重新发函」），
+                   * 于是这个事实在这里补上：**共几次回函**在表头上、「这一次算不算数」在上一枚标签，
+                   * 本枚回答的是它为什么会有第二次 —— 因为第一次的回函不足以为据。
+                   */}
+                  {times > 1 && (
+                    <StatusTag
+                      size="sm"
+                      tone="neutral"
+                      tip={`该函证共 ${times} 次回函，本行呈现最新一次；历次回函在展开行`}
+                    >
+                      重新发函
+                    </StatusTag>
+                  )}
                 </span>
                 <span className="num">{h.sendRecordNo}</span>
                 <span className="num">{h.replyDate ?? '—'}</span>
@@ -748,7 +817,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
                           : {
                               kind: 'view',
                               recordId: h.id,
-                              note: `这是第 ${seq} 次回函，已被后续回函覆盖，仅供参考；当前有效为第 ${times} 次。本页为只读查看，如需修改请从列表行操作区的「更多」进入。`,
+                              note: `这是第 ${seq} 次回函，已被后续回函覆盖，仅供参考；当前有效为第 ${times} 次。本页为只读查看；如需修改，请在列表行的「回函进度」列点开对应步骤（补正的是当前有效那一次）。`,
                             },
                       )
                     }
@@ -765,8 +834,9 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
           以下三片字段于 v2.38 移出展开行，去处都已另有（同一份信息只在一个地方承载）：
           · 函件与物流（发函方式 / 快递公司 / 快递单号 / 发函登记 / 回函登记）→「查看函证」工作区顶部基础信息，
             后三项那里本就有；快递单号另在本表的「快递单号」列；
-          · AI 核验结论（含「查看核验详情」按钮与「AI 识别中」提示行）→ 行操作区的「更多 → AI 核验」——
-            核验是「拿着结论去原件上核对依据」的动作，配着 AI 批注看才是它该有的样子；识别中态由「AI 风险」列表达；
+          · AI 核验结论（含「查看核验详情」按钮与「AI 识别中」提示行）→ 行内「AI 核验事项」列的事项标签
+            （v3.28：原先是从操作列「更多 → AI 核验」进、再在页签里找一项）——
+            核验是「拿着结论去原件上核对依据」的动作，配着 AI 批注看才是它该有的样子；
           · 核验 / 修改留痕 → 本表下方的一行小字（见下）。
         */}
 
@@ -827,21 +897,17 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
   return (
     <div className="page">
       {/*
-       * 页面头 —— 面包屑 + 标题 + 统计。
-       * 顶部导航条已删除（用户决定：集成进真实系统后那部分由外层提供），
-       * 于是「我在哪」与「今天还有几件事」两个问题都由这里回答。
+       * 页面头 —— 标题 + 统计。
+       *
+       * **面包屑已去掉**（v3.29，用户：「去掉这块的内容」）：原型顶部导航条早就删了
+       * （集成进真实系统后由外层提供），那三截「函证系统 / 回函管理 / 往来函证回函」
+       * 是照着 Ant Design Pro 详情页摆的**层级线索** —— 但本原型只有这两页、
+       * 且右侧就有「往来函证 / 银行函证」切换器，路径信息**三处重复**。
+       * 真实系统里"我在哪"由外层菜单回答，本页只需回答"这是哪一类、有几封"。
        * 统计从工具栏右端的 13px 灰字提升上来，也不再与分页重复。
        */}
       <div className="page-head">
         <div style={{ minWidth: 0 }}>
-          {/* 面包屑到"二级菜单"这一层 —— 两类各是一个菜单（v3.05） */}
-          <Breadcrumb
-            items={[
-              { title: '函证系统' },
-              { title: '回函管理' },
-              { title: isBank ? '银行函证回函' : '往来函证回函' },
-            ]}
-          />
           <h1 className="page-head__title">
             {isBank ? '银行函证回函' : '往来函证回函'}
             {/*
@@ -1060,16 +1126,29 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
           操作指引
         </Button>
 
-        {/* 统计已上移到页面头；此处只留「识别中」这一条**当下状态**提示 */}
-        <span style={{ marginLeft: 'auto' }}>
-          {recognizing && (
-            <span style={{ fontSize: 13, color: 'var(--c-primary)' }}>
-              ● 识别中，结果将自动写入列表
-            </span>
-          )}
-        </span>
+        {/*
+         * 「● 识别中，结果将自动写入列表」这一句**已移除**（v3.28）——
+         * 「哪几封在认、认到哪一项」由识别区逐封交代（`RecognitionProgressBoard`），
+         * 本行再挂一句笼统的"识别中"是同一件事的第二处表达（项目一路在清理这类重复）。
+         */}
         </div>
       </div>
+
+      {/*
+       * 智能识别区（v3.28 立题；v3.29 位置两改）—— 识别过程**长在主页面**上，
+       * 逐封一行：哪一封在认、认到哪一项。跑完一封即从本区消失、同时出现在下方表格里
+       * （入表闸在 store：`isFullyRecognized`）。有任务才出现、跑完自动淡出收起。
+       *
+       * **位置**：① 原在页面标题之下 → ② 用户要求「放在表单上，按钮的下方」，于是挂进了
+       * 筛选表单卡内 → ③ 用户再要求「不要放在按钮的同一个区域，要和按钮所在的区域、
+       * 表单所在的区域**分开**」⇒ 现在是**独立的一块**，夹在**表单卡**与**表格卡**之间。
+       *
+       * 三次改动的落点其实是同一句：它是**上传动作的结果**，与表单/按钮是"因"与"果"的关系，
+       * 所以既不能压在他们上面（顺序反了），也不能塞在他们里面（那是同一块区域里的两件事）。
+       * 单独成块之后，页面自上而下正好是：**表单（我要做什么）→ 识别（系统正在做什么）→
+       * 表格（做完的成果）**，三段各是各的。
+       */}
+      <RecognitionProgressBoard />
 
       {/* 表格 */}
       <div className="panel" style={{ padding: '4px 0' }}>
@@ -1078,13 +1157,31 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
           rowKey="confirmationNo"
           columns={columns}
           dataSource={data}
-          scroll={{ x: 1240 }}
+          /* 列宽合计：196+132+132+84+300+200+120 = 1164 —— 去掉「是否重新发函」112、
+             新增「AI 核验事项」（v3.28 建 236，v3.29 事项改一行文字链后加宽到 300）、
+             操作列 v3.28 收到 60、v3.29 失败行要「重新识别」又收回 120。
+             `scroll.x` 取 1324（> 合计 1124）只是给窄屏兜一个最小宽度；宽屏下浏览器会按比例
+             把剩余空间分给各列（1680 视口下实测 AI 核验事项列约 395px，正好一行放完全部事项）。 */
+          scroll={{ x: 1324 }}
           locale={{ emptyText: emptyNode }}
           /* 行首不再加「高风险」红色竖条（2026-09-20 用户要求去掉）：
              风险等级已由「AI 风险」列的状态标签表达，行首再画一条属于重复表达。
              `row-risk-high` 保留给明细表的「差异行 / 未匹配行」——
              那些表没有独立的风险列，需要左侧标记做视觉定位。 */
-          rowClassName={(row) => (state.flashRowId === row.confirmationNo ? 'row-flash' : '')}
+          /*
+           * 两种行上动效，含义不同（别混）：
+           * · `row-insert` —— **这一行是刚写入的**（v3.29）：滑入 + 主色高亮一闪，
+           *   让「识别完成一条 → 加入回函表单」这个动作看得见；
+           * · `row-flash`  —— **这一行变了**（阶段二回填结论后的闪烁提醒）。
+           */
+          rowClassName={(row) =>
+            [
+              state.insertedRowIds.includes(row.confirmationNo) ? 'row-insert' : '',
+              state.flashRowId === row.confirmationNo ? 'row-flash' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          }
           pagination={{
             size: 'small',
             pageSize: 10,
@@ -1124,7 +1221,13 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
       </div>
 
       {/* 四个业务入口统一为全屏弹窗，共用一个互斥状态 */}
-      <VerificationModal open={activeModal?.kind === 'verify'} record={activeRecord} onClose={closeModal} />
+      <VerificationModal
+        open={activeModal?.kind === 'verify'}
+        record={activeRecord}
+        /* 从列表事项标签点进来的：直接定位到那一项，并在页脚给「采纳 / 不采纳」（v3.28） */
+        initialKey={activeModal?.kind === 'verify' ? activeModal.itemKey : undefined}
+        onClose={closeModal}
+      />
       <RecordDetailModal
         open={activeModal?.kind === 'view'}
         record={activeRecord}

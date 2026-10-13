@@ -359,20 +359,31 @@ export function buildBatchA(): UploadBatch {
       },
     },
     {
-      /* 末段保留一个**失败演示**：面单页未识别出运单号，需人工核对面单 */
+      /*
+       * 中段保留一个**失败演示**（v3.29 换了失败点）——
+       *
+       * 原来失败的是「快递面单识别」，但 v3.29 起面单识别归**切分阶段**、不再是智能识别的
+       * 检测项，一个"面单没认出来"就不该把这封函证判成识别失败（那是切分那一步的事，
+       * 由归属界面的状态行交代）。
+       *
+       * 故失败点落在**整表比对**上 —— 这也正是真实环境里最容易失败的一项：它走 MinerU
+       * 整表识别，是整条链路里最慢、最容易超时的一环（见 `RECOVERY_ACTIONS.consistency`）。
+       */
       confirmationNo: 'whzf0010003',
       entity: '华泰证券股份有限公司',
       pageRange: '第 7-9 页',
       type: '往来函证',
-      plannedFailure: 'expressSheet',
-      failReason: '末页面单未识别出运单号（扫描模糊），需人工核对面单',
+      expressNo: 'SF7444706556801',
+      plannedFailure: 'consistency',
+      failReason: '回函纸张折痕导致整表识别超时，未能完成逐行比对 —— 可重新识别或转人工核对',
       stageDetails: {
         match: '二维码解析成功 → 归属函证 whzf0010003（第 1 次回函）',
-        consistency: '20 项科目逐行比对完成 · 全部相符',
         sealExists: '已盖章 · 公章',
         crossPageSeal: '检出 3 处骑缝章',
         sealNameMatch: '印章名称与被询证单位一致',
         handwriting: '已转录 · 位于「信息证明无误」区',
+        expressSheet: '运单号 SF7444706556801 已识别并关联',
+        /* 刻意**不给** `consistency` 的结论文案 —— 这一项在本段是失败演示 */
       },
     },
   ]

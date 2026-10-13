@@ -121,19 +121,45 @@ function PreviewPane({
  * **银行函证只有回函栏** —— 银行只上传回函件，发函数据（格式一 / 格式二）存于函证系统、
  * 没有文件；该分支查 `TYPE_RULE[type].sentFilePreview`，不写内联类型判断。
  *
- * **不含弹窗壳与关闭逻辑**：既可由全屏弹窗承载（列表「AI 核验」入口），
+ * **不含弹窗壳、页脚动作与关闭逻辑**：既可由全屏弹窗承载（列表「AI 核验事项」列点进来的详情），
  * 也可被结果填写页内嵌（看明细时不丢已填草稿）。
  *
- * **不承担确认职责**：本面板只是「看依据」，核验留痕统一在「确认回函快递信息」时打 ——
- * 同一件事不设两处签字，也就不存在「该点哪个」的困惑。
+ * **页脚那两个动作（采纳 / 不采纳识别数据）由承载者渲染**（v3.28）——
+ * 面板只负责"看依据"，并在切页签时用 `onItemChange` 把当前项上报给承载者，
+ * 由它决定动作作用于哪一项（见 `VerificationModal`）。这样内嵌场景天然没有动作、
+ * 也不会出现"两处都能采纳"的分裂。
+ *
+ * **核验留痕（核验人 / 核验时间）仍只在「确认回函快递信息」时打**，与本处的
+ * 「这一项 AI 结论我看过了」是两件事：前者是"这封回函我核验过了"，后者是"这条结论我处置了"。
  */
-export default function VerificationPanel({ record }: { record?: ReplyRecord }) {
+export default function VerificationPanel({
+  record,
+  initialKey,
+  onItemChange,
+}: {
+  record?: ReplyRecord
+  /**
+   * 打开时**直接落在哪一项**（v3.28）—— 由列表「AI 核验事项」列点进来的就是被点的那一项，
+   * 省掉"进去再在页签里找一遍"。取值是页签 key（`consistency` / `seal` / `handwriting`），
+   * 由承载者用 `config/aiReview` 的 `panelKey` 换算后传入。
+   */
+  initialKey?: string
+  /** 当前展开项变化时上报（v3.28）—— 承载者据此决定页脚「采纳 / 不采纳」作用于哪一项 */
+  onItemChange?: (key: string) => void
+}) {
   /** 回函栏的视图模式（受控）—— 核验页默认直接看批注，因为核验的就是 AI 判定依据 */
   const [previewMode, setPreviewMode] = useState<PreviewMode>('annotated')
-  /** 当前展开的核验项 */
-  const [activeKey, setActiveKey] = useState('consistency')
-  /** 只看一件：被放大的那一栏（null = 双栏均分） */
-  const [zoomed, setZoomed] = useState<'sent' | 'replied' | null>(null)
+  /** 当前展开的核验项 —— 缺省第一项；被指到哪一项就落在哪一项 */
+  const [activeKey, setActiveKey] = useState(initialKey ?? 'consistency')
+  /**
+   * 只看一件：被放大的那一栏（null = 双栏均分）。
+   *
+   * 初值随 `initialKey` 定 —— 与 `selectItem` 里那条「页签联动左侧预览」的规则一致：
+   * 看「两件对照」的项（一致性检测）要双栏，其余项看的是回函件本身、直接把回函栏放大。
+   */
+  const [zoomed, setZoomed] = useState<'sent' | 'replied' | null>(
+    initialKey && initialKey !== 'consistency' ? 'replied' : null,
+  )
   /**
    * 当前聚焦的表 + 定位令牌（v2.70）—— 点右侧「查看原件」时更新。
    * 令牌自增是为了**同一张表能反复点**：只改 `page` 时 React 不会重跑定位。
@@ -254,6 +280,8 @@ export default function VerificationPanel({ record }: { record?: ReplyRecord }) 
    */
   const selectItem = (key: string) => {
     setActiveKey(key)
+    /* 上报给承载者（v3.28）—— 页脚的「采纳 / 不采纳」始终作用于**当前这一项** */
+    onItemChange?.(key)
     setFocus(null)
     /*
      * **页签联动左侧预览的默认取景**（v3.04，用户要求）：

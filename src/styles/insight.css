@@ -33,7 +33,16 @@
 /* ① 场域：浅色 + 点阵                                                */
 /* ---------------------------------------------------------------- */
 
-.insight-stage {
+/*
+ * 语义别名（`--in-*`）挂在**两个**选择器上：
+ * · `.insight-stage` —— 本文件的场域（智能识别全屏界面）；
+ * · `.ai-surface` —— v3.29 新增：**列表页的识别区**（`RecognitionProgressBoard`）。
+ *   它不在识别界面那个场域里，却要复用本文件的微光文字 / 状态方块等原语，
+ *   而别名作用域在 `.insight-stage` 内部（先前只声明在那里）会取到未定义变量。
+ *   故把别名抽出来共用 —— 值仍全部指向既有 `:root` 令牌，不新增色值。
+ */
+.insight-stage,
+.ai-surface {
   /* —— 语义别名，全部指向既有令牌（不新增色值） —— */
   --in-bg: #fff;
   /* 卡片面：纯白 + 发丝线描边，与站内卡片同款 */
@@ -47,7 +56,10 @@
   --in-text-3: var(--c-text-3);
   --in-primary: var(--c-primary);
   --in-primary-dim: var(--c-primary-bg);
+}
 
+/* 场域本身 —— 只有识别界面要这几条（铺满全屏、白底、裁切） */
+.insight-stage {
   position: relative;
   height: 100%;
   background: var(--in-bg);

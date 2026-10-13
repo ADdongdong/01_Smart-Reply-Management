@@ -904,33 +904,24 @@ const VERIFY_HT_W: AiVerification = (() => {
  * 因此本数组长度 > 列表行数。
  *
  * id 命名：`{函证编号}-{第几次回函}`
+ *
+ * ## v3.29：种子数据收敛到 2 封（往来）
+ *
+ * 用户：「**未识别之前，表单是空的**，我要看见，识别完成一条数据，一条函证数据加入回函表单
+ * 的交互」，并拍板「清空或者，**留 2 条种子数据**即可」。原先 7 封（其中 2 封各 2 次回函）
+ * 正压在这句话上：进页面就是满满一屏，看不出"识别完一条、来一条"。
+ *
+ * 收敛口径 —— **只留"演示面"最宽的两条**，其余删掉（删掉的那些都能由上传演示批次重新长出来）：
+ * · `whzf0010005` —— **2 次回函**（第 1 次不相符、第 2 次为当前有效）：撑起展开行的
+ *   「第 N 次 / 当前有效」与「重新发函」标签；
+ * · `whzf0010004` —— **已完成 + 人工确认值齐全**（`expressInfo`）：撑起「回函快递信息」里
+ *   「已确认过的值回显、改后留痕」那条链路。
+ * 银行侧另有 `QS2024-031`（1 条，本来就只有它），撑起「待确认快递信息」这一档。
+ *
+ * 「待填写回函结果 / 已完成 / 待确认快递信息」三档因此不再在种子里齐备 ——
+ * 但缺的那一档**上传后马上就有**：新入表的行一律是「待确认快递信息」。
  */
 export const REPLY_RECORDS: ReplyRecord[] = [
-  /* ---------- 广东证券：仅 1 次回函，印章盖「信息不符」区 → 高风险，已人工核验 ---------- */
-  {
-    id: 'whzf0010006-1',
-    sendSeq: 1,
-    sendRecordNo: '20260810000006',
-    confirmationNo: 'whzf0010006',
-    entity: '广东证券股份有限公司',
-    type: '往来函证',
-    sendMethod: '邮寄发函',
-    sendDate: '2026-09-14 15:26:13',
-    replyDate: '2026-09-14 15:39:39',
-    expressCompany: '顺丰（系统对接）',
-    expressNo: 'SF7444706557147',
-    replyFile: '0813回函123_p6.pdf',
-    faceSheet: 'SF7444706557147.jpg',
-    replyProgress: '已完成',
-    hasReplied: true,
-    risk: 'high',
-    verifyStatus: 'verified',
-    verifiedBy: '张审计',
-    verifiedAt: '2026-09-14 16:02:11',
-    aiFilled: true,
-    verification: VERIFY_GD,
-  },
-
   /* ---------- 海通证券：2 次回函 → 以第 2 次为准（第 1 次回函不相符，故重新发函） ---------- */
   {
     id: 'whzf0010005-1',
@@ -1002,123 +993,6 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     periodEnd: '2024-03-31',
     bankItems: BANK_ITEMS_QS,
     verification: VERIFY_QS,
-  },
-
-  /* ---------- 华泰证券：1 次回函，全部相符、无任何提示 → 低风险待确认 ---------- */
-  {
-    id: 'whzf0010003-1',
-    sendSeq: 1,
-    sendRecordNo: '20260810000003',
-    confirmationNo: 'whzf0010003',
-    entity: '华泰证券股份有限公司',
-    type: '往来函证',
-    sendMethod: '邮寄发函',
-    sendDate: '2026-09-14 11:02:18',
-    replyDate: '2026-09-14 11:20:44',
-    expressCompany: '顺丰（系统对接）',
-    expressNo: 'SF528601590893',
-    replyFile: 'whzf0010003_reply.pdf',
-    faceSheet: 'SF528601590893.jpg',
-    replyProgress: '待确认快递信息',
-    hasReplied: true,
-    risk: 'low',
-    verifyStatus: 'pending',
-    aiFilled: true,
-    verification: VERIFY_ZX,
-  },
-
-  /* ---------- 中信证券：1 次回函，全部相符 → 低风险，已完成 ---------- */
-  {
-    id: 'whzf0010002-1',
-    sendSeq: 1,
-    sendRecordNo: '20260810000002',
-    confirmationNo: 'whzf0010002',
-    entity: '中信证券股份有限公司',
-    type: '往来函证',
-    sendMethod: '电子发函',
-    sendDate: '2026-09-13 17:41:52',
-    replyDate: '2026-09-14 09:15:33',
-    expressCompany: '顺丰（系统对接）',
-    expressNo: 'SF528601590877',
-    replyFile: '0813回函123_p1.pdf',
-    faceSheet: 'SF528601590877.jpg',
-    replyProgress: '已完成',
-    hasReplied: true,
-    risk: 'low',
-    verifyStatus: 'verified',
-    verifiedBy: '李复核',
-    verifiedAt: '2026-09-14 09:52:40',
-    aiFilled: true,
-    verification: VERIFY_ZX,
-  },
-
-  /* ---------- 广发证券：2 次回函 → 以第 2 次为准 ---------- */
-  {
-    id: 'whzf0010001-1',
-    sendSeq: 1,
-    sendRecordNo: '20260808000030',
-    confirmationNo: 'whzf0010001',
-    entity: '广发证券股份有限公司',
-    type: '往来函证',
-    sendMethod: '邮寄发函',
-    sendDate: '2026-09-08 10:12:40',
-    replyDate: '2026-09-09 14:22:31',
-    expressCompany: '顺丰（系统对接）',
-    expressNo: 'SF528601590833',
-    replyFile: 'whzf0010001_reply_v1.pdf',
-    faceSheet: 'SF528601590833.jpg',
-    replyProgress: '已完成',
-    hasReplied: true,
-    risk: 'high',
-    verifyStatus: 'verified',
-    verifiedBy: '张审计',
-    verifiedAt: '2026-09-09 15:40:02',
-    aiFilled: true,
-    verification: VERIFY_GD,
-  },
-  {
-    id: 'whzf0010001-2',
-    sendSeq: 2,
-    sendRecordNo: '20260810000001',
-    confirmationNo: 'whzf0010001',
-    entity: '广发证券股份有限公司',
-    type: '往来函证',
-    sendMethod: '邮寄发函',
-    sendDate: '2026-09-13 16:20:09',
-    replyDate: '2026-09-14 08:40:12',
-    expressCompany: '顺丰（系统对接）',
-    expressNo: 'SF528601590861',
-    replyFile: 'whzf0010001_reply.pdf',
-    faceSheet: 'SF528601590861.jpg',
-    replyProgress: '待填写回函结果',
-    hasReplied: true,
-    risk: 'medium',
-    verifyStatus: 'pending',
-    aiFilled: true,
-    verification: VERIFY_HT,
-  },
-
-  /* ---------- 招商证券：1 次回函，**几处金额不符** → 中风险，待人工确认 ---------- */
-  {
-    id: 'whzf0010007-1',
-    sendSeq: 1,
-    sendRecordNo: '20260809000014',
-    confirmationNo: 'whzf0010007',
-    entity: '招商证券股份有限公司',
-    type: '往来函证',
-    sendMethod: '邮寄发函',
-    sendDate: '2026-09-13 15:02:31',
-    replyDate: '2026-09-14 10:05:18',
-    expressCompany: '顺丰（系统对接）',
-    expressNo: 'SF7444706556912',
-    replyFile: 'whzf0010007_reply.pdf',
-    faceSheet: 'SF7444706556912.jpg',
-    replyProgress: '待确认快递信息',
-    hasReplied: true,
-    risk: 'low',
-    verifyStatus: 'pending',
-    aiFilled: true,
-    verification: VERIFY_ZX,
   },
 
   /* ---------- 国泰君安：1 次回函，全部相符 → 低风险，已完成 ---------- */

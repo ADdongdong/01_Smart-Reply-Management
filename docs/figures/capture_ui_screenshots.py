@@ -29,15 +29,23 @@
 3. **每张图都重新打开页面** —— 「回函归属」是全屏界面，`Escape` 关不掉，上一张图的界面会把
    后续步骤全挡住。`goto()` 重开最省心（每张多花 2 秒，值得）。
 
-## 两张全屏界面已经能自动抓了（v3.06 起）
+## 几个多步界面怎么走到的
 
-- **回函切分与归属**（`ui_assign` 往来 / `ui_assign_bank` 银行）—— 此前走不通：上传弹窗点「下一步」在 headless 里没推进到
+- **回函切分与归属**（`ui_assign` 往来 / `ui_assign_bank` 银行 / `ui_assign_bank_smart` 智能初稿）—— 此前走不通：上传弹窗点「下一步」在 headless 里没推进到
   归属界面（等文件解析），而当时的「演示数据」按钮**直接跳过归属**。**v3.06 起演示数据入口改走
-  「下一步」同一条路**（`START_BATCH` 会一并置 `assignOpen`）⇒ 点一下演示数据按钮就落在归属界面，
-  于是可自动抓。
-- **识别工作台 · 智能识别界面**（`ui_identify`）—— 它挂在列表右下角常驻的**识别进度卡**上：
-  归属界面点「确定」→ 进度卡出现 → 点「看识别过程」打开全屏界面。难点只是**要等识别推进到出结论**
-  （`.insight-card__owner` 出现，最多等 60s），不是点不开。
+  「下一步」同一条路**（`START_BATCH` 会一并置 `assignOpen`）⇒ 点一下演示数据按钮就落在归属界面；
+  智能初稿那条约 v3.26 起走弹窗里的「智能识别」按钮。
+- **列表页的「正在智能识别」区**（`ui_recog_board`）—— v3.28 起识别过程就在列表页上，
+  v3.29 起它**独立成块、位于输入卡与列表之间**：银行页 → 弹窗点「智能识别」→ 归属界面点「确定」→
+  回列表，等到「识别区还有行 **且** 表格已有行」再截（那一对照就是这张图的要点）。
+- **⚠️ 已退役的入口**：右下角识别进度卡与它点开的**全屏「智能识别」界面**在 v3.28 **不再挂载**
+  （识别过程搬到了列表页），故原 `ui_identify` / `ui_identify_card` 两张图**下线**；
+  识别依据现由「AI 核验事项」列的事项详情承担（`ui_verify_actions` / `ui_verify_consistency` /
+  `ui_verify_seal` / `ui_verify_handwrite`，入口都是 `open_chip`）。
+- **「更多」下拉已移除**（v3.28）——「回函快递信息 / 回函结果」改点**进度列的步骤条**（`open_step`），
+  「AI 核验」改点**事项文字链**（`open_chip`），删除入口不复存在（原 `ui_delete_confirm` 下线）。
+- **事项详情截"已采纳留痕"要走两步**（v3.29）—— 点「采纳识别数据」后弹窗**自动关闭**，
+  故先采纳、再点同一条事项重新打开，才拍得到页脚那行留痕。
 """
 import glob
 import os
@@ -154,42 +162,56 @@ def to_assign_bank_smart(page):
     page.wait_for_timeout(800)
 
 
-def to_identify(page):
-    """走到「智能识别」全屏界面（＝需求点「识别工作台」）。
+def to_recog_board(page):
+    """走到**列表页的「正在智能识别」区**（v3.28，取代原右下角悬浮卡 + 全屏识别界面；v3.29 起独立成块、位于输入卡与列表之间）。
 
-    路径：归属界面点「确定」→ 列表右下角出现识别进度卡 → 点「看识别过程」。
-    等到检测点卡头（`.insight-card__owner`）出现再截 —— 结论没出来时界面只有进度区。
+    路径：银行页 → 上传弹窗点「智能识别」→ 归属界面点「确定」→ 回列表，
+    此时识别区逐封列出 20 个任务、下方表格里是**已经跑完的那些**。
+    本图的要点正是这个对照，故**不能等它跑完**：等到"识别区还有行、表格已有行"就截。
     """
-    to_assign(page)
+    page.locator('button', has_text='上传银行函证回函').first.click()
+    page.locator('.ant-modal-content').wait_for(timeout=8000)
+    page.locator('.ant-modal-content button', has_text='智能识别').first.click()
+    page.locator('.assign-draftsrc', has_text='智能识别已应用').wait_for(timeout=20000)
     page.locator('button').filter(has_text=re.compile(r'^\s*确\s*定\s*$')).last.click()
-    page.wait_for_timeout(1500)
-    page.locator('button', has_text='看识别过程').first.click()
-    page.locator('.insight-card__owner').first.wait_for(state='visible', timeout=60000)
-    page.wait_for_timeout(1200)
-
-
-def to_identify_card(page):
-    """近景：智能识别界面里那张**结论建议卡**（风险等级标签 + 置信度 + 风险原因）。
-
-    整屏图铺到 15cm 后界面字只剩 5pt 上下，「建议卡」又在整屏图的下半截 ——
-    要看清卡头那枚风险等级标签与置信度胶囊，得单独出一张近景。
-    """
-    to_identify(page)
-    card = page.locator('.insight-card').filter(
-        has=page.locator('> .insight-card__owner')).first
-    card.wait_for(state='visible', timeout=30000)
-    card.scroll_into_view_if_needed()
+    page.locator('.recog-board').wait_for(timeout=15000)
+    # 等"上面还在认、下面已入表"同时成立再截（最多 90s）——
+    # 太早表格还是空的、太晚识别区已经收起来了，两个极端都拍不到这个对照。
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        board = page.locator('.recog-board__row').count()
+        rows = page.locator('.ant-table-row').count()
+        if 0 < board and rows > 1:
+            break
+        page.wait_for_timeout(1500)
+    # 把鼠标挪开再截：点过「确定」后光标常停在识别区某一行上，
+    # 触发检测项的悬停说明（一把浮层压在识别区上，图就废了）
+    page.mouse.move(1660, 940)
     page.wait_for_timeout(800)
 
+# 原 `to_identify` / `to_identify_card`（全屏「智能识别」界面与它的近景）已于 v3.28 移除 ——
+# 该界面**不再挂载**（识别过程搬到了列表页顶部的识别区，见 `to_recog_board`），
+# 组件本身保留备用；若将来恢复那个入口，把这两个函数按原实现加回来即可。
 
-def open_more(page, n, label):
-    """点第 n 行的「更多」→ 选下拉项。"""
-    page.locator('.ant-table-row').nth(n).locator('button', has_text='更多').first.click()
-    page.wait_for_timeout(1200)
-    item = page.locator('.ant-dropdown-menu-item:visible', has_text=label).first
-    item.wait_for(state='visible', timeout=8000)
-    item.click()
+
+def open_step(page, n, label):
+    """点第 n 行「回函进度」列的步骤条（v3.28：这是「回函快递信息 / 回函结果」的**唯一**入口）。
+
+    「更多」下拉在 v3.28 被移除，那两项改由进度列的步骤条承担（v2.51 起步骤名就可点）。
+    """
+    page.locator('.ant-table-row').nth(n).locator('.progress-steps__step', has_text=label).first.click()
     page.wait_for_timeout(2800)
+
+
+def open_chip(page, n, label):
+    """点第 n 行「AI 核验事项」列的某一项 → 打开该项的识别详情（v3.28）。
+
+    这是「AI 核验」的唯一入口：打开即**定位到被点的那一项**，页脚给「采纳 / 不采纳识别数据」。
+    v3.29 起事项是**一行文字链**（类名由 `.ai-review__chip` 改为 `.ai-review__link`）。
+    """
+    page.locator('.ant-table-row').nth(n).locator('.ai-review__link', has_text=label).first.click()
+    page.locator('.vw-right').first.wait_for(state='visible', timeout=12000)
+    page.wait_for_timeout(1800)
 
 
 STEPS = [
@@ -209,31 +231,39 @@ STEPS = [
      lambda p: p.locator('button', has_text='上传往来函证回函').first.click(), True),
     ('ui_upload_bank', '「上传银行函证回函」弹窗',
      lambda p: p.locator('button', has_text='上传银行函证回函').first.click(), True),
-    # 两张**全屏界面**（多步流程，见 to_assign / to_identify）—— 整屏截，不能只截弹窗元素
+    # 三张**全屏界面**（多步流程，见 to_assign / to_assign_bank*）—— 整屏截，不能只截弹窗元素
     ('ui_assign', '「回函切分与归属」全屏界面 · 往来侧初稿（按二维码切分成段 → 逐段归属）', to_assign, False),
     ('ui_assign_bank', '「回函切分与归属」全屏界面 · 银行侧初稿（4 个包裹：面单页已预切成独立面单段）',
      to_assign_bank, False),
-    ('ui_assign_bank_smart', '「回函切分与归属」全屏界面 · 银行侧「智能识别」初稿态（初稿即切分结果：8 段 / 4 包裹 / 归属与单号已带入）',
+    ('ui_assign_bank_smart', '「回函切分与归属」全屏界面 · 银行侧「智能识别」初稿态（初稿即切分结果：20 段 / 4 包裹 / 归属与单号已带入）',
      to_assign_bank_smart, False),
-    ('ui_identify', '「智能识别」全屏界面（按函证分组的检测点卡 + 建议卡）', to_identify, False),
-    # 近景（第 4 项传选择器 → 只截该元素）：建议卡在整屏图的下半截，字会糊
-    ('ui_identify_card', '近景：结论建议卡（风险等级标签 + 置信度胶囊 + 风险原因）',
-     to_identify_card, '.insight-card:has(> .insight-card__owner)'),
-    ('ui_verify_consistency', 'AI 核验 · 一致性检测', lambda p: open_more(p, 0, 'AI 核验'), True),
-    ('ui_express', '「回函快递信息」弹窗', lambda p: open_more(p, 0, '快递信息'), True),
-    ('ui_result', '「填写回函结果」页', lambda p: open_more(p, 0, '回函结果'), True),
-    ('ui_delete_confirm', '删除的二次确认', lambda p: open_more(p, 0, '删除'), True),
+    # v3.28：识别过程搬上列表页（`to_recog_board`）—— v3.29 起独立成块、位于输入卡与列表之间；
+    # 整屏截，要看"上面在认、下面已入表"的对照
+    ('ui_recog_board', '「正在智能识别」区（独立成块、位于输入卡与列表之间；逐封一行 + 与下方表格同屏对照）',
+     to_recog_board, False),
+    # v3.28：事项详情 = 点列表「AI 核验事项」某一项打开，页签落在该项、页脚给采纳 / 不采纳
+    # v3.29：点「采纳」后弹窗**自动关闭**，故采纳完再点一次同一项，才能拍到页脚那行留痕
+    ('ui_verify_actions', 'AI 核验事项详情（打开即定位被点项 + 页脚采纳 / 不采纳；截**已采纳**后的留痕态）',
+     lambda p: (open_chip(p, 0, '印章识别'),
+                p.locator('.ant-modal-wrap:visible .ant-modal-footer button',
+                          has_text=re.compile('^采纳识别数据$')).first.click(),
+                p.wait_for_timeout(1200),
+                open_chip(p, 0, '印章识别')), True),
+    ('ui_verify_consistency', 'AI 核验 · 发函回函一致性检测', lambda p: open_chip(p, 0, '发函回函一致性检测'), True),
+    ('ui_express', '「回函快递信息」弹窗', lambda p: open_step(p, 0, '快递信息'), True),
+    ('ui_result', '「填写回函结果」页', lambda p: open_step(p, 0, '回函结果'), True),
     # ⚠ 这一张**必须整屏截**：它是个抽屉 + 结果弹窗的组合，只截 `.ant-modal-content` 会超时
     ('ui_express_import', '快递数据导入结果',
      lambda p: p.locator('button', has_text='导入快递数据').first.click(), False),
 ]
 
-# 需要额外点一下页内模式的（在核验页里切换）
+# 需要额外点一下页内模式的（在核验页里切换）—— v3.28 起入口是「AI 核验事项」列的事项
 MODES = [('ui_verify_seal', 'AI 核验 · 印章识别', '印章识别'),
          ('ui_verify_handwrite', 'AI 核验 · 手写体识别', '手写体识别')]
 
 # 这几个文件要去**银行页**抓（其余都在往来页）—— v3.05 拆页之后必须各去各的
-BANK_STEPS = {'ui_reply_list_bank', 'ui_upload_bank', 'ui_assign_bank', 'ui_assign_bank_smart'}
+BANK_STEPS = {'ui_reply_list_bank', 'ui_upload_bank', 'ui_assign_bank', 'ui_assign_bank_smart',
+              'ui_recog_board'}
 
 
 def main():
@@ -250,7 +280,10 @@ def main():
             try:
                 page.goto(PAGE_BANK if name in BANK_STEPS else PAGE_WANGLAI,
                           wait_until='domcontentloaded')
-                page.wait_for_selector('text=回函管理', timeout=30000)
+                # 页面就绪判据用**页面头标题元素**，不用文字「回函管理」——
+                # v3.29 起那三截面包屑（函证系统 / 回函管理 / …）已从页面头移除，
+                # 拿它当判据会让每一张都 30s 超时（本轮踩到过）。
+                page.wait_for_selector('.page-head__title', timeout=30000)
                 page.wait_for_timeout(1800)
                 act(page)
                 page.wait_for_timeout(2600)
@@ -265,12 +298,10 @@ def main():
         for name, desc, mode in MODES:
             try:
                 page.goto(BASE, wait_until='domcontentloaded')
-                page.wait_for_selector('text=回函管理', timeout=30000)
+                page.wait_for_selector('.page-head__title', timeout=30000)
                 page.wait_for_timeout(1800)
-                open_more(page, 0, 'AI 核验')
-                ctl = page.locator('.ant-modal-content button', has_text=re.compile(mode))
-                ctl.first.click()
-                page.wait_for_timeout(2500)
+                # v3.28：直接点「AI 核验事项」列里那一项（打开即定位到它），不必再切页签
+                open_chip(page, 0, mode)
                 shot(page, name, '.ant-modal-content')
                 ok.append(name)
             except Exception as e:

@@ -15,7 +15,16 @@ import FullscreenModal from '@/components/FullscreenModal'
 import VerificationPanel from '@/components/VerificationPanel'
 import BankItemsTable from '@/components/BankItemsTable'
 import { AiChip, ResultBar } from '@/components/Marks'
-import type { BankItemGroup, BankItemRow, CrossSealChoice, SubjectEntry } from '@/types'
+import { StatusTag } from '@/components/StatusTag'
+import { aiReviewPrefill } from '@/config/aiReview'
+import type {
+  BankItemGroup,
+  BankItemRow,
+  CrossSealChoice,
+  ReplyRecord,
+  ReplyResultInfo,
+  SubjectEntry,
+} from '@/types'
 
 /**
  * 重算单行 —— 改了「回函值」就必须重算 `diff` 与 `match`，否则分组表自己不可信。
@@ -30,6 +39,27 @@ function recalcRow(row: BankItemRow, replyAmount: number | null): BankItemRow {
     diff,
     match: diff == null ? null : diff === 0,
   }
+}
+
+/**
+ * 列表「AI 核验事项」里**采纳过**的项 → 本页各字段的「已采纳」标记（v3.28）。
+ *
+ * 带出来的值需要在本页**看得出是采纳来的**：沿用本页既有的 `adopted` 机制
+ * （那条「采纳」按钮会因此显示「已采纳」），并驱动顶部那枚来源标签。
+ *
+ * **只有"本页还没保存过该字段"时才标** —— 已保存的值是人工上次的判断，
+ * 那时它出现在表单里是"回显"，不是"刚带出来"，标成采纳会误导读者的判断依据。
+ */
+function adoptedFromAiReview(record?: ReplyRecord): Record<string, boolean> {
+  const pre = record ? aiReviewPrefill(record) : {}
+  const saved = record?.resultInfo
+  const out: Record<string, boolean> = {}
+  if (pre.matched !== undefined && saved?.matched === undefined) out.matched = true
+  if (pre.sealConsistent !== undefined && saved?.sealConsistent === undefined) out.seal = true
+  if (pre.officialSeal !== undefined && saved?.officialSeal === undefined) out.official = true
+  if (pre.crossSeal !== undefined && saved?.crossSeal === undefined) out.cross = true
+  if (pre.diffDesc && !saved?.diffDesc) out.desc = true
+  return out
 }
 
 export default function ReplyResultModal({
@@ -174,28 +204,45 @@ export default function ReplyResultModal({
   )
 
   /**
-   * 表单初始值 = **已保存过的人工判断值**（若有）。
+   * **列表「AI 核验事项」里已采纳的值**（v3.28）—— 本页初值的第二来源。
+   * 映射规则见 `config/aiReview.ts` 的 `aiReviewPrefill`（与列表事项同一份声明，不另写一套）。
+   */
+  const aiPrefill: Partial<ReplyResultInfo> = record ? aiReviewPrefill(record) : {}
+  /** 其中**真正被带进本页**的字段（已保存值优先，故可能少于此） */
+  const fromAiReview = adoptedFromAiReview(record)
+  const fromAiReviewCount = Object.keys(fromAiReview).length
+
+  /**
+   * 表单初始值 = **已保存过的人工判断值优先 → 列表采纳值 → 空**。
    *
-   * 两层口径都要守住：
+   * 三层口径都要守住：
    *   ① 保存过的值优先回显 —— 否则「修改」变成每次都从 AI 建议重来；
-   *   ② 没保存过时**留空**，不默认等于 AI 建议 —— 那等于 AI 自动写入，
+   *   ② 没保存过时，**只带"人在列表上明确采纳过"的值**（v3.28）——
+   *      用户口径：「回函结果里的那些智能核验项目，如果在前面的字段中，已经选择了采纳或者不采纳，
+   *      就自动带出前面选择的结果」；**标记不采纳的一项一律不带**（那是"我看过、不采用"）；
+   *   ③ 都没有则**留空**，绝不默认等于 AI 建议 —— 那等于 AI 自动写入，
    *      与约束 C-03（AI 结果须经人工确认才写入）相悖。
    */
-  const [matched, setMatched] = useState<boolean | undefined>(record?.resultInfo?.matched)
-  const [diffDesc, setDiffDesc] = useState(record?.resultInfo?.diffDesc ?? '')
+  const [matched, setMatched] = useState<boolean | undefined>(
+    record?.resultInfo?.matched ?? aiPrefill.matched,
+  )
+  const [diffDesc, setDiffDesc] = useState(record?.resultInfo?.diffDesc ?? aiPrefill.diffDesc ?? '')
   const [sealConsistent, setSealConsistent] = useState<boolean | undefined>(
-    record?.resultInfo?.sealConsistent,
+    record?.resultInfo?.sealConsistent ?? aiPrefill.sealConsistent,
   )
   const [sealReason, setSealReason] = useState(record?.resultInfo?.sealReason ?? '')
   /** 是否为公章（非财务章等其他印章） */
   const [officialSeal, setOfficialSeal] = useState<boolean | undefined>(
-    record?.resultInfo?.officialSeal,
+    record?.resultInfo?.officialSeal ?? aiPrefill.officialSeal,
   )
   /** 是否有骑缝章 */
   const [crossSeal, setCrossSeal] = useState<CrossSealChoice | undefined>(
-    record?.resultInfo?.crossSeal,
+    record?.resultInfo?.crossSeal ?? aiPrefill.crossSeal,
   )
-  const [adopted, setAdopted] = useState<Record<string, boolean>>({})
+  /* 采纳标记：列表上采纳过的项一进来就显示「已采纳」，与本页现点「采纳」同形 */
+  const [adopted, setAdopted] = useState<Record<string, boolean>>(() =>
+    adoptedFromAiReview(record),
+  )
   /**
    * 完整核验明细（内嵌只读面板）。
    * 刻意**不走列表页的互斥弹窗状态** —— 若跳转到「AI 核验」弹窗，本弹窗会被卸载，
@@ -374,6 +421,21 @@ export default function ReplyResultModal({
                 <span className="muted" style={{ fontSize: 12 }}>
                   默认不填入表单，采纳后仍可修改
                 </span>
+                {/*
+                  来源标签（v3.28）—— 说明"表单里那几个值不是凭空来的，是你在列表上采纳过的"。
+                  用户口径：「回函结果里的那些智能核验项目，如果在前面的字段中，已经选择了采纳……
+                  就自动带出前面选择的结果」。带出来后**仍可改**（这里是初值，不是锁定）。
+                */}
+                {fromAiReviewCount > 0 && (
+                  <StatusTag
+                    ai
+                    size="sm"
+                    tone="primary"
+                    tip={`已按你在列表「AI 核验事项」里的采纳结果带入（${fromAiReviewCount} 项）；不采纳的项不会带值，带进来的也仍可修改`}
+                  >
+                    已带出列表采纳的 {fromAiReviewCount} 项
+                  </StatusTag>
+                )}
               </div>
 
               {/* 相符性 —— 往来按印章落章区域；银行按询证事项逐项核对（依据见 evaluateMatch） */}

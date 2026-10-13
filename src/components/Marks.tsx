@@ -240,7 +240,7 @@ export function ProgressSteps({
 /* ------------------- 回函是否相符 ------------------- */
 
 /**
- * 「回函是否相符」标签 —— 列表列专用（v2.25）。
+ * 「回函是否相符」标签 —— 列表列专用（v2.25 立，v3.29 改口径）。
  *
  * **判定口径（业务硬规则，不可违背）**：判定本身已收敛到
  * `services/replyRule.ts` 的 `evaluateMatch` 单一出口，本组件只负责展示：
@@ -248,24 +248,35 @@ export function ProgressSteps({
  * · 银行函证 —— **只看询证事项逐项核对**（有差异即判不相符），印章不作相符性依据；
  * · 人工填写过回函结果后（`resultInfo.matched`），**以人工值为准**。
  *
- * **为什么必须区分来源**：项目底线是「AI 只出建议、人工确认才算数」。
- * 未人工填写时带 `✦` 前缀与「AI 建议」说明，避免读者把 AI 结论误当成已确认的结论。
+ * ## v3.29：这一格是「**用户确认之后的那个结果**」，不再带任何 AI 标记
  *
- * 视觉口径与 `RiskTag` 一致（v2.23）：**浅底无边框 + 深档语义色文字 + 字重 500**；
- * 「无法判定」走中性灰 —— 它不是结论，只是一种未知。
+ * 用户原话：「**是否相符，不需要 ai 标识和虚线**，这个是否相符，就是**用户确认之后的结果**，
+ * 在未确认之前，这里标识为**未确认**就行」。
+ *
+ * 于是把 v2.25 起的「`✦` + 虚线框 = AI 建议、实线 = 已人工确认」那套**整套去掉**：
+ * 结论要么是用户认过的，要么根本还没结论 —— 两种状态各自有名字，不需要再教用户读边框样式。
+ *
+ * 三态（`review` 为承载相符性的那一项在「AI 核验事项」里的处置结果，见 `config/aiReview`）：
+ * · **未确认**（那项还没处理、结果页也没填过）→ 中性「未确认」；
+ * · **待人工判定**（那项被标记「不采纳」）→ 中性 —— AI 的结论人没收，相符性得由人在
+ *   「回函结果填写」页给；
+ * · **已确认**（采纳了那项，或结果页填过 `matched`）→ 如实给「相符 / 不相符 / 无法判定」。
+ *
+ * 视觉口径与 `RiskTag` 一致（v2.23）：**浅底无边框 + 深档语义色文字 + 字重 500**（列表里的
+ * 标签是"结论徽标"、与整页一致）；「未确认 / 待人工判定 / 无法判定」走中性灰 ——
+ * 它们都**不是结论**，只是"还没有结论"。
  */
 export function MatchTag({
   matched,
-  byAi,
   basis,
   reasons,
   type,
   pending,
+  review,
+  filled,
 }: {
   /** 相符 = true；不相符 = false；无法判定 = null */
   matched: boolean | null
-  /** 是否为 AI 建议（回函结果尚未人工填写） */
-  byAi?: boolean
   /** 一句话依据，如「印章落于「信息证明无误」区」 */
   basis?: string
   /** 不相符时的原因 / 差异说明（与「AI 风险」列一致：只用悬停，不加图标） */
@@ -275,27 +286,38 @@ export function MatchTag({
   /**
    * AI 识别中（v2.28 银行函证两阶段）—— 渲染中性「识别中」。
    * 与「无法判定」的区分：识别中是「数据还没就绪」，无法判定是「结论是未知、待人工」。
-   * 本入参**不改变** `{ matched, byAi, basis, reasons }` 的语义契约。
    */
   pending?: boolean
-}) {
   /**
-   * 档位与「是否 AI 产出」分两位表达：
-   * · `tone` 讲结论（相符 / 不相符 / 无法判定）；
-   * · `ai` 讲来源（尚未经人工确认）—— 走虚线框 + `✦`，与人工确认值可辨。
-   * 「无法判定」不加 AI 标记：那时还没有结论，谈不上「建议值」。
+   * **承载相符性的那一项在「AI 核验事项」里的处置结果**（v3.29）——
+   * 往来 = 印章识别、银行 = 回函是否相符检测（见 `AI_REVIEW_MATCH_CARRIER`）。
+   * `undefined` = 还没处理。
    */
-  const cfg: { text: string; tone: TagTone; ai: boolean } = pending
-    ? { ...PENDING_CFG, ai: false }
-    : matched === true
-      ? { text: '相符', tone: 'low', ai: Boolean(byAi) }
-      : matched === false
-        ? { text: '不相符', tone: 'high', ai: Boolean(byAi) }
-        : { text: '无法判定', tone: 'neutral', ai: false }
+  review?: 'adopted' | 'ignored'
+  /** 是否已在「回函结果填写」页人工填过相符性（`resultInfo.matched`）—— 那也是"确认过" */
+  filled?: boolean
+}) {
+  /** 人已经认过这个结论：采纳了承载项，或在结果页自己填过 */
+  const confirmed = review === 'adopted' || filled === true
+  const cfg: { text: string; tone: TagTone } = pending
+    ? PENDING_CFG
+    : review === 'ignored'
+      ? { text: '待人工判定', tone: 'neutral' }
+      : !confirmed
+        ? { text: '未确认', tone: 'neutral' }
+        : matched === true
+          ? { text: '相符', tone: 'low' }
+          : matched === false
+            ? { text: '不相符', tone: 'high' }
+            : { text: '无法判定', tone: 'neutral' }
 
   const tips: string[] = []
   if (pending) {
     tips.push(RECOGNIZING_HINT)
+  } else if (review === 'ignored') {
+    tips.push('你在「AI 核验事项」里标记了不采纳该项识别数据 —— 相符性以「回函结果填写」页的人工判断为准')
+  } else if (!confirmed) {
+    tips.push('待确认 —— 相符性以你在「AI 核验事项」里确认的结论为准；确认后这里才显示结果')
   } else if (matched === null) {
     /* 无法判定的归因必须与该类型的相符性判据一致 —— 银行函证不得归因到印章落章区域 */
     tips.push(
@@ -303,10 +325,12 @@ export function MatchTag({
         ? 'AI 未能完成询证事项逐项核对，无法自动判定 —— 待人工判定'
         : 'AI 未能识别印章落章区域，无法自动判定 —— 待人工判定',
     )
-  } else if (byAi) {
-    tips.push('✦ AI 建议 —— 尚未经人工确认，以「填写回函结果」时确认的结论为准')
   } else {
-    tips.push('已人工确认（回函结果填写）')
+    tips.push(
+      review === 'adopted'
+        ? '已确认 —— 你在列表「AI 核验事项」里采纳了这一项的识别数据'
+        : '已确认 —— 你在「回函结果填写」页填写了相符性',
+    )
   }
   if (basis) tips.push(`依据：${basis}`)
   if (reasons?.length) tips.push(...reasons.map((r) => `· ${r}`))
@@ -314,8 +338,6 @@ export function MatchTag({
   return (
     <StatusTag
       tone={cfg.tone}
-      ai={cfg.ai}
-      mark={cfg.ai ? '✦' : undefined}
       tip={
         <div style={{ fontSize: 13, lineHeight: 1.8 }}>
           {tips.map((t) => (
