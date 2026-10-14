@@ -1,10 +1,11 @@
-import { AiChip } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
 
 /**
- * 建议卡（v2.57）—— 以「AI 建议 + 置信度」呈现识别结论。
+ * 建议卡（v2.57）—— 以「AI 建议」呈现识别结论。
  *
- * 形态取自 beautifului.dev 的 **Recommendation Card**（建议 + 置信度条 + 动作）。
+ * 形态取自 beautifului.dev 的 **Recommendation Card**（建议 + 置信度条 + 动作）——
+ * 其中**置信度那一枚胶囊已于 2026-10-14 移除**（用户：「去掉所有的置信度」），
+ * 卡片此后只讲「结论是什么、依据是什么、需不需要人工核验」。
  *
  * ## 为什么必须标明「建议」
  *
@@ -28,8 +29,6 @@ export function RecommendationCard({
   tone,
   /** 一行依据摘要 */
   basis,
-  /** 置信度（0–1）；低于 0.9 转风险红档 */
-  confidence,
   /** 风险原因等补充行 */
   reasons,
   /** 风险等级标签文字（高风险 / 中风险 / 低风险 / 待人工判定）—— 卡头右侧彩色标签（v3.14，v3.16 改标签） */
@@ -41,7 +40,6 @@ export function RecommendationCard({
   verdict: string
   tone: 'high' | 'low' | 'neutral'
   basis?: string
-  confidence?: number
   reasons?: string[]
   riskLabel?: string
   riskTone?: 'high' | 'medium' | 'low' | 'neutral'
@@ -96,24 +94,6 @@ export function RecommendationCard({
           <span style={{ fontSize: 12, color: 'var(--in-text-2)', minWidth: 0 }}>{basis}</span>
         )}
       </div>
-
-      {/*
-       * 置信度 —— **彩色胶囊**（v3.13，用户要求：「这个置信度进度条，根本看不见进度，都是灰色的，
-       * 要么改成明显的颜色，要么改成彩色的标签，标签内是文字+置信度百分比」）。
-       *
-       * 原进度条为什么"全灰"：填充元素是个 `<span>`（**inline**），而 `width` / `height`
-       * 对 inline 元素**不生效** ⇒ 填充宽度恒为 0，轨道那条 8% 灰底就成了唯一的可见部分。
-       * （真要留进度条，一行 `.confidence__fill { display: block }` 即可；本条已改走胶囊形态。）
-       *
-       * 胶囊是**项目既有件** `AiChip` —— 与「回函结果填写」页的 AI 结论用的是同一个，
-       * 文字与百分比同处一个标签内、低置信度走红档，比一条 6px 细线更经得起扫视，
-       * 也免了"条 + 百分比"两处信息各说一半。
-       */}
-      {confidence != null && (
-        <div style={{ marginTop: 14 }}>
-          <AiChip confidence={confidence} label="置信度" />
-        </div>
-      )}
 
       {reasons && reasons.length > 0 && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 5 }}>

@@ -4,7 +4,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { FileSearchOutlined } from '@ant-design/icons'
 import type { ConsistencyTable, ConsistencyTableRow } from '@/types'
 import { compareCell, parseAmount, type CellState } from '@/utils/consistency'
-import { AiChip, ResultBar } from '@/components/Marks'
+import { ResultBar } from '@/components/Marks'
+import { AiResultHead } from '@/components/ManualConfirm'
 
 /** 视角：全部数据表格 / 只看有差异的表 */
 type ViewKey = 'all' | 'diff'
@@ -57,15 +58,21 @@ interface AlignedTable {
  *    因此「结论条说几项不符」与「表里框了几处」必然一致。
  *
  * 差异是**客观事实**（回函金额与发函底稿对不上），不需要逐行采纳，故不设操作列；
- * 差异说明的去向是「回函结果填写」页，这里只用结论条点一句。
+ * 差异说明的去向是「回函结果填写」页的「回函结果不相符处的描述」。
+ *
+ * ⚠️ **本页不设人工确认列**（v3.35，用户口径：「去掉这部分内容」）：核验动线里写这句说明的地方
+ * 在别处 —— 往来是「手写体识别」页（不符说明写的正是原件上手写的那段话），
+ * 银行是「回函是否相符检测」页（银行不做手写体识别）。本页只做"AI 逐格比对、把差异标出来"。
  */
 export default function ConsistencyDiff({
   tables,
-  confidence,
   onFocusTable,
 }: {
   tables: ConsistencyTable[]
-  confidence: number
+  /*
+   * 原有一个 `confidence: number`（工具行右侧那枚「整体置信度 AI 92%」胶囊的数据源），
+   * 2026-10-14 用户「去掉所有的置信度」时随胶囊一起取消 —— 调用处不再传。
+   */
   /**
    * 点某张表的「查看原件」（v2.70）—— 把该表回传给调用方，
    * 由调用方驱动左侧「发函用印件 / 回函件」两栏同时跳到该表所在页。
@@ -88,6 +95,9 @@ export default function ConsistencyDiff({
 
   return (
     <div>
+      {/* AI 侧：只逐格比对、把差异标出来 */}
+      <AiResultHead note="逐表逐格与发函底稿对照" />
+
       {/* ① 结论条 —— 只讲结果，不讲比对实现方式 */}
       <ResultBar
         status={diffCount ? 'risk' : 'ok'}
@@ -96,14 +106,10 @@ export default function ConsistencyDiff({
             ? `检出 ${diffCount} 项金额不符（共核对 ${compared} 项）`
             : `${compared} 项金额与发函底稿全部一致`
         }
-        detail={
-          diffCount
-            ? '差异单元格已在下方逐表框出；差异说明在「回函结果填写」页填写'
-            : undefined
-        }
+        detail={diffCount ? '差异单元格已在下方逐表框出' : undefined}
       />
 
-      {/* ② 工具行 —— 视角切换 + 整体置信度 */}
+      {/* ② 工具行 —— 视角切换（右侧原有「整体置信度 AI xx%」胶囊，2026-10-14 移除） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <Segmented
           size="small"
@@ -114,12 +120,6 @@ export default function ConsistencyDiff({
             { label: `仅看差异 ${diffTables.length} 张表`, value: 'diff' },
           ]}
         />
-        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="muted" style={{ fontSize: 13 }}>
-            整体置信度
-          </span>
-          <AiChip confidence={confidence} label="AI" />
-        </span>
       </div>
 
       {/* ③ 逐表并排对比 */}

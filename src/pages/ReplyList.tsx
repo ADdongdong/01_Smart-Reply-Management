@@ -28,21 +28,27 @@ import { useApp } from '@/store/AppStore'
 import { EXPRESS_IMPORT_RESULT } from '@/mock/expressImport'
 import { DEMO_LABEL, PRESET_BATCHES } from '@/mock/recognition'
 import { TYPE_RULE, consistencyOf, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
-import { ASSIGN_SOURCE_LABEL } from '@/services/bankMatch'
-import { AI_REVIEW_MATCH_CARRIER, aiReviewItemsOf, aiReviewStateOf } from '@/config/aiReview'
+import { AI_REVIEW_MATCH_CARRIER, aiReviewStateOf } from '@/config/aiReview'
+import { replyTaskEntryPanelKeyOf } from '@/config/replyTasks'
 import AiReviewCell from '@/components/AiReviewCell'
-import RecognitionProgressBoard from '@/components/RecognitionProgressBoard'
+import { SmartCheckProgress, SmartCheckStatus } from '@/components/SmartCheckCells'
 import SplitEntryModal from '@/components/SplitEntryModal'
 import type { SplitFileInfo } from '@/components/SplitEntryModal'
 import BankUploadModal from '@/components/BankUploadModal'
 import type { BankUploadFile } from '@/components/BankUploadModal'
 import ExpressImportDrawer from '@/components/ExpressImportDrawer'
-import type { AiReviewKey, ConfirmationType, ReplyProgress, ReplyRecord, RiskLevel } from '@/types'
+import type {
+  AiReviewKey,
+  ConfirmationType,
+  RecognitionTask,
+  ReplyProgress,
+  ReplyRecord,
+} from '@/types'
 import VerificationModal from '@/components/VerificationModal'
 import RecordDetailModal from '@/components/RecordDetailModal'
 import ReplyDocEntryModal from '@/components/ReplyDocEntryModal'
 import ReplyResultModal from '@/components/ReplyResultModal'
-import { MatchTag, ProgressSteps, RISK_MAP, RISK_ORDER, RiskTag } from '@/components/Marks'
+import { MatchTag, ProgressSteps } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
 import { afterPaint } from '@/utils/afterPaint'
 
@@ -61,7 +67,7 @@ type ModalKind = 'view' | 'verify' | 'doc' | 'result'
  */
 const PROGRESS_HINT: Record<ReplyProgress, string> = {
   待确认快递信息: '确认即完成核验留痕',
-  待填写回函结果: '「AI 核验事项」里采纳的值已带入表单，采纳或修改后保存即归档',
+  待填写回函结果: '「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档',
   /* v3.28：「更多」已移除 —— 步骤条本身随时可点开（回看 / 补正都走它） */
   已完成: '如需修正，点本列的步骤条打开对应步骤；改后仍保持「已完成」并记录修改人与时间',
 }
@@ -132,8 +138,6 @@ interface FilterState {
   keyword?: string
   sendMethod?: string
   progress?: string
-  /** 风险筛选 = 风险等级取值（高风险 / 中风险 / 低风险 / 未核验），与「AI 风险」列同一套等级（v3.20） */
-  risk?: RiskLevel
 }
 
 const EMPTY_FILTER: FilterState = {}
@@ -166,10 +170,12 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     recordId: string
     note?: ReactNode
     /**
-     * 从「AI 核验事项」列某一项打开核验详情时携带（v3.28）——
-     * 详情页据此**直接落在被点的那一项**上，省掉"进去再在页签里找一遍"。
+     * 打开核验详情时**落在哪一页签**（v3.28 立；v3.31 起由列表那一格传入"第一个未完成的事项"；
+     * v3.33 起改传**页签 key**）—— 因为待办现在也包含"回函结果必填项"，而它落在核验页
+     * 第 4 项（「回函结果补充」）而不是任何一个 AI 页签上，见 `replyTaskEntryPanelKeyOf`。
+     * 详情页据此直接落在它上面，省掉"进去再在页签里找一遍"。
      */
-    itemKey?: AiReviewKey
+    panelKey?: string
   } | null>(null)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
@@ -316,6 +322,27 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
 
   const total = rows.length
 
+  /*
+   * **记录 → 识别任务**（2026-10-14）—— 「智能核查状态 / 智能核查进度」两列要读**过程**
+   * （任务上的 `stages`），而记录上只有**事实**（结论、留痕）。两者的桥是 `task.recordId`
+   * （落库时写回任务，见 `finalizeTask`）。
+   *
+   * 用 Map 而不是每次 `find`：这一页每 tick 都会重渲染（`TICK` 600ms），
+   * 两列 × 每行各 `find` 一次是 N×M 次线性扫。
+   *
+   * **查不到就是没有任务** —— 演示种子行与历史数据都不是本次核查产生的，
+   * 组件按"核查早已跑完"处理（见 `SmartCheckCells` 的口径）。
+   */
+  const taskByRecordId = useMemo(() => {
+    const map = new Map<string, RecognitionTask>()
+    state.batches.forEach((b) =>
+      b.tasks.forEach((t) => {
+        if (t.recordId) map.set(t.recordId, t)
+      }),
+    )
+    return map
+  }, [state.batches])
+
   const data = useMemo(() => {
     return rows
       .filter((row) => {
@@ -331,19 +358,15 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
         }
         if (filter.sendMethod && m.sendMethod !== filter.sendMethod) return false
         if (filter.progress && m.replyProgress !== filter.progress) return false
-        /*
-         * 风险筛选 = **按当前的风险等级逐档匹配**（高风险 / 中风险 / 低风险 / 未核验，v3.20）。
-         * 此前只有「有风险（高+中）」「仅高风险」两档 —— 那是 v2.28 中风险还并入红档年代的口径，
-         * 与「AI 风险」列的三色三档对不上（想只看中风险、或想看还没核验的行，都选不出来）。
-         */
-        if (filter.risk && m.risk !== filter.risk) return false
+        /* 风险筛选随「AI 风险」列一并移除（2026-10-14，用户：「去掉 AI 风险列，完整去掉」）——
+           列的取值与文案原本就和筛选项同源（`RISK_MAP`），列没了筛选也就没有对象 */
         return true
       })
       /*
        * **只按回函时间倒序（v3.12）** —— 原来还有一条「待人工确认的排在前面」。
        * 那一条的后果是：**某行一旦处理完就不再"待人工确认"，当场跳到列表别处**
        * （用户要求：「如果某个函证数据完成了，也不要修改整体表单数据的顺序」）。
-       * 「还有哪几封没处理」由行内步骤条与「AI 风险」列表达即可（v3.20 起页面头不再给统计），
+       * 「还有哪几封没处理」由行内步骤条表达即可（v3.20 起页面头不再给统计），
        * 不需要靠"随时重排行序"来提示 —— 排序键只留**不因处理动作而变**的那一个。
        */
       .sort((a, b) =>
@@ -356,7 +379,6 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     if (filter.keyword) chips.push({ key: 'keyword', label: `关键字：${filter.keyword}` })
     if (filter.sendMethod) chips.push({ key: 'sendMethod', label: `发函方式：${filter.sendMethod}` })
     if (filter.progress) chips.push({ key: 'progress', label: `回函进度：${filter.progress}` })
-    if (filter.risk) chips.push({ key: 'risk', label: `AI 风险：${RISK_MAP[filter.risk].text}` })
     return chips
   }, [filter])
 
@@ -413,7 +435,14 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
       /* 银行函证的被询证单位就是银行，故这一页把「（银行）」写进表头（v3.05） */
       title: isBank ? '被询证单位（银行）' : '被询证单位',
       key: 'entity',
-      width: 196,
+      /*
+       * 196 → 190（2026-10-14，为两张宽列让位，但只让 6px）。
+       *
+       * ⚠️ 这列**必须按最长的单位名量**：实测「国泰君安证券股份有限公司」（12 字）内容宽约 170，
+       * 一度收到 170 ⇒ 那一行**溢出列外**（就是它把表格挤出一截）。196 的余量是给长名的，
+       * 不是给"最常见的名字"的 —— 与「操作」列要量失败行是同一条教训。
+       */
+      width: 190,
       fixed: 'left',
       render: (_, row) => (
         <Button
@@ -430,8 +459,45 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
       title: '函证编号',
       key: 'confirmationNo',
       /* 类型标签去掉了（v3.05）：本页只有一类函证，每行再标「往来 / 银行」是重复信息 */
-      width: 132,
+      width: 124,
       render: (_, row) => <span className="num">{row.confirmationNo}</span>,
+    },
+    /* ---------- 智能核查状态 / 进度（2026-10-14 新增两列） ---------- */
+    /*
+     * 用户原话：「上传完函证回函、切分完点完确认以后，**函证回函数据直接落入表格**，
+     * 智能核查过程的显示的位置，**放在表单中**，因此表单要增加两个字段：① 智能核查状态：
+     * 未开始、正在核查（需要有动效）、已核查；② 智能核查进度：类似 AI 核验事项字段展示的内容，
+     * 每识别完一个智能核查项，该项前面加一个完成标识。核查进度要和真实核查进度进行联动，动态展示」。
+     *
+     * **位置：紧跟「函证编号」之后、业务结论之前** —— 这两列回答的是"这一行现在能不能看"，
+     * 是结论的**前置条件**：核查没跑到那一步时，「回函是否相符」本来就没有结论可显示
+     * （那格此刻显示中性「识别中」）。故顺序是「是谁 → **核到哪了** → 结论 → 人处理了没有 → 下一步」。
+     *
+     * **两列数据都来自识别任务**（`taskByRecordId`），随 `TICK` 每 600ms 重算 —— 这就是用户要的
+     * 「和真实核查进度联动、动态展示」；跑完那一刻旗子**全变蓝**、状态定格为「已核查」。
+     */
+    {
+      title: '智能核查状态',
+      key: 'smartCheckStatus',
+      width: 120,
+      render: (_, row) => <SmartCheckStatus task={taskByRecordId.get(row.main.id)} />,
+    },
+    {
+      title: '智能核查进度',
+      key: 'smartCheckProgress',
+      /*
+       * **350**（2026-10-14 由 330 加宽）—— 标识从 12px 加大到 20px 后，实测内容宽由 321
+       * 涨到 **339**，加右内边距 8 需要 **347**，故取 350。
+       * （此前口径：内容 307 + 两侧内边距 ⇒ 330 —— 这条列宽一直是**按实测内容反推**的，
+       * 见表格那处「列宽合计」的注释；若不跟着加，长出来的那 6px 会**压到右边那列上**。）
+       * 它与右边「核查事项复核」共用同一份事项清单；但 v3.31 起右边那格**只报一条状态**
+       * （不再逐项），故"两列都得放得下全部项、否则一列换行另一列不换行"那条约束已作废 ——
+       * 逐项只在本列，本列的宽度只需按**它自己**的内容量（即上面这个 350）。
+       */
+      width: 350,
+      render: (_, row) => (
+        <SmartCheckProgress task={taskByRecordId.get(row.main.id)} type={row.main.type} />
+      ),
     },
     /* ---------- 回函是否相符 ---------- */
     /*
@@ -439,13 +505,13 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
      * 6/6 是**系统内部的检测点计数**，而业务人员看列表最想知道的是「**这封回函到底相符吗**」。
      * 故独立成列：给结论 + 区分结论**来自 AI 建议还是人工确认**（不相符时悬停看原因）。
      *
-     * 位置：紧随「被询证单位 / 函证编号」，排在「AI 风险」之前 ——
-     * 相符与否是首位业务结论，先于风险等级这类辅助判断。
+     * 位置：紧随「被询证单位 / 函证编号」——
+     * 相符与否是首位业务结论（2026-10-14 之前它后面还跟着「AI 风险」列，该列已移除）。
      */
     {
       title: '回函是否相符',
       key: 'match',
-      width: 132,
+      width: 130,
       render: (_, row) => {
         /*
          * **识别失败**的行（v3.29）—— 不显示相符性结论：识别没过，结论无源，
@@ -479,7 +545,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
             pending={isRecognitionPending(row.main)}
             /*
              * 这一格是「**用户确认之后的那个结果**」（v3.29）—— 故把承载相符性的那一项
-             * （往来＝印章识别 / 银行＝回函是否相符检测）在「AI 核验事项」里的处置结果传给它：
+             * （往来＝印章识别 / 银行＝回函是否相符检测）在「核查事项复核」里的处置结果传给它：
              * 未处理 ⇒ 「未确认」，不采纳 ⇒ 「待人工判定」，采纳 ⇒ 如实给结论。
              * 结果页自己填过 `resultInfo.matched` 也算确认过（人工值优先，与 `evaluateMatch` 一致）。
              */
@@ -489,50 +555,22 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
         )
       },
     },
-    {
-      title: 'AI 风险',
-      key: 'risk',
-      width: 84,
-      render: (_, row) => {
-        /*
-         * **识别错误 / 未识别到结论**的行（v3.29，用户要求）——
-         * 用户原话：「AI 风险列还是保持不变，如果存在 AI 未识别到或者识别错误的，
-         * 则用灰色标签标注：**识别错误**」。
-         *
-         * 为什么**替代**而不是与风险标签并排：这种行的风险等级在 store 里记 `none`
-         * （识别没过，任何结论都无源，见 `finalizeTask`），渲染 `RiskTag` 会显示「未核验」——
-         * 读起来像"还没轮到人工看"，而事实是**这一封没认出来**；两枚标签并排则是一件事说两遍。
-         *
-         * 灰色（`neutral`）是刻意的：红在站内是"判定了高风险"的意思，而这里恰恰是**没判出来**；
-         * 与「回函是否相符」列那枚「识别失败」同一个档位口径（同为中性、同为"结论无源"），
-         * 只是各自回答本列的问题：那边答"相符性没有结论"，这边答"风险等级没有依据"。
-         */
-        if (row.main.recognitionFailed) {
-          return (
-            <StatusTag
-              tone="neutral"
-              tip={
-                <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-                  <div>{row.main.recognitionFailReason ?? '未识别到该项结论'}</div>
-                  <div style={{ marginTop: 2 }}>
-                    本封识别未得出结果，不记风险等级 —— 可在「操作」列点「重新识别」重跑
-                  </div>
-                </div>
-              }
-            >
-              识别错误
-            </StatusTag>
-          )
-        }
-        return (
-          <RiskTag
-            level={row.main.risk as RiskLevel}
-            reasons={row.main.verification?.riskReasons}
-            pending={isRecognitionPending(row.main)}
-          />
-        )
-      },
-    },
+    /* ---------- AI 风险列已移除（2026-10-14） ---------- */
+    /*
+     * 用户原话：「**去掉 AI 风险列，完整去掉**」⇒ 列、筛选项（含条件 chip 与 `FilterState.risk`）
+     * 一并删除；`RiskTag` / `RISK_MAP` / `RISK_ORDER` 在本页不再引用（件本身保留 ——
+     * 核验详情顶部仍挂着一枚，见 `VerificationModal`）。
+     *
+     * 三条连带后果（都是有意的、不是漏改）：
+     * · **列表上不再有任何风险表达** —— 风险等级此后只在核验详情里可见；
+     * · v3.29 刚加的那枚灰色「识别错误」随列一起消失 —— 识别失败的信号仍在两处：
+     *   「回函是否相符」列写中性「识别失败」、操作列给「重新识别」；
+     * · 「行首不加红色竖条」那条旧口径（2026-09-20 定，理由是"风险等级已由本列表达"）
+     *   **不再有依据**，但也不因此把竖条加回来 —— 见表格 `rowClassName` 处的说明。
+     */
+
+    /*
+     * v2.37 移除「人工核验」列 —— 它与「回函进度」列是**同一事实的两种画法**：
     /*
      * v2.37 移除「人工核验」列 —— 它与「回函进度」列是**同一事实的两种画法**：
      * `verifyStatus` 只在「确认回函快递信息」的首次确认时置为 verified，
@@ -542,17 +580,19 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
      * 既然每个环节都要人工签字，「签过字」就是**默认背景、不是信息量** ——
      * 同一件事在相邻两列各说一遍，只会多占 104px 与一次扫视。
      * 核验人 / 核验时间**下沉到展开行的「留痕」区块**（审计要留痕，列表不必占一列）。
+     * （2026-10-14 补充：那块留痕也已撤掉，这几项在任何列表位置都不再展示 —— 数据仍在记录上。）
      */
 
-    /* ---------- AI 核验事项（v3.28 立，v3.29 定名） ---------- */
+    /* ---------- 核查事项复核（v3.28 立，v3.29 定名「AI 核验事项」，v3.30 改今名） ---------- */
     /*
      * 用户口径：「表单数据，需要增加一个 ai 识别字段区域，该区域包含 1、回函一致性识别
      * 2、印章识别 3、手写体识别……每一条回函数据，是由多个需要用户完成的 todo 事项完成的，
      * 完成所有的核验事项，这个回函数据任务就完成」。
      *
-     * 位置：**紧邻「AI 风险」之后、回函进度之前** —— 阅读主线是「谁（被询证单位）→ 结论
-     * （相符 / 风险）→ **AI 给了什么、我处理了没有** → 下一步做什么」。放在进度之前，
-     * 是因为这些待办正是"往下走"之前必须先过的关；进度列只回答"流程走到哪一步"。
+     * 位置：**紧邻「回函是否相符」之后、回函进度之前**（2026-10-14 之前它前面还有「AI 风险」列，
+     * 该列已移除）—— 阅读主线是「谁（被询证单位）→ 结论（相不相符）→ **AI 给了什么、我处理了没有**
+     * → 下一步做什么」。放在进度之前，是因为这些待办正是"往下走"之前必须先过的关；
+     * 进度列只回答"流程走到哪一步"。
      *
      * 清单按类型取（往来三项 / 银行两项），见 `config/aiReview` —— 那里是单一数据源，
      * 事项详情页与「回函结果填写」页读的是同一份，不各写一套。
@@ -568,27 +608,53 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
      *    用户否掉：「**样子也不太对，列名还叫 AI 核验事项吧，然后也不动态变化了**」。
      *    否得有道理：列名是**列的标识**，不是一枚会变的仪表 —— 表头随数据变脸，
      *    用户两次看同一列会以为换了列；而且"做完没有"本就是**逐行**的事实，
-     *    行内的圆环（`AiReviewCell`）已经逐项说了，表头再汇总一次是第二处表达。
+     *    行内那一格（`AiReviewCell`）已经说了，表头再汇总一次是第二处表达。
      *
-     * 现名「**AI 核验事项**」：说明来源（AI 认出来的）、说明对象（核验事项）、
-     * 且**不预设**它已办还是待办 —— 状态由行内逐项的圆环表达，表头只管"这一列是什么"。
+     * 现名「**核查事项复核**」（v3.30 改）：用户原话「AI 核验事项字段改成：核查事项复核」——
+     * 名字点出**要人做的动作**（复核）而不是**内容来源**（AI）：来源已由格内那枚 `✦`
+     * 与详情里的识别依据交代，而这一列存在的理由就是"等你复核"。
+     * 它仍**不预设**这一列已办还是待办 —— 状态由格内的勾选框 + 状态词表达，
+     * 表头只管"这一列是什么"（与上面「智能核查状态」列的分工不冲突：那一列是**机器**跑到哪，
+     * 这一列是**人**复核到哪）。
+     *
+     * ## v3.31：格内由"逐项清单"收成"整条状态"
+     *
+     * 用户原话：「**这一列就展示：待复核、已复核**。……因为前面已经有 AI 核查进度展示具体进行了
+     * 哪些 AI 核查项目，所以，这里就不展示具体的哪些核查项了，只需要告诉用户，要去做 AI 核查。」
+     *
+     * 于是"具体有哪几项、哪几项还没做"交给左边「智能核查进度」列（机器逐项），这一格只回答
+     * "**人这边还有没有要做的事**"：`待复核 · 剩 N 项` / `已复核`。格内的详略与悬停明细见
+     * `AiReviewCell` 的头注释，整条状态的判定口径见 `config/aiReview` 的 `aiReviewSummaryOf`。
      */
     {
-      title: 'AI 核验事项',
+      title: '核查事项复核',
       key: 'aiReview',
       /*
-       * v3.29 由 236 加宽到 **300** —— 事项现在是**一行文字链**（「印章识别 / 发函回函一致性检测 /
-       * 手写体识别」，含间隔实测约 300px），用户明确要求两件事：「这里要**更宽一些**」、
-       * 「**不要换行，一行搞定**」。故给足宽度一次放完，不再靠折行救。
-       * （各列按比例分摊剩余宽度，见表格 `scroll` 处的说明。）
+       * 沿革：236（v3.28 建）→ 300（v3.29）→ 360（2026-10-14）→ 480（v3.30）→ **160**（v3.31）。
+       *
+       * 中间那三版都是按"**3 项并列**"的内容宽反推的（v3.30 那版：3 项文字链 + 勾选框 + 状态词
+       * ＝ 473px ⇒ 480）。v3.31 格内收成**一个状态**，内容只剩：
+       * **勾选框 16 + 「待复核」3 字 ≈ 39 + 「· 剩 3 项」≈ 48 + `✦` 10 + 三处 4px 间距 12
+       * + 两侧内边距 16 ≈ 145** ⇒ 取 **160**。
+       * 与那三版同一条教训：列宽按**最坏那一行**量（这里是"待复核 + 剩 3 项"那一行），
+       * 不按"最常见的样子"量 —— 见「操作」列与「被询证单位」两处的注释。
        */
-      width: 300,
+      width: 160,
       render: (_, row) => (
         <AiReviewCell
           record={row.main}
-          items={aiReviewItemsOf(row.main.type)}
-          onOpen={(itemKey) =>
-            setActiveModal({ kind: 'verify', recordId: row.main.id, itemKey })
+          /*
+           * 点这一格 → 进原来那套 AI 智能核验详情，**默认落在第一个未复核项**
+           * （`aiReviewEntryOf`；全部复核完则落第一项）—— 省掉"进去再在页签里找一遍"。
+           * 详情内照旧可切页签逐项复核，页脚采纳 / 不采纳后自动关窗（v3.29 口径）。
+           */
+          onOpen={() =>
+            setActiveModal({
+              kind: 'verify',
+              recordId: row.main.id,
+              /* 落点＝**第一个未完成的事项**（AI 项 → 它自己的页签；必填项 → 第 4 项） */
+              panelKey: replyTaskEntryPanelKeyOf(row.main),
+            })
           }
         />
       ),
@@ -654,8 +720,8 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
      *
      * 用户原话：「操作界面，去掉更多和更多下的所有操作」。那四项的去处各自都有落点，
      * 所以不是"功能被删掉"，而是**同一件事不再有第二处入口**：
-     *   · **AI 核验** → 并进「AI 核验事项」列 —— 点某一项直接落在那一项上，比从下拉里先进门、
-     *     再在页签里找一项少两步；
+     *   · **AI 核验** → 并进「核查事项复核」格 —— 点那一格直接进核验详情（默认落在**第一个未复核项**），
+     *     比从下拉里先进门、再在页签里找一项少两步；
      *   · **回函快递信息 / 回函结果** → 「回函进度」列的步骤条本来就能点（v2.51 起，
      *     v3.12 起两步各自独立、任何阶段都可进），下拉里那两个入口是它的第二处副本；
      *   · **删除** → 一并去掉（用户明确要求"去掉更多下的所有操作"）。
@@ -667,8 +733,15 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     {
       title: '操作',
       key: 'action',
-      /* 失败行要多一枚「重新识别」—— 60 → 120（两枚链接并排的实际宽度） */
-      width: 120,
+      /*
+       * 60 → 120（v3.29：失败行要多一枚「重新识别」）→ **130**（2026-10-14 实测修正）。
+       *
+       * 这一列的宽度**不能按"没失败的行"量**：失败那一行才是它的最宽状态
+       * （查看 28 + 间距 4 + 「重新识别」图标 14 + 文字 56 ≈ 114，加两侧内边距 16 ⇒ 130）。
+       * 一度按 120 给，实测失败行的「重新识别」被 sticky 列裁掉半截 —— 量宽度要量"最坏那一行"，
+       * 这条教训与 v2.49 那次「用户指了位置就必须量那个位置」是同一类。
+       */
+      width: 130,
       fixed: 'right',
       render: (_, row) => (
         <Space size={4}>
@@ -681,12 +754,13 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
             查看
           </Button>
           {/*
-           * 「重新识别」（v3.29）—— 只给**识别失败**的行。
+           * 「重新识别」（v3.29 立；2026-10-14 改口径）—— 只给**核查失败**的行。
            *
-           * 它把这一封退回识别队列重跑（见 `RETRY_TASK`）：行**当即从列表撤下**、回到页面顶部的
-           * 识别区逐项再走一遍，跑完再作为"新的一行"入表并播插入动效。
-           * 撤下而不是原地刷新，是为了让"这行数据正在被重新识别"这件事没有歧义 ——
-           * 它的结论已经作废，留在列表里只会让人以为它还有效。
+           * 它把这一封退回核查队列重跑（见 `RETRY_TASK`）：**行留在原地**，随即退回「核查中」
+           * （结论清空、失败标记清空），「智能核查进度」列的旗子**重新一面面由灰转蓝**，跑完定格。
+           * 原先是"当即从列表撤下、跑完作为新的一行入表"—— 那是"没识别完不写列表"年代的做法；
+           * 现在数据本来就在表里（入表时机已提前），撤下再插回来反而让人以为数据变了，
+           * 而**变的只是核查结果**。
            */}
           {row.main.recognitionFailed && (
             <Button
@@ -834,40 +908,24 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
           以下三片字段于 v2.38 移出展开行，去处都已另有（同一份信息只在一个地方承载）：
           · 函件与物流（发函方式 / 快递公司 / 快递单号 / 发函登记 / 回函登记）→「查看函证」工作区顶部基础信息，
             后三项那里本就有；快递单号另在本表的「快递单号」列；
-          · AI 核验结论（含「查看核验详情」按钮与「AI 识别中」提示行）→ 行内「AI 核验事项」列的事项标签
+          · AI 核验结论（含「查看核验详情」按钮与「AI 识别中」提示行）→ 行内「核查事项复核」格
             （v3.28：原先是从操作列「更多 → AI 核验」进、再在页签里找一项）——
             核验是「拿着结论去原件上核对依据」的动作，配着 AI 批注看才是它该有的样子；
           · 核验 / 修改留痕 → 本表下方的一行小字（见下）。
         */}
 
         {/*
-         * 留痕 —— 审计要留痕，但一行小字足够（v2.38 起不再占一整块字段网格）。
+         * **原先这里还有一行留痕小字，已于 2026-10-14 去掉（用户：「去掉这部分的说明」）** ——
+         * 内容是「归属来源 自动归属 · 核验人 … · 核验时间 … · 最近修改 …（谁）」，
+         * 排在回函记录表下方，字号 12、三级灰。
          *
-         * **三段的次序就是业务时序**（v2.64 起并入「归属来源」）：
-         *   归属来源（识别阶段定下"归到哪封"）→ 核验（第一次人工确认）→ 最近修改（归档后补正）。
-         * 三段都**按需出现**，全都没有则整行不渲染。
-         *
-         * 「归属来源」放在**最前**：它是这份回函的**出身**，后两段都是人对它的处置。
-         * 它回答的是审计复核时最常被问的那句「**这封凭什么是这家银行的**」——
-         * 原先这只留在识别任务上、没有随记录落库，界面上完全看不到。
+         * 去掉的代价（写下来，免得日后有人以为是漏了）：**审计复核时那句「这封凭什么
+         * 是这家银行 / 谁在什么时候核过它」，列表上再也看不到** —— 展开行只剩记录本身
+         * （回函次序 / 记录编号 / 回函日期 / 快递单号 / 回函情况 / 查看）。
+         * 数据层**一个字没删**：`assignSource` / `verifiedBy` / `verifiedAt` /
+         * `lastEditedBy` / `lastEditedAt` 仍随记录落库并可追溯，将来若改在别处承载
+         * （例如「查看函证」工作区的信息区、或核验详情弹窗的页脚），这几个字段直接取用即可。
          */}
-        {(() => {
-          const traces = [
-            main.assignSource ? `归属来源 ${ASSIGN_SOURCE_LABEL[main.assignSource]}` : null,
-            main.verifiedAt ? `核验人 ${main.verifiedBy ?? '—'} · 核验时间 ${main.verifiedAt}` : null,
-            main.lastEditedAt
-              ? `最近修改 ${main.lastEditedAt}${main.lastEditedBy ? `（${main.lastEditedBy}）` : ''}`
-              : null,
-          ].filter((t): t is string => !!t)
-          return (
-            traces.length > 0 && (
-              /* 整行走等宽数字（中文不受影响），时间戳因此天然对齐 */
-              <div className="num" style={{ marginTop: 8, fontSize: 12, color: 'var(--c-text-3)' }}>
-                {traces.join(' · ')}
-              </div>
-            )
-          )
-        })()}
       </div>
     )
   }
@@ -913,7 +971,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
             {/*
              * v3.20：只留总数，「待人工确认 / 已完成」两段统计去掉
              * （用户：「上面不需要人工确认，已完成，这些字样」）——
-             * 「还有哪几封没处理」由行内进度步骤条与「AI 风险」列表达，比一个总数更具体。
+             * 「还有哪几封没处理」由行内进度步骤条表达，比一个总数更具体。
              */}
             <small>
               共 <b className="num">{total}</b> 封函证
@@ -948,8 +1006,9 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
               onPressEnter={query}
             />
           </Col>
-          {/* 三个下拉统一 140px —— 此前是 130 / 150 / 140 三种宽度，
-              同一行控件左边界不齐，扫视时看着像没对齐 */}
+          {/* 两个下拉统一 140px —— 此前是 130 / 150 / 140 三种宽度，
+              同一行控件左边界不齐，扫视时看着像没对齐
+              （2026-10-14：「AI 风险」下拉随该列一并移除，本行由三个变两个） */}
           <Col flex="140px">
             <Select
               allowClear
@@ -972,18 +1031,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
               )}
             />
           </Col>
-          <Col flex="140px">
-            <Select
-              allowClear
-              placeholder="AI 风险"
-              style={{ width: '100%' }}
-              value={form.risk}
-              onChange={(v) => setForm({ ...form, risk: v })}
-              /* 选项 = 当前的风险等级（高风险 / 中风险 / 低风险 / 未核验，v3.20）——
-                 取值与文案都来自 `RISK_MAP`，与「AI 风险」列的标签是同一份定义 */
-              options={RISK_ORDER.map((l) => ({ label: RISK_MAP[l].text, value: l }))}
-            />
-          </Col>
+          {/* 「AI 风险」筛选随列一并移除（2026-10-14）—— 留着就是个筛不出东西的下拉 */}
           <Col>
             <Space size={8}>
               <Button type="primary" icon={<SearchOutlined />} onClick={query}>
@@ -1128,27 +1176,19 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
 
         {/*
          * 「● 识别中，结果将自动写入列表」这一句**已移除**（v3.28）——
-         * 「哪几封在认、认到哪一项」由识别区逐封交代（`RecognitionProgressBoard`），
+         * 「哪几封在认、认到哪一项」有它自己的去处：v3.28 起先是识别区逐封交代，
+         * 2026-10-14 起改为**每行自己的「智能核查状态 / 进度」两列**（更具体：行内看得到），
          * 本行再挂一句笼统的"识别中"是同一件事的第二处表达（项目一路在清理这类重复）。
          */}
         </div>
       </div>
 
       {/*
-       * 智能识别区（v3.28 立题；v3.29 位置两改）—— 识别过程**长在主页面**上，
-       * 逐封一行：哪一封在认、认到哪一项。跑完一封即从本区消失、同时出现在下方表格里
-       * （入表闸在 store：`isFullyRecognized`）。有任务才出现、跑完自动淡出收起。
-       *
-       * **位置**：① 原在页面标题之下 → ② 用户要求「放在表单上，按钮的下方」，于是挂进了
-       * 筛选表单卡内 → ③ 用户再要求「不要放在按钮的同一个区域，要和按钮所在的区域、
-       * 表单所在的区域**分开**」⇒ 现在是**独立的一块**，夹在**表单卡**与**表格卡**之间。
-       *
-       * 三次改动的落点其实是同一句：它是**上传动作的结果**，与表单/按钮是"因"与"果"的关系，
-       * 所以既不能压在他们上面（顺序反了），也不能塞在他们里面（那是同一块区域里的两件事）。
-       * 单独成块之后，页面自上而下正好是：**表单（我要做什么）→ 识别（系统正在做什么）→
-       * 表格（做完的成果）**，三段各是各的。
+       * 独立识别区**已撤除**（2026-10-14）—— 用户把口径整个调过来：
+       * 「智能核查过程的显示的位置，**放在表单中**」（即表格里那两列），
+       * 不再需要页面上单开一块。组件 `RecognitionProgressBoard` **保留备用、不再挂载**
+       * （与 v3.28 退役的悬浮卡 / 全屏识别界面同一处置）。
        */}
-      <RecognitionProgressBoard />
 
       {/* 表格 */}
       <div className="panel" style={{ padding: '4px 0' }}>
@@ -1157,15 +1197,27 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
           rowKey="confirmationNo"
           columns={columns}
           dataSource={data}
-          /* 列宽合计：196+132+132+84+300+200+120 = 1164 —— 去掉「是否重新发函」112、
-             新增「AI 核验事项」（v3.28 建 236，v3.29 事项改一行文字链后加宽到 300）、
-             操作列 v3.28 收到 60、v3.29 失败行要「重新识别」又收回 120。
-             `scroll.x` 取 1324（> 合计 1124）只是给窄屏兜一个最小宽度；宽屏下浏览器会按比例
-             把剩余空间分给各列（1680 视口下实测 AI 核验事项列约 395px，正好一行放完全部事项）。 */
-          scroll={{ x: 1324 }}
+          /* 列宽合计：190+124+120+350+130+160+200+130 = 1404
+             （「AI 风险」84 于 2026-10-14 随该列移除；同一天新增「智能核查状态」120 +「智能核查进度」330，
+             并把「被询证单位 / 函证编号 / 回函是否相符 / 操作」各收一点、把两张宽列按**实测内容宽**
+             反推加宽：进度列内容 307 + 内边距 ⇒ 330，「AI 核验事项」内容 341 ⇒ 360。
+             不这么给的直接后果是**宽列的文字压到右边那列上**，2026-10-14 实测溢出 31px。
+             同日再调一次：进度列的标识由 12px 加到 20px，内容宽 321 → 339，列宽 330 → 350。
+             v3.30 再调一次：「核查事项复核」列每项多了状态词与更大的勾选框，内容 ≈ 473 ⇒ 480，
+             合计随之 1604 → 1724。
+             v3.31：该格由"逐项清单"收成"整条状态"（内容 ≈ 145 ⇒ 160），合计 1724 → **1404** ——
+             这是这一列四次调整里**唯一一次收窄**，也是第一次让整表在常见视口下不再横向滚动。）
+             此前依次去掉「是否重新发函」112、新增「AI 核验事项」（v3.28 建 236，v3.29 加宽到 300）、
+             操作列 v3.28 收到 60、v3.29 失败行要「重新识别」又收回 120）。
+             `scroll.x` **取合计值本身（1404）**：给它一条比合计更大的最小值没用 ——
+             2026-10-14 试过 1600，1680 视口下反而**多出一条横向滚动条**（实测 scrollWidth 1640）：
+             antd 会再加一份滚动条补偿，越界就那么几像素。取合计值、让各列按容器富余等比放宽即可。
+             窄屏（< 合计）则按 1404 横向滚动，各列不再被压扁。 */
+             scroll={{ x: 1404 }}
           locale={{ emptyText: emptyNode }}
-          /* 行首不再加「高风险」红色竖条（2026-09-20 用户要求去掉）：
-             风险等级已由「AI 风险」列的状态标签表达，行首再画一条属于重复表达。
+          /* 行首不加「高风险」红色竖条（2026-09-20 用户要求去掉；2026-10-14 起「AI 风险」列
+             也移除了，那条"风险已由本列表达"的理由不再成立 —— 但**不因此恢复竖条**：
+             用户当时要的是"列表干净"，不是"换个地方显示风险"；风险等级此后只在核验详情里看）。
              `row-risk-high` 保留给明细表的「差异行 / 未匹配行」——
              那些表没有独立的风险列，需要左侧标记做视觉定位。 */
           /*
@@ -1224,8 +1276,12 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
       <VerificationModal
         open={activeModal?.kind === 'verify'}
         record={activeRecord}
-        /* 从列表事项标签点进来的：直接定位到那一项，并在页脚给「采纳 / 不采纳」（v3.28） */
-        initialKey={activeModal?.kind === 'verify' ? activeModal.itemKey : undefined}
+        /*
+         * 从列表那一格点进来的：直接定位到**第一个未完成的事项**所在页签
+         * （AI 项 → 它自己的页签；必填项 → 第 4 项「回函结果补充」），
+         * 并在页脚给「采纳 / 不采纳」（v3.28；落点口径 v3.33 见 `replyTaskEntryPanelKeyOf`）。
+         */
+        initialPanelKey={activeModal?.kind === 'verify' ? activeModal.panelKey : undefined}
         onClose={closeModal}
       />
       <RecordDetailModal

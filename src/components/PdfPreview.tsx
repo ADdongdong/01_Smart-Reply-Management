@@ -1,24 +1,27 @@
-import { useState } from 'react'
-import { Button, Space } from 'antd'
-import { FilePdfOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import AnnotatedPdfPreview from '@/components/AnnotatedPdfPreview'
 import type { SealBox } from '@/types'
-import { DEFAULT_PREVIEW_MODE, browserSampleUrlOf, type PreviewMode } from '@/config/preview'
+import { browserSampleUrlOf } from '@/config/preview'
 
 /**
- * 函证文件预览 —— 两种视图**共用同一套 pdf.js 渲染**，样式完全一致，切换零闪动：
+ * 函证文件预览 —— 原件 + **固定叠加**的 AI 批注层。
  *
- * · **原始文件** —— 只渲染回函原件；
- * · **AI 批注** —— 同一份原件之上叠加 AI 批注层（印章定位框、落章区域高亮、手写体识别区）。
+ * ## 「原始文件 / AI 批注」切换已删除（v3.35，用户口径）
  *
- * 实现要点：两者是**同一套多页画布**，切换只显隐批注叠加层、不重建 PDF ——
- * 因此「原文 ↔ 批注」来回核对时，页面位置、缩放、滚动位置完全对齐，不会闪动或跳动。
- * 多页连续滚动、缩放（工具条 + Ctrl 滚轮 / 触控板捏合）与懒渲染由 `AnnotatedPdfPreview` 承载。
+ * 用户原话：「**整体，去掉原始文件 / ai批注这个功能，全局**」。
+ * 原先右上角有一对按钮，让用户在"只看原件"与"原件 + 批注"之间来回切（结果填写页、查看函证、
+ * 核验页都有）。现在**批注层恒为显示**：调用方传了 `sealBoxes` / `showRegions` / `handwriting`，
+ * 就是在说"这一屏要看 AI 依据"；不传则叠加层为空。
+ * 于是"要不要批注"由**调用方传参**决定，不再由一个摆在自己内容上的按钮决定 ——
+ * 那个按钮在多数页面里点了也没什么变化（该页的批注本来就在别处），只剩噪音。
  *
- * 批注坐标与显示尺寸解耦（页面百分比），缩放与滚动时批注始终贴合文件内容。
+ * ⚠️ 连带后果（有意为之）：原先**默认落在「原始文件」**的那几处（回函结果填写页、查看函证详情）
+ * 从此也直接显示批注层 —— 它们本就传了 `sealBoxes` / `handwriting`，只是默认没打开而已。
  *
- * 视图可由外部受控（`viewMode` + `onViewModeChange`）—— AI 核验页据此在切到「印章识别」时
- * 自动切到批注视图；不传则内部自管理。`forceAnnotated` 用于锁定批注视图且不显示切换按钮。
+ * ## 其余能力不变
+ *
+ * · 多页连续滚动、缩放（工具条 + Ctrl 滚轮 / 触控板捏合）与懒渲染由 `AnnotatedPdfPreview` 承载；
+ * · 批注坐标与显示尺寸解耦（页面百分比），缩放与滚动时批注始终贴合文件内容；
+ * · `markRange` / `markLabel`（标出「本段」/「本表」页区间）与 `scrollGroup`（多份预览同步滚动）照旧。
  *
  * 另有两个「换内容 / 换范围」的入口，供**预览的不是整份回函**的场景使用：
  * · `fileUrl` —— 直接指定文件（如快递面单：一份独立的单页面单扫描件），不传则按函证编号推断；
@@ -38,10 +41,6 @@ export default function PdfPreview({
   activeRegion,
   height = 420,
   handwriting,
-  forceAnnotated = false,
-  hideViewToggle = false,
-  viewMode,
-  onViewModeChange,
   markRange,
   markLabel = '本段',
   scrollGroup,
@@ -53,8 +52,8 @@ export default function PdfPreview({
    */
   fileUrl?: string
   /**
-   * **只渲染 `page` 那一页** —— 用于只看单页的场景（快递面单）。
-   * 与 `hideViewToggle` 搭配使用：面单上没有印章 / 落章区域 / 手写区，也没有其它页可看。
+   * **只渲染 `page` 那一页** —— 用于只看单页的场景（快递面单：一份单页扫描件，
+   * 没有印章 / 落章区域 / 手写区，也没有其它页可看，铺整份只会让人以为漏了东西）。
    */
   singlePage?: boolean
   /** 以下三项由调用方传入，原件渲染不依赖（回函文件自带这些信息），保留以兼容既有调用 */
@@ -67,23 +66,15 @@ export default function PdfPreview({
    * 用于「点右侧某张表 → 左侧原件跳到该表所在页」，同一张表可反复点。
    */
   locateToken?: number
+  /** 印章定位框（AI 批注层）—— 不传即不画 */
   sealBoxes?: SealBox[]
-  /** 是否展示「信息证明无误 / 信息不符」两个落章区域 */
+  /** 是否展示「信息证明无误 / 信息不符」两个落章区域（AI 批注层） */
   showRegions?: boolean
   activeRegion?: '信息证明无误区' | '信息不符区' | '未识别'
   /** 预览高度：数字＝固定像素；`'100%'`＝撑满父容器（左固定栏场景，见 AnnotatedPdfPreview） */
   height?: number | string
+  /** 手写体识别区（AI 批注层）—— 传了就在对应页上画出识别区 */
   handwriting?: string
-  /** 锁定为 AI 批注视图，不提供切换（需要叠加定位框时使用） */
-  forceAnnotated?: boolean
-  /**
-   * 隐藏「原始文件 / AI 批注」切换 —— 用于**本身没有 AI 批注可看**的预览
-   * （如快递面单页：面单上没有印章、落章区域与手写区，留着切换只会误导）。
-   */
-  hideViewToggle?: boolean
-  /** 受控视图（配合 `onViewModeChange` 使用；不传则内部自管理） */
-  viewMode?: PreviewMode
-  onViewModeChange?: (mode: PreviewMode) => void
   /**
    * 标出「本段」页区间（v2.56）—— 归属匹配里预览**整份回函**时用：
    * 整份铺出来、当前段描边打角标。不传 = 不标记。详见 `AnnotatedPdfPreview`。
@@ -97,53 +88,6 @@ export default function PdfPreview({
    */
   scrollGroup?: string
 }) {
-  const [internalMode, setInternalMode] = useState<PreviewMode>(DEFAULT_PREVIEW_MODE)
-  const pref = forceAnnotated ? 'annotated' : (viewMode ?? internalMode)
-  const annotated = pref === 'annotated'
-
-  const setMode = (m: PreviewMode) => {
-    setInternalMode(m)
-    onViewModeChange?.(m)
-  }
-
-  /**
-   * 视图切换 —— 固定在预览右上角，当前视图用主色实心按钮标识，
-   * 让用户随时知道「现在看的是原件，还是带 AI 批注的原件」。
-   */
-  const switcher = !forceAnnotated && !hideViewToggle && (
-    <div
-      style={{
-        position: 'absolute',
-        top: 12,
-        right: 12,
-        zIndex: 2,
-        background: 'rgba(255,255,255,0.98)',
-        borderRadius: 8,
-        padding: 3,
-        boxShadow: 'var(--shadow-pop)',
-      }}
-    >
-      <Space.Compact>
-        <Button
-          type={annotated ? 'default' : 'primary'}
-          icon={<FilePdfOutlined />}
-          onClick={() => setMode('original')}
-          title="仅显示回函原件，供人工阅读原文"
-        >
-          原始文件
-        </Button>
-        <Button
-          type={annotated ? 'primary' : 'default'}
-          icon={<ThunderboltOutlined />}
-          onClick={() => setMode('annotated')}
-          title="在原件上叠加印章定位框、落章区域与手写识别区等 AI 批注"
-        >
-          AI 批注
-        </Button>
-      </Space.Compact>
-    </div>
-  )
-
   return (
     /**
      * 根容器同样要吃满：内部 `AnnotatedPdfPreview` 的 `height` 是**相对本容器**算的
@@ -152,22 +96,20 @@ export default function PdfPreview({
      * 两者在各自场景下生效、互不干扰（flex 下 basis 优先，height 被忽略）。
      */
     <div style={{ position: 'relative', height: '100%', flex: 1, minHeight: 0 }}>
-      {/* 批注开关只切换叠加层，pdf.js 画布始终复用 —— 切换不重渲染、不闪动 */}
       <AnnotatedPdfPreview
         fileUrl={fileUrl ?? browserSampleUrlOf(confirmationNo)}
         page={page}
         locateToken={locateToken}
         singlePage={singlePage ? page : undefined}
         height={height}
-        sealBoxes={annotated ? sealBoxes : []}
-        showRegions={annotated && showRegions}
-        activeRegion={annotated ? activeRegion : undefined}
-        handwriting={annotated ? handwriting : undefined}
+        sealBoxes={sealBoxes}
+        showRegions={showRegions}
+        activeRegion={activeRegion}
+        handwriting={handwriting}
         markRange={markRange}
         markLabel={markLabel}
         scrollGroup={scrollGroup}
       />
-      {switcher}
     </div>
   )
 }

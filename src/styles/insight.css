@@ -153,70 +153,71 @@
 /* ---------------------------------------------------------------- */
 
 /*
- * 像素网格 —— 以方格阵列表达"系统正在工作"。
- * 方格按**列**错相位驱动，形成扫过的人流式波纹（不是整排一起闪，那样像故障）。
- * 纯 CSS：无 JS 逐帧，全部走 transform / opacity（合成层）。
+ * **3×3 像素网格 + 人字形波前** —— 逐字照搬上游（beautifului.dev `primitives/LoadingState.tsx`
+ * 的 Drive / Dots 变体）：
+ * · 网格：3 列 × **4px**、`gap: 1.5px`、方角 1px（Dots 变体只是把格子取圆角，见 `.is-round`）；
+ * · 关键帧 `pixel-on`：`0%/100% opacity .15` → `18%/42% opacity 1` → `62% .15` ——
+ *   亮起是一个**平台**而不是尖峰，读起来是"一格一格被点亮、保持一下再灭"，不是闪烁；
+ * · 相位：上游的 chevron 延迟表 `(c + |r-1|) * 90ms`（**列错相 90ms ＋ 离中间行的距离**），
+ *   每格由组件写进内联 `--d`（CSS 侧不写死 9 条延迟）；时长 **650ms**、`ease-in-out`、无限循环。
+ *
+ * ⚠️ **2026-10-14 把 v2.57 那版移植换成上游原样**。旧版是"9 根等高竖条"（`align-items: flex-end`
+ * + `scaleY` 关键帧 + 每格 55ms 均等错相）—— 那是照着官网画廊的印象**重画**的，不是上游那个
+ * 「3×3 方格 + 人字波前」。两者手感差别不小：波前**有方向**（中间一行先亮，上下两行各晚 90ms × 列），
+ * 看着像"扫过去"；均等错相看不出方向。旧的 `px-sweep` 关键帧、`--i` 相位、`.px-dots`
+ * 与 `DotLoader` 一并删除（`.px-dots` 与 `DotLoader` 全项目无人引用，且它本就是 Dots 变体的近似 ——
+ * 上游 Dots 只是同一张网格取圆角，故改成组件上的 `round` 开关，不再单设一套）。
+ *
+ * 只用 `opacity`（合成层）、无 JS 逐帧；`prefers-reduced-motion` 在本文件底部统一降级。
  */
 .px-grid {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 18px;
+  display: inline-grid;
+  grid-template-columns: repeat(3, 4px);
+  gap: 1.5px;
+  flex: none;
 }
 .px-grid__cell {
   width: 4px;
-  height: 100%;
+  height: 4px;
   border-radius: 1px;
   background: currentColor;
-  opacity: 0.2;
-  transform-origin: bottom;
-  animation: px-sweep 650ms var(--ease-out) infinite;
-  animation-delay: calc(var(--i) * 55ms);
+  opacity: 0.15;
+  animation: pixel-on 650ms ease-in-out infinite;
+  animation-delay: var(--d, 0ms);
 }
-@keyframes px-sweep {
+/* Dots 变体 —— 上游把同一张网格的格子取圆角 */
+.px-grid.is-round .px-grid__cell {
+  border-radius: 50%;
+}
+@keyframes pixel-on {
   0%,
   100% {
-    opacity: 0.2;
-    transform: scaleY(0.55);
+    opacity: 0.15;
   }
-  45% {
+  18%,
+  42% {
     opacity: 1;
-    transform: scaleY(1);
+  }
+  62% {
+    opacity: 0.15;
   }
 }
 
-/* 完成态 —— 方格定格为静态图案（不再动，表示"干完了"） */
+/* 完成态 —— 方格定格为静态图案（**停止运动**即"干完了"，比换一枚图标更准） */
 .px-grid.is-done .px-grid__cell {
   animation: none;
-  opacity: 0.75;
+  opacity: 0.6;
 }
-.px-grid.is-done .px-grid__cell:nth-child(3n) {
-  opacity: 0.35;
+.px-grid.is-done .px-grid__cell:nth-child(2n) {
+  opacity: 0.25;
 }
 
-/* 圆点相位变体 —— 用于小尺寸场合（右下角卡） */
-.px-dots {
-  display: inline-flex;
-  gap: 3px;
-  align-items: center;
-}
-.px-dots i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: px-dot 900ms var(--ease-out) infinite;
-  animation-delay: calc(var(--i) * 140ms);
-}
-@keyframes px-dot {
-  0%,
-  100% {
-    opacity: 0.25;
-  }
-  50% {
-    opacity: 1;
-  }
-}
+/*
+ * 2026-10-14：曾短暂有过一个 `.is-idle`（"还没轮到这一项"，定格 + 压暗）供列表「智能核查进度」
+ * 的未核查格使用 —— 用户当天就否了（「还没有核查的时候，前面不要用灰色的 9 个点」），
+ * 那一格改用一条浅灰短横（见 `global.css` 的 `.smart-check__dash`）。
+ * 死类名一并删掉，不留第二套"格子状态"的说法。
+ */
 
 /* ---------------------------------------------------------------- */
 /* ③ 微光文字（shimmer）                                              */
@@ -511,12 +512,12 @@
 /* ---------------------------------------------------------------- */
 
 /*
- * **置信度条已在 v3.13 移除，改用 `AiChip` 胶囊**（`components/Marks.tsx`，与
- * 「回函结果填写」页同一个件）—— 用户要求「要么改成明显的颜色，要么改成彩色的标签，
- * 标签内是文字+置信度百分比」，取了后者。
+ * **置信度在这条链路上已经全部消失，别再做回来（沿革留档）**：
+ * v3.13 由「进度条」改为「彩色胶囊 `AiChip`」→ **2026-10-14 用户「去掉所有的置信度」，
+ * 胶囊连同本文件与 `global.css` 里相关的样式一并删除**（现在全站不再出现任何置信度数字）。
  *
- * 记下原条子为什么"全灰"（免得日后有人把它做回来还照抄）：填充元素是 `<span>`
- * （**inline**），而 `width` / `height` **对 inline 元素不生效** ⇒ 填充宽度恒为 0，
+ * 顺手记下更早那条路为什么"全灰"，免得日后有人又照抄：填充元素是 `<span>`（**inline**），
+ * 而 `width` / `height` **对 inline 元素不生效** ⇒ 填充宽度恒为 0，
  * 只剩轨道那条 8% 灰底可见。要留进度条形态，补一行 `.confidence__fill { display: block }`
  * 即可（轨道是 flex 子项，会被 blockify，所以只有填充这一层踩坑）。
  */
@@ -646,7 +647,6 @@
  */
 @media (prefers-reduced-motion: reduce) {
   .px-grid__cell,
-  .px-dots i,
   .shimmer-text,
   .sweep-bar.is-running::after,
   .in-status--running {

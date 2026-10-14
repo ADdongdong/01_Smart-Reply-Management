@@ -14,7 +14,7 @@ import { buildKkPreviewUrl } from '@/config/preview'
  * 无法在其内容上叠加坐标批注层，且与 pdf.js 渲染的观感不一致
  * （带自己的工具栏 / 缩放条，两个视图对比时会跳）。
  * 现由 `AnnotatedPdfPreview`（pdf.js 自渲染 + 批注叠加层）统一承载
- * 「原始文件 / AI 批注」两个视图，共用同一画布。
+ * 原件 + 批注叠加层（v3.35 起批注恒为显示，不再有「原始文件 / AI 批注」切换）。
  *
  * 保留用途：后续若需预览 pdf.js 不支持的格式（Word / Excel 等），可再启用本组件。
  */

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Progress } from 'antd'
-import { ThunderboltOutlined } from '@ant-design/icons'
+import { AiGlyph } from '@/components/Marks'
 
 /**
  * 「智能识别」动作（v3.26）—— 一个按钮，点下去跑约 5 秒的识别过程，跑完回调 `onDone`。
@@ -92,7 +92,12 @@ export function SmartSplitAction({
   return (
     <Button
       size={size}
-      icon={<ThunderboltOutlined />}
+      /*
+       * **AI 能力用 ✦，不用 ⚡**（2026-10-14 图标盘点）—— 它做的是"把切分 / 归属 / 单号都认一遍"，
+       * 与归属界面那行「✦ 智能识别已应用」是同一件事，两处记号必须一样。
+       * ⚡ 自此只留给"用演示数据一键体验"那两个入口（见 `Marks.AiGlyph` 的说明）。
+       */
+      icon={<AiGlyph />}
       onClick={() => setPercent(0)}
       title={
         '一次把切分、归属与快递单号都识别好，进切分页直接确认（原型固定约 5 秒）——'

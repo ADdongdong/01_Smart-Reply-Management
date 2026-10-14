@@ -1,26 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Input, Radio, Table, Tag, Tooltip, Upload } from 'antd'
-import {
-  FileExcelOutlined,
-  InfoCircleFilled,
-  PaperClipOutlined,
-  ThunderboltOutlined,
-  UploadOutlined,
-} from '@ant-design/icons'
+import { Alert, App, Button, Input, Radio, Table, Tag, Tooltip } from 'antd'
+import { InfoCircleFilled, PlusOutlined } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { buildBankItemGroups, buildSubjectEntriesForRecord } from '@/mock/confirmations'
 import { TYPE_RULE, evaluateMatch, isRecognitionPending } from '@/services/replyRule'
+import AttachmentField from '@/components/AttachmentField'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
 import VerificationPanel from '@/components/VerificationPanel'
 import BankItemsTable from '@/components/BankItemsTable'
-import { AiChip, ResultBar } from '@/components/Marks'
+import { AiGlyph, ResultBar } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
 import { aiReviewPrefill } from '@/config/aiReview'
+import { RESULT_NOTE_FIELDS } from '@/config/replyTasks'
 import type {
   BankItemGroup,
   BankItemRow,
   CrossSealChoice,
+  ReplyAttachment,
   ReplyRecord,
   ReplyResultInfo,
   SubjectEntry,
@@ -42,7 +39,7 @@ function recalcRow(row: BankItemRow, replyAmount: number | null): BankItemRow {
 }
 
 /**
- * 列表「AI 核验事项」里**采纳过**的项 → 本页各字段的「已采纳」标记（v3.28）。
+ * 列表「核查事项复核」里**采纳过**的项 → 本页各字段的「已采纳」标记（v3.28）。
  *
  * 带出来的值需要在本页**看得出是采纳来的**：沿用本页既有的 `adopted` 机制
  * （那条「采纳」按钮会因此显示「已采纳」），并驱动顶部那枚来源标签。
@@ -204,7 +201,7 @@ export default function ReplyResultModal({
   )
 
   /**
-   * **列表「AI 核验事项」里已采纳的值**（v3.28）—— 本页初值的第二来源。
+   * **列表「核查事项复核」里已采纳的值**（v3.28）—— 本页初值的第二来源。
    * 映射规则见 `config/aiReview.ts` 的 `aiReviewPrefill`（与列表事项同一份声明，不另写一套）。
    */
   const aiPrefill: Partial<ReplyResultInfo> = record ? aiReviewPrefill(record) : {}
@@ -239,6 +236,24 @@ export default function ReplyResultModal({
   const [crossSeal, setCrossSeal] = useState<CrossSealChoice | undefined>(
     record?.resultInfo?.crossSeal ?? aiPrefill.crossSeal,
   )
+  /**
+   * **三个"人工补充"字段**（v3.34）—— 两个附件 + 一段底稿指引文本。
+   *
+   * 它们与核验页第 4 项「回函结果补充」**读写同一份数据**（`resultInfo`），
+   * 所以本页也必须进 state、随保存一起落库：此前这三行只是"摆了三个上传按钮"，
+   * 不读也不写 —— 在本页选了文件，一保存就没了，与核验页那句「两处都能传」对不上。
+   */
+  const [altTestFiles, setAltTestFiles] = useState<ReplyAttachment[]>(
+    record?.resultInfo?.altTestFiles ?? [],
+  )
+  const [diffAdjustFiles, setDiffAdjustFiles] = useState<ReplyAttachment[]>(
+    record?.resultInfo?.diffAdjustFiles ?? [],
+  )
+  /**
+   * 「拟执行的进一步核查程序及底稿指引」—— **文本，不是上传件**（v3.34，用户口径：
+   * 「是文本框输入，不是上传附件」）。数据字段是 `procedureNote`（原 `procedureFiles` 已废）。
+   */
+  const [procedureNote, setProcedureNote] = useState(record?.resultInfo?.procedureNote ?? '')
   /* 采纳标记：列表上采纳过的项一进来就显示「已采纳」，与本页现点「采纳」同形 */
   const [adopted, setAdopted] = useState<Record<string, boolean>>(() =>
     adoptedFromAiReview(record),
@@ -354,8 +369,24 @@ export default function ReplyResultModal({
                 message.warning(`请先处理必填项：${miss.join('、')}`)
                 return
               }
+              /*
+               * **先铺 `record.resultInfo` 再盖本轮值**（v3.34 修）——
+               * store 里 `...action.patch` 是浅合并，`resultInfo` 是**整份替换**：
+               * 只写本页这几个字段的话，核验页第 4 项保存的附件 / 底稿指引会被**抹掉**。
+               */
               const patch = {
-                resultInfo: { matched, diffDesc, sealConsistent, sealReason, officialSeal, crossSeal },
+                resultInfo: {
+                  ...record.resultInfo,
+                  matched,
+                  diffDesc,
+                  sealConsistent,
+                  sealReason,
+                  officialSeal,
+                  crossSeal,
+                  altTestFiles,
+                  diffAdjustFiles,
+                  procedureNote,
+                },
               }
               if (isArchived) {
                 dispatch({ type: 'UPDATE_RESULT', recordId: record.id, patch })
@@ -416,7 +447,7 @@ export default function ReplyResultModal({
             <div className="panel" style={{ padding: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span className="section-title">
-                  <ThunderboltOutlined style={{ color: 'var(--c-primary)' }} /> AI 核验结论
+                  <AiGlyph /> AI 核验结论
                 </span>
                 <span className="muted" style={{ fontSize: 12 }}>
                   默认不填入表单，采纳后仍可修改
@@ -431,7 +462,7 @@ export default function ReplyResultModal({
                     ai
                     size="sm"
                     tone="primary"
-                    tip={`已按你在列表「AI 核验事项」里的采纳结果带入（${fromAiReviewCount} 项）；不采纳的项不会带值，带进来的也仍可修改`}
+                    tip={`已按你在列表「核查事项复核」里的采纳结果带入（${fromAiReviewCount} 项）；不采纳的项不会带值，带进来的也仍可修改`}
                   >
                     已带出列表采纳的 {fromAiReviewCount} 项
                   </StatusTag>
@@ -457,7 +488,6 @@ export default function ReplyResultModal({
                 }
                 extra={
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <AiChip confidence={isBank ? 0.96 : v.seal.confidence} />
                     <Button
                       size="small"
                       type={adopted.matched ? 'default' : 'primary'}
@@ -481,7 +511,6 @@ export default function ReplyResultModal({
                 detail={`依据：印章名称「${v.seal.sealName}」`}
                 extra={
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <AiChip confidence={0.96} />
                     <Button
                       size="small"
                       type={adopted.seal ? 'default' : 'primary'}
@@ -514,7 +543,6 @@ export default function ReplyResultModal({
                 }
                 extra={
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <AiChip confidence={0.97} />
                     <Button
                       size="small"
                       type={adopted.official ? 'default' : 'primary'}
@@ -551,7 +579,6 @@ export default function ReplyResultModal({
                   }
                   extra={
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      <AiChip confidence={v.seal.crossPageSealCount ? 0.94 : 0.9} />
                       <Button
                         size="small"
                         type={adopted.cross ? 'default' : 'primary'}
@@ -579,7 +606,6 @@ export default function ReplyResultModal({
                   detail={v.handwriting.text}
                   extra={
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      <AiChip confidence={v.handwriting.confidence} label="OCR" />
                       <Button
                         size="small"
                         type={adopted.desc ? 'default' : 'primary'}
@@ -666,9 +692,14 @@ export default function ReplyResultModal({
                 </Tooltip>
               </div>
 
+              {/*
+               * 「回函结果不相符处的描述」（v3.34）—— 标签取自 `RESULT_NOTE_FIELDS`：
+               * 核验页的一致性检测 / 手写体识别 / 印章识别三处「人工确认」列填的也是这一格，
+               * 两处显示同一件事就不许各写一个名字。
+               */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
-                  回函结果不相符处的描述
+                  {RESULT_NOTE_FIELDS.diffDesc}
                 </span>
                 <Input.TextArea
                   rows={3}
@@ -678,6 +709,35 @@ export default function ReplyResultModal({
                   style={{ flex: 1 }}
                 />
               </div>
+
+              {/*
+               * **差异调节表**（v3.32）—— 用户：「回函结果填写，这里还要加一个：差异调节表字段，
+               * 支持上传 pdf 和 Excel」。
+               *
+               * **位置为什么紧跟在「不相符处的描述」下面**：这两项是同一件事的两半 ——
+               * 描述说"差在哪"，调节表给"怎么调平的"，人工填完描述顺手就把表挂上来；
+               * 若放到本页下方那组上传字段（替代性测试文件 / 拟执行的进一步核查程序）里，
+               * 就离它要解释的那段描述隔了四五个字段。
+               *
+               * **格式锁 PDF / Excel**（用户口径）：`accept` 一头过滤系统文件选择器、一头给浏览器提示，
+               * 与按钮文案里的"支持 PDF / Excel"互为表里 —— 只写文案不写 `accept`，
+               * 用户仍会选中 xlsx 之外的一堆格式再被拦下。
+               *
+               * **不设必填**：上传类字段一律不进 `missingRequired()`（本页另一处附件字段同样如此）——
+               * 差异调节表是"有差异时才有得传"，把它设成必填会把"相符"的行也堵在归档口。
+               *
+               * 交互与核验页第 4 项**完全一致**（v3.34）：两处改用同一个 `AttachmentField`
+               * （`beforeUpload` 返回 `false` 不真上传、选文件即入列、逐条可删），读写同一份
+               * `resultInfo.diffAdjustFiles` —— 同一件事若一个有回显、一个没有，用户只会怀疑哪个坏了。
+               */}
+              <AttachmentField
+                label="差异调节表"
+                actionText="上传附件（支持 PDF / Excel）"
+                accept=".pdf,.xls,.xlsx"
+                files={diffAdjustFiles}
+                onChange={setDiffAdjustFiles}
+                labelWidth={200}
+              />
 
               <div
                 style={{
@@ -769,9 +829,10 @@ export default function ReplyResultModal({
                 </div>
               )}
 
+              {/* 「盖章不一致处原因描述」—— 同上，核验页印章识别的「人工确认」列也填这一格 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
-                  盖章不一致处原因描述
+                  {RESULT_NOTE_FIELDS.sealReason}
                 </span>
                 <Input.TextArea
                   rows={2}
@@ -782,26 +843,42 @@ export default function ReplyResultModal({
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
-                  替代性测试文件
-                </span>
-                <Upload beforeUpload={() => false} multiple>
-                  <Button size="small" icon={<PaperClipOutlined />}>
-                    上传附件（JPG / JPEG / PDF，可多附件）
-                  </Button>
-                </Upload>
-              </div>
+              {/*
+               * 两个附件字段（v3.34）—— 改用与核验页第 4 项**同一个组件**（`AttachmentField`）：
+               * 两处读写同一份 `resultInfo`，形态与交互（选文件即入列、可逐条删、显上传人与时间）
+               * 就该一模一样；此前这里是两个"不读不写"的上传按钮，选了文件一保存就没了。
+               * `labelWidth` 传 200 是为了与本页其它行（差异说明 / 底稿指引）的标签列对齐。
+               */}
+              <AttachmentField
+                label="替代性测试文件"
+                actionText="上传附件（JPG / JPEG / PDF，可多附件）"
+                accept=".jpg,.jpeg,.pdf"
+                files={altTestFiles}
+                onChange={setAltTestFiles}
+                labelWidth={200}
+              />
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
+              {/* 「拟执行的进一步核查程序及底稿指引」—— 文本输入，不是上传件（v3.34，用户拍板） */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                <span
+                  style={{
+                    width: 200,
+                    fontSize: 13,
+                    color: 'var(--c-text-2)',
+                    flexShrink: 0,
+                    textAlign: 'right',
+                    paddingTop: 5,
+                  }}
+                >
                   拟执行的进一步核查程序及底稿指引
                 </span>
-                <Upload beforeUpload={() => false}>
-                  <Button size="small" icon={<FileExcelOutlined />}>
-                    上传附件（支持 Excel）
-                  </Button>
-                </Upload>
+                <Input.TextArea
+                  rows={3}
+                  value={procedureNote}
+                  onChange={(e) => setProcedureNote(e.target.value)}
+                  placeholder="例：差异科目逐笔追至明细账与出入库单并留存复印件（底稿索引 D-3-2）"
+                  style={{ flex: 1 }}
+                />
               </div>
             </div>
           </div>
@@ -820,7 +897,13 @@ export default function ReplyResultModal({
                   按标准《银行询证函》固定询证项核对，已自动带入回函识别结果
                 </span>
                 <span style={{ marginLeft: 'auto' }}>
-                  <Button size="small" icon={<UploadOutlined />}>
+                  {/*
+                   * 加一行（不是上传）—— 原先挂的是 `UploadOutlined`：那枚图标是
+                   * **把文件传上来**的意思，而这颗按钮做的是**往表里加一行询证事项**，
+                   * 两者在站内都有各自的固定记号（上传 = `CloudUploadOutlined`），
+                   * 于是这枚图标既错义、又占了上传的坑。改 `PlusOutlined`（加）。
+                   */}
+                  <Button size="small" icon={<PlusOutlined />}>
                     新增询证事项
                   </Button>
                 </span>
@@ -865,7 +948,8 @@ export default function ReplyResultModal({
                 已自动带入回函识别的差异科目
               </span>
               <span style={{ marginLeft: 'auto' }}>
-                <Button size="small" icon={<UploadOutlined />}>
+                {/* 同上：「加一行」用 `PlusOutlined`，不用上传的那枚 */}
+                <Button size="small" icon={<PlusOutlined />}>
                   新增分录
                 </Button>
               </span>

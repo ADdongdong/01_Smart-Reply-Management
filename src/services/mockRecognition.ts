@@ -56,8 +56,9 @@ export function advanceTask(task: RecognitionTask): { task: RecognitionTask; cha
    * 只在这封**已经没有任何检测项可推进**时提前返回（v3.29 改判据）。
    *
    * 原判据是 `task.status === 'failed'` —— 后果是**一个检测项失败就把整封函证钉死**：
-   * 它**后面的检测项永远停在「待×××」**（既不再跑，也永远不会 `done`），这封函证于是既
-   * 进不了列表、也不在识别区里动。用户要求：「识别出错的，**不要阻塞，继续识别后面的内容**」。
+   * 它**后面的检测项永远停在「待×××」**（既不再跑，也永远不会 `done`），
+   * 于是这一封的核查**永远跑不完**（「智能核查状态」会一直停在"正在核查"，
+   * 旗子再也点不满）。用户要求：「识别出错的，**不要阻塞，继续识别后面的内容**」。
    *
    * 故改为按「还有没有没跑完的项」判断：失败的项本身不会再被 pick（它不是 waiting / running），
    * 其余项照常逐项跑完；全部尘埃落定后 `status` 由 `anyFailed` 决定为 `failed`
@@ -119,7 +120,7 @@ export function advanceTask(task: RecognitionTask): { task: RecognitionTask; cha
        * 那一步正是"失败会阻塞"的真正来源（比旧版那个 `status === 'failed'` 提前返回更隐蔽）：
        * `advanceBatch.canAdvance` 只推进 `status === 'pending'` 的任务 —— 状态一旦提前翻成
        * `failed`，这封**剩下的检测项就再没人推进**，永远停在「待×××」，
-       * 于是它既进不了列表（`stagesSettled` 为假）、也永远挂在识别区里收不起来。
+       * 于是它永远结不了案（`stagesSettled` 为假 ⇒ 结论回填不了、失败案也结不了）。
        * 实测就卡在这一处：华泰证券那封在 t=30s 起就一动不动。
        *
        * 现在：失败的只是**那一个检测项**，整封继续把其余项跑完，跑完才判 `failed` ——

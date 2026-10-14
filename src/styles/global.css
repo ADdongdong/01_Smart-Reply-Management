@@ -182,26 +182,23 @@ body {
   cursor: help;
 }
 
-.ai-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: var(--h-tag-sm);
-  padding: 0 4px;
-  border-radius: var(--radius-tag);
-  font-size: 11px;
+/*
+ * ✦ 的**裸形态**（`AiGlyph`，2026-10-14）—— 没有悬停卡，故 `cursor` 不提示"可悬停"，
+ * 也不带 `margin-left`（它常做按钮 icon 或标题前缀，位置由父元素的布局决定）。
+ */
+.ai-glyph {
+  display: inline-block;
+  font-size: 12px;
   line-height: 1;
   color: var(--c-primary);
-  background: var(--c-ai-bg);
-  white-space: nowrap;
 }
 
-/* 低置信度 —— 与「高风险」共用红档：底色与文字都走深档。
-   此前这里底色用红档、文字却是墨色，与风险标签并列时看起来像两种语义 */
-.ai-chip--low {
-  color: var(--c-risk-high-text);
-  background: var(--c-risk-high-bg);
-}
+/*
+ * `.ai-chip`（AI 置信度胶囊）与 `.ai-chip--low` 已于 **2026-10-14 删除** ——
+ * 用户：「**去掉所有的置信度**」。删掉的是一整套视觉件（胶囊 + 低置信度红档），
+ * 不是"藏起来"：`AiChip` 组件（`Marks.tsx`）与它的全部调用处同步移除，
+ * 全站此后不再出现任何置信度数字或百分比。
+ */
 
 /* ------------------------- 状态标签（全站统一） ------------------------- */
 
@@ -278,11 +275,50 @@ body {
   background: var(--c-risk-medium-bg);
   border-color: rgba(232, 145, 45, 0.42);
 }
-/* 标签里的 ✦ —— 更小一号，不顶高行距 */
+/* 标签里的前置标记（✦）—— 更小一号，且与文字垂直居中 */
 .status-tag__mark {
+  display: inline-flex;
+  align-items: center;
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
+}
+/*
+ * **"还在动"的标签**（列表「智能核查状态」的「正在核查」那一枚，2026-10-14 二次定）——
+ * 动效落在标签**自己的底色**上：一道亮光沿底色扫过。
+ *
+ * 这条规矩绕了一圈才定：先是它 → 换成 beautifului 的 **3×3 像素网格**（放标签 `mark` 位）
+ * → 又换回它（用户：「既然智能核查动效在智能核查进度这里有了，那智能核查状态就不要
+ * 那 9 个点了，**换一种**」）。两列的动效因此分工：**逐项 = 像素网格（进度列）·
+ * 整体 = 标签扫光（本列）**，不会让用户以为两处在说同一件事。
+ *
+ * 三条克制：① 只改 `background-position`（不碰布局、不碰文字色，标签的语义色仍读得清）；
+ * ② 只在"正在核查"时挂（同一刻至多一枚在动）；③ 受 `prefers-reduced-motion` 约束（下方降级块）。
+ */
+.status-tag--live {
+  background-image: linear-gradient(
+    100deg,
+    var(--c-primary-bg) 38%,
+    /* 扫过的那一段比底色亮一档：底色是 0.08 的主色，光带取 0.2 —— 只加浓、不换色相 */
+    rgba(59, 91, 219, 0.2) 50%,
+    var(--c-primary-bg) 62%
+  );
+  background-size: 250% 100%;
+  animation: tag-sweep 1700ms linear infinite;
+}
+@keyframes tag-sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -130% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-tag--live {
+    animation: none;
+    background-image: none;
+  }
 }
 /* 带悬停说明的标签 —— 光标提示「这里可以悬停」
    （它承载的是 Tooltip，而不是链接或按钮，故不用手型） */
@@ -793,44 +829,47 @@ body {
   cursor: help;
 }
 
-/* ------------------------- 列表「AI 核验事项」事项区（v3.28；v3.29 收敛为一行文字链） ------------------------- */
+/* ---------- 列表「核查事项复核」格（v3.28 立；v3.29 文字链；v3.30 定名 + 勾选框；v3.31 收成整条状态） ---------- */
 
 /*
- * 一条回函的**待办清单**。形态已经收敛三轮（每轮都在减）：
+ * 一条回函的**整条复核状态**（列名 v3.30 由「AI 核验事项」改为「**核查事项复核**」）。
+ * 形态收敛过五轮，每一轮都在往下减：
  *
  * ① v3.28 —— 三枚同规格的**浅底小标签**，未处理与已处理只差「虚线 vs 实线 + 一枚小勾」，
  *    用户判「太不明显了，交互感很差」；
  * ② 上一轮 —— 改成**勾选清单**（白底描边 + 空心勾选框 + 首位「待办 N」计数）；
- * ③ 本轮 —— 用户又砍一刀：「**AI 识别去掉待办 3 这个标签**，并且这里要更宽一些，
+ * ③ 上一轮 —— 用户又砍一刀：「**AI 识别去掉待办 3 这个标签**，并且这里要更宽一些，
  *    印章识别 / 发函回函一致性检测 / 手写体识别这些可以换成**蓝色或者别的字体，让用户一眼能看出来
- *    可以点**。**不要做成按钮的这种形式**」。
+ *    可以点**。**不要做成按钮的这种形式**」；
+ * ④ v3.30 —— 定名「核查事项复核」，记号定成**勾选框**、状态写成两个词
+ *    （用户：「两个状态：待复核、已经复核……不以标签形式展示，需要用户知道这是待完成的 todo」）；
+ * ⑤ v3.31 —— **格内不再逐项列**，整格只表达一个状态（用户：「**这一列就展示：待复核、已复核**……
+ *    因为前面已经有 AI 核查进度展示具体进行了哪些 AI 核查项目，所以，这里就不展示具体的哪些核查项了，
+ *    只需要告诉用户，要去做 AI 核查」）。
  *
- * 现在每项就是**一枚文字链**：
- * · **未处理** —— **主色文字**（本列唯一一片蓝，一眼就是"这里可以点"），悬停加下划线；
- * · **已处理** —— 灰字 + 一枚小勾（勾在文字**前**）。
+ * 现在整格 = **勾选框 + 状态词（待复核时另加一枚「· 剩 N 项」）+ `✦`**：
+ * · **待复核** —— **主色**（本列唯一一片蓝，一眼就是"这里可以点"）+ **空方框**
+ *   + 「待复核 · 剩 N 项」（N 来自 `aiReviewSummaryOf` 的 `pending`）；
+ * · **已复核** —— **灰字** + **方框加勾** + 「已复核」。
  *
- * 「待办 N」那枚计数为什么删：它是"还剩几件事"的汇总，而**未处理的项本身就是蓝的** ——
- * 数一数有几枚蓝字即可；挂一枚实心主色小徽标反而成了整格里最重的东西，与本轮"轻"的取向相反。
+ * 「已复核」**只有一个颜色**（v3.31 用户确认「统一一个色」）：不再按采纳（绿）/
+ * 不采纳（灰）分色 —— 本列只回答"做完了没有"，采纳与否进详情看；这里多一种颜色，
+ * 只会让人以为它在说"结论好不好"。灰的另一个理由是它要**退到背景里**：
+ * 扫过去时剩下的那片蓝（待复核）才是还要接着做的事。
  *
- * 「已处理」的勾分色：**绿 = 已采纳 / 灰 = 已标记不采纳** —— "处理过"是同一个事实，
- * 采纳与否只由勾的颜色区分（沿用 v3.28 的语义，只是从"框的底色"挪到了"勾的颜色"）。
+ * 「具体有哪几项、哪几项还没做」由左边「智能核查进度」列回答（`SmartCheckCells`，机器逐项）——
+ * 两列并排的读法是「**机器核完没有 → 我要不要复核**」，不必在相邻两格各列一遍同一份清单。
  *
  * ⚠️ 视觉上不再是按钮，但组件侧**仍用 `<button>`**：可 Tab 聚焦、有焦点环、键盘可触发
  * （项目规范，用 `<span onClick>` 会把这些全丢掉）。这里只把外观重置成文字链接。
  *
- * `white-space: nowrap` —— 用户明确要求「**不要换行，一行搞定**」。
+ * `white-space: nowrap` —— 用户明确要求「**不要换行，一行搞定**」（v3.29）。
  */
-.ai-review {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  white-space: nowrap;
-}
-/* 文字链 —— 未处理态（主色 = 可点） */
+/* 整格 —— 待复核态（主色 = 可点）。格内（勾选框 / 状态词 / 剩余项数 / ✦）间距 4px */
 .ai-review__link {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   padding: 0;
   margin: 0;
   border: 0;
@@ -856,40 +895,64 @@ body {
   color: var(--c-text-3);
 }
 /*
- * **todo 标识 —— 前置小圆环**（用户从四个方案里选的这一个）。
+ * **todo 勾选框**（v3.30 立，记号由"自绘小圆环"换成 Tabler 的方框 / 方框+勾）。
  *
- * 语言与右侧「回函进度」列的 `.progress-steps__dot` 同族（空心圆 → 实心勾），
- * 差别只在**未处理时的颜色**：那一列走中性灰（"还没轮到"），这一列走**主色**
- * （"这件事**等你做**"）—— 同样的记号，靠颜色把"轮到我"与"等我做"分开。
+ * 用户口径：「**两个状态：待复核、已经复核**。这两个状态，**不以标签形式展示**，
+ * 需要用户知道这是**待完成的 todo**」：
+ * · **待复核** = 空方框（`tabler:square`），走**主色** —— 本列唯一一片蓝，"这件事等你做"；
+ * · **已复核** = 方框 + 勾（`tabler:square-check`），随文字一起转灰（统一一个色，见文件头的说明）。
  *
- * 尺寸比进度列那枚小一号（12px / 进度列 14px）：这里一行要放三项，圆环不能抢文字的戏。
+ * 为什么不是标签、也不是那枚圆环：
+ * · **标签**（浅底胶囊）在本站是"状态结论"的语言（`StatusTag`，紧邻的「智能核查状态」列就用它）；
+ *   这一格是**待办** —— 两者同屏若长得一样，就分不清"这封跑到哪了"与"我还有没有要做的事"；
+ * · **勾选框**是"待办"最不需要解释的记号（空框 = 没做、打勾 = 做了）。原来那枚空心圆环其实
+ *   也被用户读成"待办勾选框"（见 `SmartCheckCells` 头注释里那次改标签的由来），
+ *   既然要的本来就是勾选框，就直接画勾选框。
+ *
+ * 尺寸 16px：比原来那枚 12px 的圆环大一档 —— 方框要能看清"空 / 有勾"的差别，
+ * 太小就退化成一个小方块。v3.31 格内只剩这一件，不必再顾虑"一行放三项"，
+ * 故 16px 保留（它现在是这一格里唯一有形状的东西）。
+ * 描边走 SVG 自带的 `stroke-width="2"`（与「智能核查进度」列那两枚裸勾同一处置）。
  */
-.ai-review__dot {
+.ai-review__box {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
-  height: 12px;
-  border: 1.5px solid var(--c-primary);
-  border-radius: 50%;
-  font-size: 8px;
-  line-height: 1;
-  color: #fff;
+  width: 16px;
+  height: 16px;
+  color: var(--c-primary);
 }
-/* 已处理：实心 + 白勾。绿 = 已采纳 */
-.ai-review__link.is-adopted .ai-review__dot {
-  border-color: var(--c-risk-low);
-  background: var(--c-risk-low);
+.ai-review__box svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
-/* 灰 = 已标记不采纳（"处理过"是同一个事实，分歧只在颜色） */
-.ai-review__link.is-done:not(.is-adopted) .ai-review__dot {
-  border-color: var(--c-text-3);
-  background: var(--c-text-3);
+/* 已复核：勾选框随文字一起转灰（统一一个色 —— 采纳 / 不采纳的区分不在这格里） */
+.ai-review__link.is-done .ai-review__box {
+  color: var(--c-text-3);
 }
 /*
- * 每项后面的 **AI 标识**（`✦`，全站统一的 AI 产出标记）—— 用户要求「后面要加上 AI 的标识」。
- * 不单独给颜色，随本项文字走（未处理 = 主色、已处理 = 灰），免得一行里出现第三种颜色。
+ * **状态的文字**（v3.30）—— 「待复核 / 已复核」，这一格的主语。
+ *
+ * 用户要求"两个状态"，那就得一眼读到，不该藏在悬停里（悬停只用来补细节）。
+ * 它是**纯文字**：没有底色、没有描边、没有圆角 —— 所以是"状态"，不是"标签"
+ * （"不以标签形式展示"否掉的是胶囊那种形态，不是否掉"能不能写出状态"）。
+ * v3.31 起它是格内唯一的主文字，故与整格同级（13px），颜色跟整格走（待复核主色、已复核灰）。
+ */
+.ai-review__state {
+  font-size: 13px;
+  line-height: 1;
+}
+/*
+ * 原 `.ai-review__rest`（「· 剩 N 项」那段小字）已于 **v3.35 删除** ——
+ * 用户口径：「这里不展示剩下几项」。状态词（待复核 / 已复核）与勾选框仍在，
+ * "还剩哪几件"只在悬停里给（见 `AiReviewCell`）。
+ */
+/*
+ * 格尾的 **AI 标识**（`✦`，全站统一的 AI 产出标记）—— 用户要求「后面要加上 AI 的标识」。
+ * 不单独给颜色，随本格文字走（待复核 = 主色、已复核 = 灰），免得一格出现第三种颜色。
+ * 它不参与状态表达（这一格复核的正是 AI 认出来的东西，故保留）。
  */
 .ai-review__ai {
   font-size: 10px;
@@ -924,9 +987,19 @@ body {
   animation: shimmer-move 1400ms linear infinite;
   text-decoration: none;
 }
-/* 微光只走文字，`✦` 保持可见（否则它会被继承的透明填充一起吃掉） */
-.ai-review__link:hover .ai-review__ai {
+/*
+ * 微光只走**状态词**（这一格的主文字），两样附属记号保持可见 —— 否则它们会被继承的透明填充
+ * 一起吃掉，勾选框更会**整个消失**（它用 `stroke: currentColor`，`color: transparent` 一并生效）：
+ * · **剩余项数**与 `✦`（AI 标识）是文字 → 补 `-webkit-text-fill-color`；
+ * · **勾选框**是 SVG → 补 `color`（`-webkit-text-fill-color` 对 SVG 不起作用，两者都要写）。
+ *
+ * 限定 `:not(.is-done)`：扫光只挂在**待复核**这一态（已复核的事不需要再"正在读"，
+ * 而且那格是灰字，点亮它会和"这件事还等着你"混淆）。
+ */
+.ai-review__link:not(.is-done):hover .ai-review__ai,
+.ai-review__link:not(.is-done):hover .ai-review__box {
   -webkit-text-fill-color: #7f96f7;
+  color: #7f96f7;
 }
 @media (prefers-reduced-motion: reduce) {
   .ai-review__link:not(.is-done):hover {
@@ -935,9 +1008,118 @@ body {
     background: none;
     -webkit-text-fill-color: currentColor;
   }
-  .ai-review__link:hover .ai-review__ai {
+  .ai-review__link:not(.is-done):hover .ai-review__ai,
+  .ai-review__link:not(.is-done):hover .ai-review__box {
     -webkit-text-fill-color: currentColor;
+    color: var(--c-primary);
   }
+}
+
+/* ------------------- 列表「智能核查状态 / 进度」两列（2026-10-14） ------------------- */
+
+/*
+ * 这两列回答的是「这一行的核查跑到哪了」，读的是**识别任务**（不是记录）：
+ * · **状态** = 未开始 / 正在核查 / 已核查 / 核查失败 —— **走 `StatusTag` 颜色标签**
+ *   （用户：「做成颜色标签，不要使用 to-do 样式」）；**"正在核查"那枚的动效**是
+ *   **标签底色扫光**（`.status-tag--live`，见上）—— 绕了一圈定在这里：先扫光 → 换成
+ *   像素网格（放标签 `mark` 位）→ 用户又要求换回来（「既然智能核查动效在智能核查进度
+ *   这里有了，那智能核查状态就不要那 9 个点了，换一种」）；
+ * · **进度** = 逐项，**每项前面一枚标识**（`StageMark`）：未核查一条浅灰短横、正在核查
+ *   一张在跑的像素网格、核完一枚蓝对勾、失败一枚红叉（`FlagFilled` 那版早已换掉）。
+ * 两者的判据与取舍见 `components/SmartCheckCells.tsx` 的头注释。
+ *
+ * **两列的动效分工**（这才是上面那次"绕圈"换来的结论）：**逐项 = 像素网格（进度列）·
+ * 整体 = 标签扫光（状态列）** —— 同一个动效同时出现在两处，用户会以为它们说的是同一件事
+ * （"哪一项在跑" vs "这封在跑"），也让两列读起来像同一列的复制。
+ *
+ * （这里原先还有一组 `.smart-status*`：方块 + 文字，方块沿用 `insight.css` 的 `.in-status`。
+ *   它被用户在 2026-10-14 否掉 —— 那枚空心/旋转小方块与「核查事项复核」列的空心圆环太像，
+ *   读者会以为那是"待办勾选框"。整套样式随组件改写一并删除，不留死类名。）
+ */
+
+/* 进度：一行文字链，项间 14px（与「核查事项复核」列同款间距，两列并排读起来是一套） */
+.smart-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.smart-check__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: help;
+}
+.smart-check__item.is-waiting {
+  color: var(--c-text-3);
+}
+.smart-check__item.is-running {
+  color: var(--c-primary);
+  font-weight: 500;
+}
+.smart-check__item.is-done {
+  color: var(--c-text-1);
+}
+.smart-check__item.is-failed {
+  color: var(--c-risk-high-text);
+}
+/*
+ * 状态标识 —— 形状按状态给（2026-10-14 定，形状改过四版，最新一版见 `StageMark` 的头注释）。
+ *
+ * · 未核查（`waiting`，默认）→ **一条浅灰短横**（`.smart-check__dash`，见下）。
+ *   与站内空值 `—` 同一个记号，读作"这一格还没有结果"；用浅灰是因为它**不该抢戏**
+ *   （2026-10-14 用户否掉了原先那版"压暗的像素网格"：「还没有核查的时候，前面不要用灰色的 9 个点」）；
+ * · 正在核查（`is-running`）→ **主色**（那枚像素网格在跑，动效继承这个色）；
+ * · 已核查（`is-done`）→ **主色蓝的裸勾**。**不用绿** —— 绿在站内被"相符 / 低风险"占着
+ *   （业务结论"这单没问题"），而这里说的是"**机器**核完了"，是系统自己的动作；
+ * · 核查失败（`is-failed`）→ 红叉。
+ *
+ * **这一格是定宽的 20×20**（2026-10-14 由 14 加大）：
+ * · 用户原话「**对勾太小了，不明显，能不能再大一点**」—— 14px 时圈只有 10.5px、勾更小；
+ * · 取 **20** 的两条依据：① 图标规范的尺寸阶梯是 14 / 16 / 20 / 24，要"明显大一点"就跳下一档；
+ *   ② **20px 盒里的像素网格（15×15）与裸勾（约 12.5×8.3px）在行里占的光学体量相当**，
+ *   换态时不跳；
+ * · 给它们一个**定宽盒子**居中摆放，标识换态时项名不会左右跳。
+ * 勾 / 叉是内联 SVG（Tabler，`viewBox` 24，描边 **2** —— 图标规范：≥16px 用 2）。
+ */
+.smart-check__mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--c-text-3);
+}
+.smart-check__mark > svg {
+  width: 100%;
+  height: 100%;
+}
+.smart-check__item.is-running .smart-check__mark {
+  color: var(--c-primary);
+}
+.smart-check__item.is-done .smart-check__mark {
+  color: var(--c-primary);
+}
+.smart-check__item.is-failed .smart-check__mark {
+  color: var(--c-risk-high);
+}
+
+/*
+ * **未核查的占位短横**（2026-10-14，替掉原先那版"压暗的 3×3 像素网格"）——
+ * 用户原话：「智能核查进度，**在还没有核查的时候，前面不要用灰色的 9 个点。换个别的**」。
+ *
+ * 形状取一条 **10×2px、圆角 1px 的短线**，就是站内空值那个 `—` 的记号：
+ * 3 条短横排一行读作"这三项都还没认到"，认完一项它就被一枚蓝勾**替换**掉 ——
+ * "替换"比"点亮"更符合这一列的事实（没认到的时候，本来就没有任何结果可展示）。
+ * 颜色沿用 `--c-text-3`（这个盒子的默认色），与未开始的项名同色档。
+ */
+.smart-check__dash {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
 }
 
 /* 核验进度徽标 */
@@ -1371,30 +1553,8 @@ body {
   min-width: 0;
   font-variant-numeric: tabular-nums;
 }
-.ai-card__pct {
-  font-weight: 600;
-}
-.ai-card__pct.is-low {
-  color: var(--c-risk-high-text);
-}
-/* 迷你置信度计量条 —— 让「92%」与「63%」在视觉上立刻分得开 */
-.ai-card__meter {
-  display: inline-block;
-  width: 54px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.22);
-  overflow: hidden;
-}
-.ai-card__meter > i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: currentColor;
-}
-.ai-card__meter > i.is-low {
-  background: var(--c-risk-high-text);
-}
+/* `.ai-card__pct`（百分比）与 `.ai-card__meter`（迷你计量条）已于 2026-10-14 随
+   「去掉所有的置信度」一并删除 —— 来源卡现在只剩「来源」一行。 */
 .ai-card__foot {
   margin-top: 8px;
   padding-top: 6px;
@@ -2582,6 +2742,289 @@ body {
     height: 420px;
   }
 }
+
+/* ------------------- 核验页「回函结果补充」+ 上传类字段行（v3.34） ------------------- */
+
+/*
+ * 核验页第 4 项装三区内容（补填必填项 / 附件 / 底稿指引）。原先这三区**一路平铺**：
+ * 标题与说明挤在同一行（说明被挤成两截）、字段行之间没有间隔、附件行的标签与按钮
+ * 各占一行（一个字段三四行高），整片看着"糊在一起"（用户：「这个页面展示优化」）。
+ *
+ * 现在按**分区 + 行线**排，口径与结果页表单一致（标签在左、控件在右）：
+ * · 每区一句标题，**说明另起一行** —— 右栏不宽，与标题同行必然被挤断；
+ * · 区内每个字段一行，行间一条发丝线；控件靠右（`auto` 在放不下时自然收成 0，不会挤扁）；
+ * · 保存行动作恒在右端，与上面各区之间画一条线。
+ */
+.result-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 8px;
+}
+.result-extra__section {
+  min-width: 0;
+}
+.result-extra__title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-1);
+}
+.result-extra__hint {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.7;
+  color: var(--c-text-3);
+}
+/*
+ * 原 `.result-extra__row` / `__label` / `__req`（「AI 没带出来的必填项」那几行的版式）已于
+ * **v3.35 随该区一并删除** —— 那块内容改由前面三个页签的人工确认列承载（见 `ReplyResultExtraPanel`）。
+ */
+/* 底稿指引：一整段文本，铺满整行（挤在右半栏里读不了几行） */
+.result-extra__textarea {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.result-extra__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-hairline);
+}
+.result-extra__actions .ant-btn {
+  margin-left: auto;
+  flex: none;
+}
+/* 核验页里同一种"一行一字段"的排法也套给附件行（结果页表单不加行线，故作用域限定在本面板） */
+.result-extra .attach-field {
+  padding: 9px 0;
+  border-top: 1px solid var(--c-hairline);
+}
+
+/*
+ * 上传类字段行（`AttachmentField`）—— 这两个类名此前**没有任何样式**：
+ * 标签、按钮、文件列表按块级元素的默认行为各占一行，一个字段要三四行高。
+ * 现在标签在左、按钮紧随其后同一行，文件列表整行铺在下面（`flex-basis: 100%`）。
+ */
+.attach-field {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.attach-field__label {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--c-text-1);
+}
+.attach-field__body {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 已上传件 —— 逐条列出（文件名 / 大小 / 上传人 / 时间 + 删除），占满一整行 */
+.attach-field__list {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.attach-field__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-tag);
+  background: var(--c-fill-light);
+  font-size: 12px;
+}
+.attach-field__icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--c-text-3);
+}
+/* 文件名可能很长（带日期与版本号）—— 省略号，别把大小/时间挤出去 */
+.attach-field__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--c-text-1);
+}
+.attach-field__meta {
+  flex: none;
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.attach-field__del {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-tag);
+  background: none;
+  color: var(--c-text-3);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+/* 删除是破坏性动作，悬停才显红 —— 常驻红会把整行染得紧张 */
+.attach-field__del:hover {
+  background: var(--c-risk-high-bg);
+  color: var(--c-risk-high-text);
+}
+.attach-field__empty {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+/* ------------- 核验页「✦ AI 识别结果 / ✎ 人工确认」两栏（v3.34） ------------- */
+
+/*
+ * 每一项排成两栏：左是 AI 给出的事实与结论、右是回函结果里对应的那几个字段。
+ * 用户口径：「前面的 AI 识别的结果要标记出来是 ai 识别的，人工填写的要标记是人工填写」——
+ * 并排 + 各挂一枚记号，就是这句话的版面实现。
+ *
+ * 记号只有两枚，与全站既有口径一致（见 `Marks.AiGlyph` 的来历）：
+ * **✦ = AI 产出**、**✎ = 人工填写**。
+ */
+.verify-cols {
+  display: grid;
+  /* 两栏**等宽**（用户口径：人工确认的区域，和 AI 识别结果的区域宽度保持一致） */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+/* 窄屏：右栏本就不宽，两栏并排会把人工确认的控件挤成一行半 —— 改为上下堆叠 */
+@media (max-width: 1100px) {
+  .verify-cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+/* 栏头 —— 标题一行、说明另起一行（右栏不宽，说明跟标题同行必被挤断，见 v3.35 截图） */
+.manual-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.manual-head__title {
+  font-weight: 600;
+  color: var(--c-text-2);
+}
+.manual-head__note {
+  flex: 1 1 100%;
+  line-height: 1.6;
+  color: var(--c-text-3);
+}
+/* 人工确认栏头的**人形图标** —— 与 `.ai-glyph`（✦）成对：一枚标 AI 产出、一枚标人工填写 */
+.manual-head__icon {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--c-text-2);
+}
+/* AI 侧的事实清单 —— 与两项明细的浅底同层（不是第二个框） */
+.manual-facts {
+  background: var(--c-fill-light);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+/* 人工确认栏 —— 一格一行、行间发丝线，与「回函结果填写」页表单同一读法 */
+.manual-col {
+  min-width: 0;
+}
+.manual-col__body {
+  /* 与 AI 识别结果那栏同一种底层色块（用户口径）*/
+  background: var(--c-fill-light);
+  border-radius: 8px;
+  padding: 4px 12px;
+}
+/*
+ * 每一行都是**「字段名一行 + 控件一行」**（v3.35）。
+ *
+ * 原先做成"标签在左、控件靠右"：右栏只有半个屏幕宽，「回函盖章是否与被询证方名称一致」
+ * 这种长字段名会把控件挤到最右、中间留一大段空；而「是否为公章」这类短名又让控件贴在左边 ——
+ * 一列看下来控件忽左忽右、行高忽高忽低（用户：「这个界面太丑了，看起来太难受了」）。
+ * 单列表单的下标法只有一个：标签在上、控件在下、控件占满整行。
+ */
+.manual-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.manual-row__label {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--c-text-1);
+}
+/* 补充说明跟在字段名后面、小一档；太长时随标签一起换行（不再挤控件） */
+.manual-row__hint {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+.manual-row__ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+/*
+ * 核验页页签栏下面那条**分段进度条**（v3.35）—— 每办完一项，它那一格从浅灰推进到主色实心。
+ *
+ * 绝对定位在页签行下面：`left/right: 4px` 与容器的 `padding: 4px` 对齐、`gap: 4px` 与页签一致，
+ * 于是每一格**正对着它上面那个页签** —— 「哪一项办完了」不必在页签里塞记号。
+ */
+.verify-tabs__track {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  display: flex;
+  gap: 4px;
+}
+.verify-tabs__seg {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(16, 24, 40, 0.1);
+  transition: background-color var(--motion-base) var(--ease-out);
+}
+.verify-tabs__seg.is-done {
+  /* 主色 —— 站内"系统 / 动作完成"的色档；绿留给业务结论（相符 / 低风险） */
+  background: var(--c-primary);
+}
+
 
 /* ⑦ 无障碍降级 —— 用户开启「减少动态效果」时全部退回静态 */
 @media (prefers-reduced-motion: reduce) {

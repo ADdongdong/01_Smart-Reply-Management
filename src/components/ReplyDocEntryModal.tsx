@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { App, Button, Input, Tag, Tooltip } from 'antd'
 import {
+  CarOutlined,
   CheckCircleFilled,
   CloudUploadOutlined,
   FilePdfOutlined,
-  InboxOutlined,
   InfoCircleFilled,
 } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
@@ -164,7 +164,7 @@ export default function ReplyDocEntryModal({
          * 本弹窗承载的是「回函快递信息」，左侧就该只给面单 —— 面单是回函文件里的一页，
          * 这里直接渲染**面单本身的单页文件**（`fileUrl` + `singlePage`），
          * 因此滚不出其它页、也看不到函证正文（要看正文从列表的「查看」入口进）。
-         * 面单上没有印章 / 落章区域 / 手写区，故不传 `showRegions` / `sealBoxes`，并隐藏「AI 批注」切换。
+         * 面单上没有印章 / 落章区域 / 手写区，故不传 `showRegions` / `sealBoxes` / `handwriting`（无批注可叠）。
          */}
         <div style={{ width: 460, flexShrink: 0 }}>
           <div className="panel" style={{ padding: 10 }}>
@@ -179,7 +179,7 @@ export default function ReplyDocEntryModal({
                 confirmationNo={record.confirmationNo}
                 fileUrl={faceSheetUrl}
                 singlePage
-                hideViewToggle
+                
                 height={520}
               />
             ) : (
@@ -198,7 +198,15 @@ export default function ReplyDocEntryModal({
                   textAlign: 'center',
                 }}
               >
-                <InboxOutlined style={{ fontSize: 26, color: 'var(--c-text-3)' }} />
+                {/*
+                 * 「未识别到快递面单」的空态图标改用 **`CarOutlined`**（2026-10-14 图标盘点）：
+                 * ① 原先是 `InboxOutlined`，与**拖放区**那枚同形 —— 同一个符号在站内表示两件事；
+                 * ② 站内的"面单"记号本来就是卡车（缩略图角标、`SplitPanel` 的包裹行都用它），
+                 *    空态跟着它走，用户不必再认一遍；
+                 * ③ 尺寸 26 → **24**（站内图标尺度按 14/16/20/24/32 取，26 是当年随手写的）。
+                 * 颜色保持中性灰：这是"这儿没有"的说明，不是动作召唤。
+                 */}
+                <CarOutlined style={{ fontSize: 24, color: 'var(--c-text-3)' }} />
                 <div style={{ fontSize: 13, color: 'var(--c-text-2)' }}>未识别到快递面单</div>
                 <div style={{ fontSize: 12, color: 'var(--c-text-3)', lineHeight: 1.9 }}>
                   面单随回函一并寄回、由识别阶段读出

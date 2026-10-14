@@ -277,7 +277,6 @@ export default function InsightView() {
             <div className="insight-card" style={{ display: 'flex', alignItems: 'center' }}>
               <PixelLoader
                 done={!running}
-                cells={9}
                 label={running ? '正在识别回函' : '识别已完成'}
                 timeText={
                   totalMs > 0
@@ -321,7 +320,6 @@ export default function InsightView() {
                       : 'neutral'
                 }
                 basis={f.evaluation!.basis}
-                confidence={f.record?.verification?.consistency.confidence}
                 reasons={f.record?.verification?.riskReasons}
                 /*
                  * 风险等级随卡走（v3.14）—— 见 `RecommendationCard` 的卡头说明。

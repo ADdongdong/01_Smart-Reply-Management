@@ -13,14 +13,35 @@ import { StatusTag, type TagTone } from '@/components/StatusTag'
 /* ------------------- AI 来源标识 ------------------- */
 
 /**
+ * **AI 产出标记 ✦ 的"裸"形态**（2026-10-14 立）—— 不带悬停卡，只出那一个符号。
+ *
+ * 用在**位置小、不需要解释**的地方：按钮的 icon 位、小节标题前缀等。
+ * 立它的直接动因是图标盘点的结论：站内「AI 产出」的记号是 **`✦`**（`AiMark` / `AiReviewCell`
+ * 的项尾 / 标签的 mark 位都是它），但有三处却用了 **`ThunderboltOutlined`（⚡）** ——
+ * 而 ⚡ 在别处表示的是"**一键跑演示数据**"（三个演示入口）。同一个符号两种含义、
+ * 同一含义两种符号，两笔账都错。现在：
+ * · **AI 产出 = `✦`**（就是本件与 `AiMark`）；
+ * · **一键 / 快速 = `⚡`**（只留给演示数据入口）。
+ */
+export function AiGlyph() {
+  return (
+    <span className="ai-glyph" aria-hidden="true">
+      ✦
+    </span>
+  )
+}
+
+/**
  * AI 来源标识 ✦ —— 悬停给出**来源卡**（v2.49 由纯文字改为结构化卡片）。
  *
- * 依据结构参考了「上下文卡片」的做法：**标题（这是什么）→ 字段区（来源 / 置信度）→ 结论行**。
- * 对审计场景来说，「这个值从哪来」是证据链的一部分，值得比一行小字更清楚；
- * 置信度也从数字升级为「数字 + 迷你计量条」，低置信度一眼可见。
+ * 结构：**标题（这是什么）→ 字段区（来源）→ 结论行**。对审计场景来说，
+ * 「这个值从哪来」是证据链的一部分，值得比一行小字更清楚。
+ *
+ * ⚠️ **卡里的「置信度」一行已移除（2026-10-14，用户：「去掉所有的置信度」）** ——
+ * 连带 `AiChip`（胶囊）与 `.ai-card__pct` / `.ai-card__meter` 样式一并删除。
+ * `AiMark` 的 `confidence` 入参也随之取消：**留着一个没人读的参数比删掉更糟**。
  */
-export function AiMark({ source, confidence }: { source?: string; confidence?: number }) {
-  const low = confidence != null && confidence < 0.9
+export function AiMark({ source }: { source?: string }) {
   return (
     <Tooltip
       title={
@@ -36,22 +57,6 @@ export function AiMark({ source, confidence }: { source?: string; confidence?: n
                 <span className="ai-card__v">{source}</span>
               </div>
             )}
-            {confidence != null && (
-              <div className="ai-card__row">
-                <span className="ai-card__k">置信度</span>
-                <span className="ai-card__v">
-                  <span className={low ? 'ai-card__pct is-low' : 'ai-card__pct'}>
-                    {Math.round(confidence * 100)}%
-                  </span>
-                  <span className="ai-card__meter">
-                    <i
-                      className={low ? 'is-low' : undefined}
-                      style={{ width: `${Math.round(confidence * 100)}%` }}
-                    />
-                  </span>
-                </span>
-              </div>
-            )}
           </div>
           <div className="ai-card__foot">需人工确认后方可生效</div>
         </div>
@@ -59,19 +64,6 @@ export function AiMark({ source, confidence }: { source?: string; confidence?: n
     >
       <span className="ai-mark">✦</span>
     </Tooltip>
-  )
-}
-
-/** AI 置信度胶囊 —— 文字走墨色，低置信度仅由底色提示（红档 = 需人工重点核对） */
-export function AiChip({ confidence, label = 'AI' }: { confidence: number; label?: string }) {
-  const low = confidence < 0.9
-  return (
-    <span
-      className={low ? 'ai-chip ai-chip--low' : 'ai-chip'}
-      title={low ? '置信度偏低，建议人工重点核对' : undefined}
-    >
-      {label} {Math.round(confidence * 100)}%
-    </span>
   )
 }
 
@@ -256,7 +248,7 @@ export function ProgressSteps({
  * 于是把 v2.25 起的「`✦` + 虚线框 = AI 建议、实线 = 已人工确认」那套**整套去掉**：
  * 结论要么是用户认过的，要么根本还没结论 —— 两种状态各自有名字，不需要再教用户读边框样式。
  *
- * 三态（`review` 为承载相符性的那一项在「AI 核验事项」里的处置结果，见 `config/aiReview`）：
+ * 三态（`review` 为承载相符性的那一项在「核查事项复核」里的处置结果，见 `config/aiReview`）：
  * · **未确认**（那项还没处理、结果页也没填过）→ 中性「未确认」；
  * · **待人工判定**（那项被标记「不采纳」）→ 中性 —— AI 的结论人没收，相符性得由人在
  *   「回函结果填写」页给；
@@ -289,7 +281,7 @@ export function MatchTag({
    */
   pending?: boolean
   /**
-   * **承载相符性的那一项在「AI 核验事项」里的处置结果**（v3.29）——
+   * **承载相符性的那一项在「核查事项复核」里的处置结果**（v3.29）——
    * 往来 = 印章识别、银行 = 回函是否相符检测（见 `AI_REVIEW_MATCH_CARRIER`）。
    * `undefined` = 还没处理。
    */
@@ -315,9 +307,9 @@ export function MatchTag({
   if (pending) {
     tips.push(RECOGNIZING_HINT)
   } else if (review === 'ignored') {
-    tips.push('你在「AI 核验事项」里标记了不采纳该项识别数据 —— 相符性以「回函结果填写」页的人工判断为准')
+    tips.push('你在「核查事项复核」里标记了不采纳该项识别数据 —— 相符性以「回函结果填写」页的人工判断为准')
   } else if (!confirmed) {
-    tips.push('待确认 —— 相符性以你在「AI 核验事项」里确认的结论为准；确认后这里才显示结果')
+    tips.push('待确认 —— 相符性以你在「核查事项复核」里确认的结论为准；确认后这里才显示结果')
   } else if (matched === null) {
     /* 无法判定的归因必须与该类型的相符性判据一致 —— 银行函证不得归因到印章落章区域 */
     tips.push(
@@ -328,7 +320,7 @@ export function MatchTag({
   } else {
     tips.push(
       review === 'adopted'
-        ? '已确认 —— 你在列表「AI 核验事项」里采纳了这一项的识别数据'
+        ? '已确认 —— 你在列表「核查事项复核」里采纳了这一项的识别数据'
         : '已确认 —— 你在「回函结果填写」页填写了相符性',
     )
   }
@@ -450,22 +442,23 @@ export function ResultBar({
 }
 
 /**
- * 事实清单的字段行 —— 标签 + 值（+ 补充说明 + 置信度胶囊）。
+ * 事实清单的字段行 —— 标签 + 值（+ 补充说明）。
  * 四项明细统一复用它，保证同一层级信息在各检测项里长得一样。
+ *
+ * ⚠️ **行尾那枚置信度胶囊已移除（2026-10-14，用户：「去掉所有的置信度」）** ——
+ * 故 `confidence` 入参一并取消（调用处同步删参）。这一行现在只讲「事实是什么」。
  */
 export function InfoRow({
   label,
   value,
   tone = 'default',
   hint,
-  confidence,
 }: {
   label: string
   value: string
   /** 值的语义：默认墨色；`risk` 用于「未检出 / 不一致」这类需关注值 */
   tone?: 'default' | 'ok' | 'risk'
   hint?: string
-  confidence?: number
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', fontSize: 13 }}>
@@ -486,11 +479,6 @@ export function InfoRow({
       {hint && (
         <span className="muted" style={{ fontSize: 12 }}>
           {hint}
-        </span>
-      )}
-      {confidence != null && (
-        <span style={{ marginLeft: 'auto' }}>
-          <AiChip confidence={confidence} />
         </span>
       )}
     </div>

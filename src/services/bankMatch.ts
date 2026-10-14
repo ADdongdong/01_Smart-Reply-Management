@@ -57,7 +57,15 @@ export const MATCH_LEVEL_META: Record<MatchLevel, { label: string; tone: 'low' |
   manual: { label: '待人工指定', tone: 'high', hint: '未匹配到可信函证，需人工从候选中指定' },
 }
 
-/** 归属来源文案 */
+/**
+ * 归属来源文案（三种取值的**唯一**措辞来源）。
+ *
+ * ⚠️ **当前没有界面消费它**（2026-10-14 起）—— 原先列表展开行那行留痕里写着
+ * 「归属来源 自动归属」，用户要求把那行去掉后就没有渲染点了。
+ * **不删**：`assignSource` 这个字段仍随记录落库、仍可追溯（见 `types` 的 `ReplyRecord.assignSource`），
+ * 这三个词也是它的正式措辞；将来改在别处承载（工作区信息区 / 核验详情页脚）时直接用，
+ * 不必再造一遍。
+ */
 export const ASSIGN_SOURCE_LABEL: Record<AssignSource, string> = {
   auto: '自动归属',
   'manual-confirm': '人工确认',

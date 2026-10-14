@@ -103,7 +103,7 @@ export default function RecordDetailModal({
             children: (
               <span>
                 {record.expressNo ?? '—'}
-                {record.expressNo && <AiMark source="快递面单条码识别" confidence={0.99} />}
+                {record.expressNo && <AiMark source="快递面单条码识别" />}
               </span>
             ),
           },

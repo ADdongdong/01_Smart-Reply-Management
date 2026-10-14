@@ -3,8 +3,8 @@
  * ------------------------------------------------------------------
  * **当前预览统一走 pdf.js**：三个真实样例 PDF 放在 `public/samples/` 下，由 Vite dev server
  * 以 HTTP 提供，浏览器端用 pdf.js 自渲染（`AnnotatedPdfPreview`）。
- * 「原始文件 / AI 批注」两个视图**共用同一画布** —— 这样才能在原件之上叠加坐标批注层，
- * 且两个视图样式完全一致、切换零闪动。
+ * 原件与批注层**共用同一画布**（批注是叠在原件上的坐标层）—— 才能零闪动地贴住缩放与滚动，
+ * 视图切换已于 v3.35 取消，批注层恒为显示（见 `components/PdfPreview`）。
  *
  * 下方 KKFileView 相关配置**保留备用**：它是第三方 iframe（内部自渲染、跨域），
  * 无法在其内容上叠加坐标标注，因此不再用于回函预览；
@@ -357,15 +357,10 @@ export function kkPreviewUrlOf(confirmationNo: string): string {
   return buildKkPreviewUrl(sampleFileUrlOf(confirmationNo))
 }
 
-/**
- * 预览视图。
- * `original` = 只渲染回函原件；`annotated` = 同一份原件之上叠加 AI 批注层。
- * 两者共用同一套 pdf.js 渲染（同一个画布），切换只显隐批注层。
+/*
+ * 原 `PreviewMode` / `DEFAULT_PREVIEW_MODE`（`original` | `annotated` 视图切换）已于 **v3.35 删除** ——
+ * 用户口径：「整体，去掉原始文件 / ai批注这个功能，全局」。批注层现在**恒为显示**，
+ * "要不要批注"由调用方传不传 `sealBoxes` / `showRegions` / `handwriting` 决定（见 `components/PdfPreview`）。
  */
-export type PreviewMode = 'original' | 'annotated'
-
-/** 默认视图 —— 先看原件，需要核对 AI 判定时再切「AI 批注」 */
-export const DEFAULT_PREVIEW_MODE: PreviewMode = 'original'
-
 /** KKFileView 未就绪时的提示文案 */
 export const KK_NOT_READY_HINT = `无法连接 KKFileView（${KKFILEVIEW_BASE}）。请确认容器已启动且端口已映射。`

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Button, Input, Modal, Table, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { DownOutlined, ReloadOutlined, RightOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { DownOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
+import { AiGlyph } from '@/components/Marks'
 import type { BankItemGroup, BankItemRow } from '@/types'
 
 /**
@@ -340,7 +341,8 @@ function GroupCard({
           <Button
             size="small"
             type="link"
-            icon={<ThunderboltOutlined />}
+            /* AI 语义一律用 ✦（原先挂 ⚡，而 ⚡ 在站内是"一键跑演示数据"，见 `Marks.AiGlyph`） */
+            icon={<AiGlyph />}
             style={{ padding: 0, height: 'auto', fontSize: 12 }}
             /* v2.49：**不直接应用**，先弹差异预览 —— 审计场景里「改了什么」必须先看得见 */
             onClick={() => onPreviewApply?.(g.id)}

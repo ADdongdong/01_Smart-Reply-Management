@@ -167,8 +167,14 @@ export default function SplitEntryModal({
           }}
           style={{ padding: '8px 0' }}
         >
-          <p style={{ margin: 0, color: 'var(--c-text-3)', fontSize: 22 }}>
-            <InboxOutlined />
+          {/*
+           * 拖放区图标 —— 站内**两处**拖拽区（本弹窗与银行上传弹窗）统一为
+           * `InboxOutlined`（收件箱 = 往里放）+ **主色 + 24px**：
+           * 此前一处是灰色 Inbox、一处是主色 CloudUpload，「同一个东西两种长相」。
+           * 分工也一并定下：**投放区 = Inbox（收进来）、上传按钮 = CloudUpload（往上传）**。
+           */}
+          <p style={{ margin: 0, fontSize: 24 }}>
+            <InboxOutlined style={{ color: 'var(--c-primary)' }} />
           </p>
           <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--c-text-1)' }}>
             点击或拖拽文件到此区域上传

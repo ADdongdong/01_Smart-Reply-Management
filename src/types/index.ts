@@ -115,6 +115,7 @@ export interface ConsistencyRow {
   sentAmount: number | null
   repliedAmount: number | null
   match: 'match' | 'diff' | 'missing' | 'extra'
+  /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
   confidence: number
 }
 
@@ -146,6 +147,7 @@ export interface SealResult {
   region: '信息证明无误区' | '信息不符区' | '未识别'
   regionConclusion: string
   boxes: SealBox[]
+  /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
   confidence: number
 }
 
@@ -159,6 +161,7 @@ export interface BankTextField {
   label: string
   value: string
   matched: boolean
+  /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
   confidence: number
   sentValue: string
   /** 回函识别值归一化后 */
@@ -242,6 +245,7 @@ export interface BankFieldInput {
 export interface BankTextResult {
   fields: BankTextField[]
   conclusion: string
+  /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
   confidence: number
   /** 匹配档位 */
   level?: MatchLevel
@@ -260,6 +264,7 @@ export interface HandwritingResult {
   text: string
   region: '信息证明无误区' | '信息不符区'
   conclusion: string
+  /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
   confidence: number
 }
 
@@ -274,6 +279,7 @@ export interface AiVerification {
     /** 拍平的比对记录 —— 由 `tables` 派生（见 `ConsistencyRow` 注释） */
     rows: ConsistencyRow[]
     diffCount: number
+    /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
     confidence: number
   }
   seal: SealResult
@@ -286,11 +292,11 @@ export interface AiVerification {
 }
 
 /* ------------------------------------------------------------------ */
-/* 列表「AI 核验事项」待办事项（v3.28）                                        */
+/* 列表「核查事项复核」待办事项（v3.28）                                        */
 /* ------------------------------------------------------------------ */
 
 /**
- * 列表「AI 核验事项」事项的 key。
+ * 列表「核查事项复核」事项的 key。
  *
  * 两类共用一套 key，只是**清单不同**（见 `config/aiReview.ts`）：
  * · 往来 —— `seal`（印章识别）/ `consistency`（发函回函一致性检测）/ `handwriting`（手写体识别）；
@@ -316,6 +322,15 @@ export interface AiReviewState {
   status: 'adopted' | 'ignored'
   by: string
   at: string
+  /**
+   * **不采纳原因**（v3.34）—— 用户口径：「**不采纳理由，与回函结果无关系**」，
+   * 故它挂在这条**处置记录**上，不进 `resultInfo`（那是"表单最终填的值"）。
+   *
+   * **必要条件**：只在 `ignored`、且该项**确实有 AI 结论**（`isAiReviewAvailable`）时填写 ——
+   * 用户确认：「**没有识别到的，就不用填不采纳原因了**」。
+   * 那种项本来就没有结论可采，逼人写理由是空转。
+   */
+  note?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -365,13 +380,22 @@ export interface ReplyRecord {
   lastEditedBy?: string
   lastEditedAt?: string
   /**
+   * **核验页第 4 项「回函结果补充」保存过的留痕**（v3.35）—— 页签尾部那枚完成勾的判据。
+   *
+   * 它**不是 AI 核查事项**（没有 `aiReview` 状态），"办完没有"只能由"人提交过没有"回答 ——
+   * 用户拍板：「**加上保存**」。谁保存的见 `lastEditedBy`（同一次动作一起写）。
+   */
+  resultExtraSavedAt?: string
+  /**
    * **归属来源留痕**（v2.64）—— 这份回函是**怎么被归到当前这封函证**的：
    * · `auto` 系统自动（往来凭二维码、银行四要素全匹配）；
    * · `manual-confirm` 人工确认了系统建议；
    * · `manual-assign` 人工指定（包括在归属界面上手工切出来的段）。
    *
-   * 与「核验人 / 核验时间」「最近修改」并列，展示在列表**展开行的留痕行**里 ——
+   * 与「核验人 / 核验时间」「最近修改」并列，**原先**展示在列表展开行的留痕行里 ——
    * 它回答的是审计复核时最常被问的那句「**这封凭什么是这家银行的**」。
+   * ⚠️ 2026-10-14 起那一行已从界面撤掉（用户：「去掉这部分的说明」），
+   * 本字段仍随记录落库、可追溯，将来改在别处承载时直接取用。
    * 识别落库时由 `applyRecognizedReply` 从任务上带过来（源字段见 `RecognitionTask.assignSource`）。
    */
   assignSource?: AssignSource
@@ -408,7 +432,7 @@ export interface ReplyRecord {
   /** 失败原因（原样带过来，悬停 / 详情里给一句人话） */
   recognitionFailReason?: string
   /**
-   * **列表「AI 核验事项」事项的人工处置结果**（v3.28）—— key 见 `AiReviewKey`。
+   * **列表「核查事项复核」事项的人工处置结果**（v3.28）—— key 见 `AiReviewKey`。
    *
    * 缺 key = 该事项**尚未处理**（列表上呈待办态）；有 key = 已处理（打勾）。
    * 它是「待办式核验」的落点：一条回函由若干核验事项组成，处理完全部事项即视为核验完成；
@@ -663,8 +687,33 @@ export interface ExpressInfo {
 export type CrossSealChoice = 'yes' | 'no' | 'na'
 
 /**
- * 回函结果填写 —— 由人工做出的必填判断 + 原因说明。
+ * 回函结果页的上传件（v3.33）。
+ *
+ * 三个上传类字段（替代性测试文件 / 差异调节表 / 拟执行的进一步核查程序及底稿指引）
+ * 原先只是摆着的按钮（`beforeUpload={() => false}`，关掉弹窗就没了）。
+ * v3.33 起**落库** —— 因为「核查事项复核」第 4 项与「回函结果填写」页要**同一份数据**
+ * 两处填报、并据此判定"这条回函的全部事项做完了没有"。
+ *
+ * **只存元信息，不存文件本体**（原型无上传服务）：知道"传了哪个文件、谁传的、什么时候"，
+ * 足以支撑回显与完成度判定，也避免把二进制塞进 state。
+ */
+export interface ReplyAttachment {
+  /** 文件名（连扩展名，回显时要靠它给用户认） */
+  name: string
+  /** 字节数 —— 回显成 KB / MB（`formatFileSize`） */
+  size: number
+  /** 上传人 */
+  by: string
+  /** 上传时间（展示用字符串，与全站留痕同一格式） */
+  at: string
+}
+
+/**
+ * 回函结果填写 —— 由人工做出的必填判断 + 原因说明 + 上传件。
  * 字段名用业务语义（matched / sealConsistent），不暴露表单控件的原始取值。
+ *
+ * ⚠️ 本对象是**两个入口共读**的落点（v3.33）：「回函结果填写」页与核验页的
+ * 「回函结果补充」项读写同一份，不各存一套 —— 两处填报的前提。
  */
 export interface ReplyResultInfo {
   /** 函证结果是否相符 */
@@ -679,6 +728,18 @@ export interface ReplyResultInfo {
   officialSeal?: boolean
   /** 是否有骑缝章 */
   crossSeal?: CrossSealChoice
+  /** **差异调节表**（v3.32 立字段，v3.33 落库）—— PDF / Excel，可多附件 */
+  diffAdjustFiles?: ReplyAttachment[]
+  /** **替代性测试文件**（v3.33 落库）—— JPG / JPEG / PDF，可多附件 */
+  altTestFiles?: ReplyAttachment[]
+  /**
+   * **拟执行的进一步核查程序及底稿指引** —— **文本说明**（v3.33 立字段，v3.34 由"上传 Excel"改为文本）。
+   *
+   * 用户口径（2026-10-14）：「这个：拟执行的进一步核查程序及底稿指引，是文本框输入，不是上传附件」。
+   * 这一项要的是**写给人看的做法**（准备执行哪些程序、底稿怎么索引），不是一份要归档的表格文件；
+   * 挂上传按钮既与语义不符，也会让人以为"不传个 Excel 就没填过"。
+   */
+  procedureNote?: string
 }
 
 export interface PrefillField {
@@ -686,6 +747,7 @@ export interface PrefillField {
   label: string
   value: string
   source: string
+  /** 置信度 —— **界面自 2026-10-14 起不再展示**（用户：「去掉所有的置信度」）；保留为识别服务的返回字段 */
   confidence: number
   adopted: boolean
   required?: boolean

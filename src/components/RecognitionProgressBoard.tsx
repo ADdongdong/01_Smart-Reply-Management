@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from 'antd'
+import { PixelGridLoader } from '@/components/ai/PixelLoader'
 import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { stageLabelOf } from '@/mock/recognition'
@@ -7,6 +8,21 @@ import type { RecognitionTask, StageKey, StageStatus } from '@/types'
 
 /**
  * 列表页的**智能识别区**（v3.28 立题；v3.29 改版：位置、形态、去进度条）。
+ *
+ * ## ⚠️ 本组件自 2026-10-14 起**不再挂载**（保留备用，勿删）
+ *
+ * 用户把核查过程的落点整个调回了**表格里**（原话：「上传完函证回函、切分完点完确认以后，
+ * 函证回函数据直接落入表格，智能核查过程的显示的位置，**放在表单中**，因此表单要增加两个字段：
+ * 智能核查状态 / 智能核查进度」）。
+ *
+ * 于是：
+ * - 入表时机回到「归属一确定就落库」（`finalizeTask` 里那道"跑完才入表"的闸已拆）；
+ * - 「哪一封核到哪一项」改由**每行自己的两格**表达 —— 见 `components/SmartCheckCells.tsx`
+ *   （状态列：未开始 / 正在核查（带动效）/ 已核查 / 核查失败；进度列：逐项一面旗，核完变蓝）；
+ * - 本组件与它依赖的 `.recog-board*` 样式**整块保留** —— 与 v3.28 退役的悬浮卡 / 全屏识别界面
+ *   同一处置：将来若要"页面上总览一眼全局"，把它挂回去即可（`ReplyList` 里已留说明位）。
+ *
+ * 下面记的是它在 v3.28～v3.29 期间**为什么长成这样**（多轮用户反馈的落点），留着供回看。
  *
  * ## 它替代了什么
  *
@@ -186,12 +202,11 @@ export default function RecognitionProgressBoard() {
         {/*
          * 头部「系统正在工作」的信号 —— 像素方格（跑完后定格成静态图案，表示"干完了"）。
          * 替代原先的 antd `LoadingOutlined`：spinner 是通用控件语言，与这套像素语言不同族。
+         *
+         * 2026-10-14：改用共用的 `PixelGridLoader`（上游 loading-state 的 3×3 人字波前，
+         * 相位表由组件给）—— 先前这里手写了 6 个格子 + `--i` 均等错相，与上游的波前不是一回事。
          */}
-        <span className={`px-grid${hasWork ? '' : ' is-done'}`} aria-hidden="true">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} className="px-grid__cell" style={{ ['--i' as string]: i }} />
-          ))}
-        </span>
+        <PixelGridLoader done={!hasWork} />
         <span className={`recog-board__title${hasWork ? ' shimmer-text' : ''}`}>
           {hasWork ? '正在智能识别' : '识别已完成'}
         </span>

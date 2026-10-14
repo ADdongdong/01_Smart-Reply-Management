@@ -1,26 +1,31 @@
-import { useState, type ReactNode } from 'react'
-import { Alert, Tooltip } from 'antd'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Alert, Input, Radio, Tooltip } from 'antd'
 import {
   AuditOutlined,
   CompressOutlined,
   DownOutlined,
   ExpandOutlined,
+  FormOutlined,
   HighlightOutlined,
   SafetyCertificateOutlined,
   UpOutlined,
 } from '@ant-design/icons'
-import type { ConsistencyTable, ReplyRecord } from '@/types'
-import type { PageRange, PreviewMode } from '@/config/preview'
+import type { ConsistencyTable, ReplyRecord, ReplyResultInfo } from '@/types'
+import type { PageRange } from '@/config/preview'
 import {
   browserSentSampleUrlOf,
   letterPagesOf,
   sampleFileOf,
   sentSampleFileOf,
 } from '@/config/preview'
+import { aiReviewItemsOf, aiReviewStateOf } from '@/config/aiReview'
+import { RESULT_EXTRA_PANEL_KEY, RESULT_NOTE_FIELDS, RESULT_REQUIRED_FIELDS } from '@/config/replyTasks'
 import { TYPE_RULE, isRecognitionPending } from '@/services/replyRule'
 import { buildBankItemGroups, buildBankItemsForRecord } from '@/mock/confirmations'
 import BankItemsTable from '@/components/BankItemsTable'
 import ConsistencyDiff from '@/components/ConsistencyDiff'
+import ReplyResultExtraPanel from '@/components/ReplyResultExtraPanel'
+import { AiResultHead, ManualConfirm, ManualRow } from '@/components/ManualConfirm'
 import SealRecognition from '@/components/SealRecognition'
 /* v2.39：「银行函证文本识别」不再作为独立检测点，本页不再引用 BankTextRecognition（组件仍被识别工作台的归属匹配区使用） */
 import HandwritingRecognition from '@/components/HandwritingRecognition'
@@ -114,14 +119,14 @@ function PreviewPane({
  *   一致性检测比的是**发函件 × 回函件**，所以左栏铺的是一个**预览栈** ——
  *   上「发函用印件」、下「回函件」（v2.70）。只铺回函件时，用户拿到的其实只有一半依据。
  *   每栏可「只看这一件」（另一栏收成一行标题），用于 A4 竖版页面在半高里看不清时放大核对。
- *   发函栏**不带 AI 批注**（印章框 / 落章区 / 手写区全在回函件上），故它没有视图切换。
+ *   发函栏**不带 AI 批注**（印章框 / 落章区 / 手写区全在回函件上）（批注视图的切换已于 v3.35 取消，这里由"不传批注入参"表达）。
  * · **右侧核验内容**：检测项切换（拟物图标 + 名称）→ 选中项的完整明细。
  *   点某张表的「查看原件」→ 两栏原件**同时**跳到该表所在页并高亮（核对成本最低的路径）。
  *
  * **银行函证只有回函栏** —— 银行只上传回函件，发函数据（格式一 / 格式二）存于函证系统、
  * 没有文件；该分支查 `TYPE_RULE[type].sentFilePreview`，不写内联类型判断。
  *
- * **不含弹窗壳、页脚动作与关闭逻辑**：既可由全屏弹窗承载（列表「AI 核验事项」列点进来的详情），
+ * **不含弹窗壳、页脚动作与关闭逻辑**：既可由全屏弹窗承载（列表「核查事项复核」列点进来的详情），
  * 也可被结果填写页内嵌（看明细时不丢已填草稿）。
  *
  * **页脚那两个动作（采纳 / 不采纳识别数据）由承载者渲染**（v3.28）——
@@ -135,26 +140,61 @@ function PreviewPane({
 export default function VerificationPanel({
   record,
   initialKey,
+  activeKey,
   onItemChange,
+  draft,
+  onDraftChange,
+  onResultExtraDone,
 }: {
   record?: ReplyRecord
   /**
-   * 打开时**直接落在哪一项**（v3.28）—— 由列表「AI 核验事项」列点进来的就是被点的那一项，
-   * 省掉"进去再在页签里找一遍"。取值是页签 key（`consistency` / `seal` / `handwriting`），
-   * 由承载者用 `config/aiReview` 的 `panelKey` 换算后传入。
+   * 打开时**直接落在哪一项**（v3.28）—— 取值是页签 key
+   * （`consistency` / `seal` / `handwriting` / `result-extra`）。
+   *
+   * v3.31 起列表那一格不再逐项，点它进来时传的是**第一个未完成的事项**；
+   * v3.33 起该落点按**总判定**算（`config/replyTasks` 的 `replyTaskEntryPanelKeyOf`），
+   * 因此也可能是第 4 项「回函结果补充」—— 省掉"进去再在页签里找一遍"；
+   * 进来之后用户仍可随意切页签。
+   *
+   * ⚠️ 与下面的 `activeKey` 分工：前者**只在挂载时**取（换一条回函才重来），
+   * 后者是**受控的当前项**，换项不该重挂载（重挂载会把左侧预览连同滚动位置一起重置）。
    */
   initialKey?: string
+  /**
+   * **受控的当前项**（v3.34）—— 传了就以它为准；不传则面板自己管（结果页内嵌即不传）。
+   *
+   * 为什么要受控：承载者也会换项 —— 采纳 / 不采纳后**自动前进到下一个 AI 核查项**
+   * （用户口径：「选择采纳后，调到下一个Ai核查项，而不是退出窗口」，见 `VerificationModal`）。
+   * 页签与左侧取景的联动规则收在本组件的 effect 里（跟着 `active` 走），
+   * 于是"用户点页签"与"承载者叫它换"走的是同一条路，行为不会两样。
+   */
+  activeKey?: string
   /** 当前展开项变化时上报（v3.28）—— 承载者据此决定页脚「采纳 / 不采纳」作用于哪一项 */
   onItemChange?: (key: string) => void
+  /**
+   * **「人工确认」列的草稿**（v3.34）—— 由承载者持有（`VerificationModal`），本组件只往下传。
+   *
+   * 为什么不放在这里：三个页签各有一列人工确认，而**保存按钮在第 4 项**；
+   * 草稿若跟着页签存取，用户切页签就把它丢了。承载者是唯一"三个页签 + 保存动作"都在的地方。
+   *
+   * 不传（结果页内嵌那种只读场景）时人工确认列**不渲染** —— 看明细的地方不该能改数。
+   */
+  draft?: Partial<ReplyResultInfo>
+  /** 人工确认列改动上报（承载者负责合并进草稿） */
+  onDraftChange?: (patch: Partial<ReplyResultInfo>) => void
+  /**
+   * 第 4 项「回函结果补充」**归档成功**后回调（v3.33）—— 承载者据此关窗（那一项办完即走）。
+   */
+  onResultExtraDone?: () => void
 }) {
-  /** 回函栏的视图模式（受控）—— 核验页默认直接看批注，因为核验的就是 AI 判定依据 */
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('annotated')
-  /** 当前展开的核验项 —— 缺省第一项；被指到哪一项就落在哪一项 */
-  const [activeKey, setActiveKey] = useState(initialKey ?? 'consistency')
+  /** 非受控时的当前项 —— 缺省第一项；承载者传了 `activeKey` 就完全听它的 */
+  const [innerKey, setInnerKey] = useState(initialKey ?? 'consistency')
+  /** 实际的当前项 —— 受控优先 */
+  const active = activeKey ?? innerKey
   /**
    * 只看一件：被放大的那一栏（null = 双栏均分）。
    *
-   * 初值随 `initialKey` 定 —— 与 `selectItem` 里那条「页签联动左侧预览」的规则一致：
+   * 初值随 `initialKey` 定 —— 与下面那条 effect 里「页签联动左侧预览」的规则一致：
    * 看「两件对照」的项（一致性检测）要双栏，其余项看的是回函件本身、直接把回函栏放大。
    */
   const [zoomed, setZoomed] = useState<'sent' | 'replied' | null>(
@@ -165,6 +205,30 @@ export default function VerificationPanel({
    * 令牌自增是为了**同一张表能反复点**：只改 `page` 时 React 不会重跑定位。
    */
   const [focus, setFocus] = useState<{ table: ConsistencyTable; token: number } | null>(null)
+
+  /**
+   * **换项就重设取景与定位**（v3.34 从 `selectItem` 里挪出来）。
+   *
+   * 原先这三条只在"用户点页签"时跑；现在承载者也会换项（采纳后自动前进），
+   * 若还挂在点击处理里，自动跳过去之后左侧会**留在上一项的取景**上
+   * （例如从「一致性检测」跳到「印章识别」，左边却仍是双栏对照）——
+   * 一句话：换项的副作用跟着"当前项变了"走，不跟着"是谁改的"走。
+   */
+  useEffect(() => {
+    /* 上一个检测项的定位留在新项上没有意义，一并清掉 */
+    setFocus(null)
+    /*
+     * **页签联动左侧预览的默认取景**（v3.04，用户要求）：
+     * · 「印章识别 / 手写体识别」看的是**回函件本身** —— 印章框、落章区、手写区都长在回函上，
+     *   发函用印件那边连批注都没有⇒ **回函件放大、发函用印件折叠**，
+     *   把左侧整个让给真正要看的那一件；
+     * · 「发函回函一致性检测」要看**两件对照** ⇒ 回到**双栏均分**。
+     *
+     * **只改"默认值"，不锁死**：本 effect 只在**换项**时跑，用户在同一项里手动展开 / 折叠
+     * （`PreviewPane` 右上角那个按钮）之后不会被覆盖回去。
+     */
+    setZoomed(active === 'consistency' ? null : 'replied')
+  }, [active])
 
   if (!record) return null
   const v = record.verification
@@ -220,6 +284,25 @@ export default function VerificationPanel({
   /** 有聚焦表时角标说「本表」，否则这一栏只是在交代「本封占哪几页」 */
   const markLabel = focusTable ? '本表' : '本封'
 
+  /**
+   * 银行侧「人工确认」那一格 = 回函结果的「函证结果是否相符」——
+   * 标签与选项借必填项表（`RESULT_REQUIRED_FIELDS`），与结果页**逐字同源**。
+   */
+  const bankMatchedField = RESULT_REQUIRED_FIELDS['银行函证'].find((f) => f.key === 'matched')
+
+  /**
+   * 各页签「**人办完了没有**」（v3.35）—— 页签尾部那枚完成勾的判据。
+   *
+   * · AI 项：`aiReview` 里有这一项即算办完（**采纳或不采纳都算**，与列表「核查事项复核」同判据）；
+   * · 第 4 项「回函结果补充」：它不是 AI 事项，按"**这次保存过**"算 —— 用户拍板「加上保存」，
+   *   见 `ReplyRecord.resultExtraSavedAt`。
+   */
+  const doneOf = (panelKey: string): boolean => {
+    if (panelKey === RESULT_EXTRA_PANEL_KEY) return !!record.resultExtraSavedAt
+    const aiKey = aiReviewItemsOf(record.type).find((i) => i.panelKey === panelKey)?.key
+    return !!aiKey && !!aiReviewStateOf(record, aiKey)
+  }
+
   const items: {
     key: string
     title: string
@@ -227,31 +310,81 @@ export default function VerificationPanel({
     icon: ReactNode
     /** 需关注的项，图标以红档提示（不额外加色点） */
     risk?: boolean
+    /** **人办完了没有** —— 决定页签尾部要不要点那枚完成勾（见 `doneOf`） */
+    done: boolean
     children: ReactNode
   }[] = [
     {
       key: 'consistency',
+      done: doneOf('consistency'),
       /* 名称按类型取：往来=发函回函一致性检测；银行=询证事项逐项核对 */
       title: rule.consistencyLabel,
       icon: <AuditOutlined />,
       risk: isBank ? bankItemsDiff > 0 : diffCount > 0,
       children: isBank ? (
-        <BankItemsTable groups={bankItemGroups} mode="view" />
+        <>
+          <AiResultHead note="回函 × 系统内格式一/二数据逐项核对" />
+          <BankItemsTable groups={bankItemGroups} mode="view" />
+          {/*
+           * 银行侧的人工确认给**两格**（v3.35）：
+           * · 「函证结果是否相符」—— 银行相符性**只由这一项决定**（R-01：印章不参与判定），
+           *   它是回函结果里那枚 `matched` 的唯一出处；
+           * · 「回函结果不相符处的描述」—— 银行不做手写体识别、也就没有那个页签，而不相符的
+           *   来源正是这里查出来的差异，说明写在这儿（往来侧同一字段在「手写体识别」页）。
+           */}
+          {onDraftChange && (
+            <div style={{ marginTop: 12 }}>
+              <ManualConfirm note="逐项核对无误后确认相符性；有差异则写明不相符处">
+                <ManualRow label={bankMatchedField?.label ?? '函证结果是否相符'}>
+                  <Radio.Group
+                    size="small"
+                    optionType="button"
+                    buttonStyle="solid"
+                    value={draft?.matched}
+                    options={bankMatchedField?.options ?? []}
+                    onChange={(e) => onDraftChange({ matched: e.target.value })}
+                  />
+                </ManualRow>
+                {/*
+                 * 「回函结果不相符处的描述」—— 银行侧只能长在这一项（v3.35，用户拍板）：
+                 * 银行**不做手写体识别**，也就没有那个页签；而不相符的来源正是「询证事项逐项核对」
+                 * 查出来的差异，说明就该写在这里（往来侧同一字段在「手写体识别」页）。
+                 */}
+                <ManualRow label={RESULT_NOTE_FIELDS.diffDesc} hint="确认不相符时必写">
+                  <Input.TextArea
+                    autoSize={{ minRows: 1, maxRows: 4 }}
+                    value={draft?.diffDesc ?? ''}
+                    onChange={(e) => onDraftChange({ diffDesc: e.target.value })}
+                    placeholder="差在哪、差多少"
+                  />
+                </ManualRow>
+              </ManualConfirm>
+            </div>
+          )}
+        </>
       ) : (
         <ConsistencyDiff
           tables={tables}
-          confidence={v.consistency.confidence}
           onFocusTable={(t) => setFocus((prev) => ({ table: t, token: (prev?.token ?? 0) + 1 }))}
         />
       ),
     },
     {
       key: 'seal',
+      done: doneOf('seal'),
       title: '印章识别',
       icon: <SafetyCertificateOutlined />,
       risk: !sealNormal,
       /* 银行函证：不渲染骑缝章行（v2.39 起 R-03 限定往来），结论条也不推导相符性 */
-      children: <SealRecognition seal={v.seal} entity={record.entity} isBank={isBank} />,
+      children: (
+        <SealRecognition
+          seal={v.seal}
+          entity={record.entity}
+          isBank={isBank}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      ),
     },
     /*
      * 「银行函证文本识别」页签已于 v2.39 移除 —— 它不再是独立检测点：
@@ -264,38 +397,59 @@ export default function VerificationPanel({
       ? [
           {
             key: 'handwriting',
+            done: doneOf('handwriting'),
             title: '手写体识别',
             icon: <HighlightOutlined />,
-            children: <HandwritingRecognition result={v.handwriting} />,
+            children: (
+              <HandwritingRecognition
+                result={v.handwriting}
+                draft={draft}
+                onDraftChange={onDraftChange}
+              />
+            ),
           },
         ]
       : []),
+    /*
+     * **回函结果补充**（v3.33）—— 用户：「在核查事项复核的三个 tab 后，再加上一项，
+     * 把不涉及 AI 识别的回函结果事项中的几个字段可以在最后一个 tab 中填写」。
+     *
+     * 它**不是 AI 核查事项**：没有 `aiReview` 状态，也不该出现「采纳 / 不采纳识别数据」
+     * （那两个动作作用于"AI 结论"，这一项里没有结论可采纳）—— 故：
+     * · 页签 key 取 `RESULT_EXTRA_PANEL_KEY`，承载者据此换页脚（见 `VerificationModal`）；
+     * · 排在 `items` 末尾，即页签栏的**最右一格**，与用户画的那张图一致。
+     *
+     * 两类函证都有这一项：上传件与必填项跟函证类型无关（银行的必填项本就少一项骑缝章）。
+     * 它同时也是"点进核验页就能填完整条回函结果"的那个兜底 —— 缺的必填项在这里补，
+     * 不必再跳去结果页。
+     */
+    {
+      key: RESULT_EXTRA_PANEL_KEY,
+      done: doneOf(RESULT_EXTRA_PANEL_KEY),
+      title: '回函结果补充',
+      icon: <FormOutlined />,
+      /* 草稿从承载者接过来（受控）—— 三个页签的人工确认列与这里的保存动作共用同一份 */
+      children: (
+        <ReplyResultExtraPanel
+          record={record}
+          value={draft}
+          onChange={onDraftChange}
+          onDone={onResultExtraDone}
+        />
+      ),
+    },
   ]
 
-  const current = items.find((it) => it.key === activeKey) ?? items[0]
+  const current = items.find((it) => it.key === active) ?? items[0]
 
   /**
-   * 点选核验项 —— 印章识别依赖批注层，自动切到批注视图；
-   * 同时**清掉联动的聚焦与高亮**：上一个检测项的定位留在新页签上没有意义。
+   * 点选核验项 —— **只管"当前项是谁"**：清定位、按项取景这两件事
+   * 已挪到上面那条跟着 `active` 的 effect 里（承载者换项也要同样处理，见其注释）。
    */
   const selectItem = (key: string) => {
-    setActiveKey(key)
+    setInnerKey(key)
     /* 上报给承载者（v3.28）—— 页脚的「采纳 / 不采纳」始终作用于**当前这一项** */
     onItemChange?.(key)
-    setFocus(null)
-    /*
-     * **页签联动左侧预览的默认取景**（v3.04，用户要求）：
-     * · 「印章识别 / 手写体识别」看的是**回函件本身** —— 印章框、落章区、手写区都长在回函上，
-     *   发函用印件那边连批注都没有（`hideViewToggle`）⇒ **回函件放大、发函用印件折叠**，
-     *   把左侧整个让给真正要看的那一件；
-     * · 「发函回函一致性检测」要看**两件对照** ⇒ 回到**双栏均分**。
-     *
-     * **只改"默认值"，不锁死**：本函数只在**切页签**时跑，用户在同页签里手动展开 / 折叠
-     * （`PreviewPane` 右上角那个按钮）之后不会被覆盖回去。
-     */
-    setZoomed(key === 'consistency' ? null : 'replied')
-    /* 除了"两件对照"，其余检测项看的都是 AI 批注（手写体识别同样依赖批注层） */
-    if (key !== 'consistency') setPreviewMode('annotated')
   }
 
   return (
@@ -320,8 +474,6 @@ export default function VerificationPanel({
                 markRange={sentAbs}
                 markLabel={markLabel}
                 height="100%"
-                /* 印章 / 落章区 / 手写区都在回函件上，发函件没有批注可看 —— 连切换一起隐掉 */
-                hideViewToggle
                 /* 上下两件同步滚动（v3.01）—— 同一个分组键，滚一件另一件跟着走 */
                 scrollGroup="verify-compare"
               />
@@ -358,8 +510,6 @@ export default function VerificationPanel({
               markRange={repliedAbs}
               markLabel={markLabel}
               height="100%"
-              viewMode={previewMode}
-              onViewModeChange={setPreviewMode}
               /* 与上面「发函用印件」同一组 —— 两件同步上下滚动（v3.01） */
               scrollGroup="verify-compare"
             />
@@ -375,12 +525,20 @@ export default function VerificationPanel({
 
       {/* ——— 右：检测项切换 + 明细 ——— */}
       <div className="vw-right">
-        {/* 分段控件式切换：浅底轨道 + 选中项白色浮起（不用描边与彩色字，避免生硬） */}
+        {/*
+         * 分段控件式切换（浅底轨道 + 选中项白色浮起）—— 容器下方还挂着一条**分段进度条**（v3.35）。
+         *
+         * 进度条是绝对定位在页签行下面的轨道：左右内边距与 gap 都与页签一致，
+         * 于是**每一格正对着它上面那个页签** —— 「这一项办完没有」看它自己脚下那一格即可，
+         * 不必在页签里塞记号（首版那枚完成勾被否：「对勾太丑陋了，能不能试下进度条，
+         * 没完成一个进度条往前进一格」）。格数 = 页签数（往来 4 / 银行 3）。
+         */}
         <div
           style={{
+            position: 'relative',
             display: 'flex',
             gap: 4,
-            padding: 4,
+            padding: '4px 4px 9px',
             marginBottom: 14,
             background: 'var(--c-neutral-bg)',
             borderRadius: 10,
@@ -430,6 +588,16 @@ export default function VerificationPanel({
               </button>
             )
           })}
+
+          {/* 分段进度条 —— 每办完一项，它那一格推进到主色实心（见页签栏的注释） */}
+          <div className="verify-tabs__track" aria-hidden="true">
+            {items.map((it) => (
+              <span
+                key={it.key}
+                className={it.done ? 'verify-tabs__seg is-done' : 'verify-tabs__seg'}
+              />
+            ))}
+          </div>
         </div>
 
         {current.children}

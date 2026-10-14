@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Modal, Radio, Upload } from 'antd'
-import { CloudUploadOutlined, DeleteOutlined, FilePdfOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { DeleteOutlined, FilePdfOutlined, InboxOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { SmartSplitAction } from '@/components/SmartSplitAction'
 
 /**
@@ -197,8 +197,9 @@ export default function BankUploadModal({
           }}
           style={{ padding: '8px 0' }}
         >
-          <p style={{ margin: 0, color: 'var(--c-text-3)', fontSize: 22 }}>
-            <CloudUploadOutlined style={{ color: 'var(--c-primary)' }} />
+          {/* 拖放区图标 —— 与往来上传弹窗统一（Inbox + 主色 + 24px），见 `SplitEntryModal` 的说明 */}
+          <p style={{ margin: 0, fontSize: 24 }}>
+            <InboxOutlined style={{ color: 'var(--c-primary)' }} />
           </p>
           <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--c-text-1)' }}>
             点击或拖拽文件到此区域上传
