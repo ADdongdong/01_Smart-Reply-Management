@@ -19,7 +19,6 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   CloudUploadOutlined,
   FileExcelOutlined,
-  QuestionCircleOutlined,
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
@@ -359,7 +358,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
         if (filter.sendMethod && m.sendMethod !== filter.sendMethod) return false
         if (filter.progress && m.replyProgress !== filter.progress) return false
         /* 风险筛选随「AI 风险」列一并移除（2026-10-14，用户：「去掉 AI 风险列，完整去掉」）——
-           列的取值与文案原本就和筛选项同源（`RISK_MAP`），列没了筛选也就没有对象 */
+           列的取值与文案原本就和筛选项同源（`RISK_MAP`，已随该列删除），列没了筛选也就没有对象 */
         return true
       })
       /*
@@ -558,7 +557,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     /* ---------- AI 风险列已移除（2026-10-14） ---------- */
     /*
      * 用户原话：「**去掉 AI 风险列，完整去掉**」⇒ 列、筛选项（含条件 chip 与 `FilterState.risk`）
-     * 一并删除；`RiskTag` / `RISK_MAP` / `RISK_ORDER` 在本页不再引用（件本身保留 ——
+     * 一并删除；`RiskTag` / `RISK_MAP` / `RISK_ORDER` 已于 2026-10-14 随「AI 风险」一并删除（
      * 核验详情顶部仍挂着一枚，见 `VerificationModal`）。
      *
      * 三条连带后果（都是有意的、不是漏改）：
@@ -791,7 +790,21 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
    * 见 `expandedRowRender` 的注释：改造前是「当前有效字段网格 + 历史回函表」，
    * 等于把详情页的字段堆进列表，而那些字段的去处其实都已另有。
    */
-  const REPLY_GRID = '118px 1.3fr 1.1fr 1.3fr 1.1fr 56px'
+  /*
+   * 列宽（v3.36 调）：第 1 列要同时放得下「第 N 次 + 当前有效 + 重新发函」三样（约 190px），
+   * 原来是 118px + 三个 `fr` —— 三枚记号被挤到换行、顺带把编号挤成两截（用户截图指出的）。
+   * 其余各列按内容给最小宽度：编号 14 位 / 日期 19 位 / 单号 17 位，够放就不折行。
+   */
+  const REPLY_GRID =
+    '190px minmax(150px, 1.2fr) 104px minmax(132px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) 56px'
+
+  /* 列序（v3.37）：回函次序 · 发函记录编号 · 发函方式 · 回函快递公司 · 快递单号 · 回函数据登记时间 · 回函情况 · 操作
+   * —— 发函侧两项跟在编号后（都来自函证系统），回函侧三项（公司 / 单号 / 登记时间）连读。
+   *
+   * ⚠️ **不展示「回函日期」**（v3.37 末，用户：「去掉回函日期，只保留回函数据登记日期即可」）：
+   * 两个时间在同一个位置都摆一遍，用户要先分辨哪个是函件上的、哪个是系统登记的；
+   * 实务上真正被引用的是**登记时间**（谁什么时候把这封回函录进系统），故只留它。
+   * 字段本身没删（`ReplyRecord.replyDate` 仍在，函件与物流、查看函证里照用）。 */
 
   const expandedRowRender = (row: ConfirmationRow) => {
     const { main, history } = row
@@ -814,7 +827,8 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
             </span>
           )}
         </div>
-        <div style={{ overflow: 'hidden' }}>
+        {/* 窄屏放不下时**横向滚动**（v3.36）—— 原来是 hidden，最后几列会被直接裁掉 */}
+        <div style={{ overflowX: 'auto' }}>
           <div
             style={{
               display: 'grid',
@@ -826,10 +840,21 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
             }}
           >
             <span>回函次序</span>
-            <span>发函记录编号</span>
-            <span>回函日期</span>
+            {/*
+             * 两列表头带说明（v3.36）—— 用户：「这两个字段的含义和由来需要澄清」。
+             * 含义与由来直接在列头悬停里给，不额外占版面（原先这两列只有干巴巴一个名字，
+             * 「编号为什么有第二种写法」「当前有效那行为什么是 —」都无处可问）。
+             */}
+            <Tooltip title="本次回函对应的是哪一次发函 —— 一封函证可以发多次函，每次发函一个编号。编号由发函登记时产生、回函落库时随记录带入，用来把「这次回函」对上「那次发函」，与「回函次序」是同一件事的两种表达。">
+              <span className="col-help">发函记录编号</span>
+            </Tooltip>
+            <span>发函方式</span>
+            <span>回函快递公司</span>
             <span>快递单号</span>
-            <span>回函情况</span>
+            <span>回函数据登记时间</span>
+            <Tooltip title="这一次回函的相符性结论，与主表「回函是否相符」列同源（往来＝印章落章区域判定；银行＝询证事项逐项核对）。当前有效那一次不在这里重复 —— 主表那一列已经给了它；识别未落定时写「识别中」。">
+              <span className="col-help">回函情况</span>
+            </Tooltip>
             <span>操作</span>
           </div>
           {history.map((h, i) => {
@@ -850,7 +875,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
                   color: isCurrent ? 'var(--c-text-1)' : 'var(--c-text-3)',
                 }}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
                   <span>第 {seq} 次</span>
                   {isCurrent && (
                     <StatusTag size="sm" tone="primary">
@@ -873,9 +898,17 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
                     </StatusTag>
                   )}
                 </span>
-                <span className="num">{h.sendRecordNo}</span>
-                <span className="num">{h.replyDate ?? '—'}</span>
-                <span className="num">{h.expressNo ?? '—'}</span>
+                <span className="num nowrap-ellipsis" title={h.sendRecordNo}>
+                  {h.sendRecordNo}
+                </span>
+                <span>{h.sendMethod}</span>
+                <span className="nowrap-ellipsis" title={h.expressCompany ?? undefined}>
+                  {h.expressCompany ?? '—'}
+                </span>
+                <span className="num nowrap-ellipsis" title={h.expressNo ?? undefined}>
+                  {h.expressNo ?? '—'}
+                </span>
+                <span className="num">{h.registeredAt ?? '—'}</span>
                 {/* 当前有效那次的相符性行上已有（「回函是否相符」列），此处不重复 */}
                 <span>{isCurrent ? '—' : c.text}</span>
                 <span>
@@ -1016,7 +1049,8 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
               style={{ width: '100%' }}
               value={form.sendMethod}
               onChange={(v) => setForm({ ...form, sendMethod: v })}
-              options={['邮寄发函', '电子发函', '跟函'].map((v) => ({ label: v, value: v }))}
+              /* 选项按本类取（v3.37）—— 往来 3 项、银行 4 项（多「电子函证」） */
+              options={TYPE_RULE[type].sendMethods.map((v) => ({ label: v, value: v }))}
             />
           </Col>
           <Col flex="140px">
@@ -1163,16 +1197,6 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
             导入快递数据
           </Button>
         </Tooltip>
-
-        <Button
-          type="link"
-          size="small"
-          icon={<QuestionCircleOutlined />}
-          style={{ padding: '0 4px', fontSize: 13 }}
-          onClick={() => dispatch({ type: 'OPEN_ONBOARDING' })}
-        >
-          操作指引
-        </Button>
 
         {/*
          * 「● 识别中，结果将自动写入列表」这一句**已移除**（v3.28）——

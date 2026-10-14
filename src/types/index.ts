@@ -1,8 +1,16 @@
+
 /** 函证类型 */
 export type ConfirmationType = '往来函证' | '银行函证'
 
-/** 发函方式 */
-export type SendMethod = '邮寄发函' | '电子发函' | '跟函'
+/**
+ * **发函方式** —— 值集**按函证类型分**（v3.37）：
+ * · 往来函证：邮寄发函 / 跟函 / 电子邮件发函；
+ * · 银行函证：再多一项 **电子函证**（银行自有电子函证平台，往来没有这个渠道）。
+ *
+ * 可用值一律以 `TYPE_RULE[type].sendMethods` 为准（筛选下拉与演示数据都读它），
+ * 数据本身来自**函证系统**（发函登记时就已确定），回函侧只读展示。
+ */
+export type SendMethod = '邮寄发函' | '跟函' | '电子邮件发函' | '电子函证'
 
 /**
  * 回函进度 —— 用户视角的「下一步要做什么」。
@@ -10,9 +18,6 @@ export type SendMethod = '邮寄发函' | '电子发函' | '跟函'
  * 因此不存在「未回函 / 待识别」状态。
  */
 export type ReplyProgress = '待确认快递信息' | '待填写回函结果' | '已完成'
-
-/** 风险等级 */
-export type RiskLevel = 'high' | 'medium' | 'low' | 'none'
 
 /** 人工核验状态 */
 export type VerifyStatus = 'pending' | 'verified'
@@ -43,7 +48,7 @@ export type AssignSource = 'auto' | 'manual-confirm' | 'manual-assign'
  * ## 为什么不是「一张拍平的表」
  *
  * 往来函证的原件（《企业询证函》）里，除「信息证明无误 / 信息不符」签章区之外的**数据表格有多张**，
- * 且**每张的列结构互不相同** —— 以真实样例 `wanglai-1-SJ01YF001.pdf` 为例：
+ * 且**每张的列结构互不相同** —— 以样例 `wanglai-1-SJ01YF001.pdf` 为例：
  *   ① 往来款项余额：截止日期 / 欠贵公司（已开票-含税）/ 欠贵公司（未开票-不含税）/ 贵公司欠 / 备注；
  *   ② 交易额：所属期间 / 交易金额（含税）/ 采购内容 / 备注；
  *   ③ 票据往来金额：所属期间 / 交易内容 / 票据结算金额 / 备注；
@@ -285,8 +290,6 @@ export interface AiVerification {
   seal: SealResult
   bankText?: BankTextResult
   handwriting?: HandwritingResult
-  riskLevel: RiskLevel
-  riskReasons: string[]
   completedModules: number
   totalModules: number
 }
@@ -350,6 +353,13 @@ export interface ReplyRecord {
   sendMethod: SendMethod
   sendDate: string
   replyDate?: string
+  /**
+   * **回函数据登记时间**（v3.37）—— 该次回函记录**录入函证系统**的时间，精确到分。
+   *
+   * 与「回函日期」不是一回事：后者是**函件上/对方回函**的日期，这个是**系统侧的登记时刻**
+   * （落库那一刻写入），用户只读。
+   */
+  registeredAt?: string
   expressCompany?: string
   expressNo?: string
   replyFile?: string
@@ -364,7 +374,6 @@ export interface ReplyRecord {
   faceSheet?: string
   replyProgress: ReplyProgress
   hasReplied: boolean
-  risk: RiskLevel
   verifyStatus: VerifyStatus
   verifiedBy?: string
   verifiedAt?: string
@@ -639,8 +648,8 @@ export interface UploadBatch {
    * ## 为什么必须有它
    *
    * 「写入回函列表」这件事**只能发生在提交之后**，这是全站一直写的口径 ——
-   * onboarding 的原话：「切分与归属决定的是『**什么时候写入回函管理列表**』，
-   * 不是『识别什么时候开始』」（`OnboardingGuide`）；`COMMIT_SPLIT` 的注释同理：
+   * 一句话：「切分与归属决定的是『**什么时候写入回函管理列表**』，
+   * 不是『识别什么时候开始』」（见需求文档 §5.2）；`COMMIT_SPLIT` 的注释同理：
    * 「切分是编辑动作，中间态不该落进任务列表」。
    *
    * 但实现此前**没有这道闸**：演示数据里任务**建批次时就带着 `assignSource`**

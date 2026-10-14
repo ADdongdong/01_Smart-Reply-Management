@@ -6,7 +6,7 @@ import {
   ExclamationCircleFilled,
   InfoCircleFilled,
 } from '@ant-design/icons'
-import type { ConfirmationType, RiskLevel, VerifyStatus } from '@/types'
+import type { ConfirmationType, VerifyStatus } from '@/types'
 import { TYPE_RULE } from '@/services/replyRule'
 import { StatusTag, type TagTone } from '@/components/StatusTag'
 
@@ -69,34 +69,6 @@ export function AiMark({ source }: { source?: string }) {
 
 /* ------------------- 风险等级 ------------------- */
 
-/**
- * 风险标签 —— **三档三色：红（高风险）/ 橙（中风险）/ 绿（低风险）**（2026-10-08 改）。
- *
- * ## 旧口径已作废（保留备查）
- *
- * 此前是红 / 绿两档：中风险在数据层保留，**视觉并入红档**，理由是"不引入第三个色相"。
- * 用户 2026-10-08 明确要求「这个风险，肯定是：低，中，高三个颜色」——
- * **业务上"中"必须与"高"一眼可分**，这一条压过了色相数量的洁癖，该取舍作废。
- * （当年反对橙色的理由是"橙色系标签会被看成咖啡色"；这次的做法是把橙的**饱和度提上去**
- * （`#e8912d`）而不是退回红档 —— 见 `global.css` 的 `--c-risk-medium*`。）
- *
- * ## 色彩用法（2026-09-20 定的那套继续有效）
- *
- * 起因是用户反馈「AI 风险那列的标签饱和度太低，看着很不清晰」：
- * · 底色走浅档（`--c-risk-*-bg`）且**无边框** —— 描边标签会在密集列表里堆出大量线条；
- * · 文字走**深档**语义色（`--c-risk-*-text`），不用墨色 ——
- *   「墨色文字 + 12% 浅底」的最终观感是**整片偏灰**，红绿只藏在底色里，扫视时认不出来；
- *   改深档后，三色在各自浅底上均 ≥ 4.5:1（WCAG AA）。
- */
-/** 风险等级的展示顺序（筛选下拉等按它排）—— 从重到轻，最后是"还没核验" */
-export const RISK_ORDER: RiskLevel[] = ['high', 'medium', 'low', 'none']
-
-export const RISK_MAP: Record<RiskLevel, { text: string; tone: TagTone }> = {
-  high: { text: '高风险', tone: 'high' },
-  medium: { text: '中风险', tone: 'medium' },
-  low: { text: '低风险', tone: 'low' },
-  none: { text: '未核验', tone: 'neutral' },
-}
 
 /**
  * 「识别中」标签的中性样式（v2.28 两阶段）—— 与「无法判定 / 未核验」同一灰阶：
@@ -106,36 +78,6 @@ const PENDING_CFG = { text: '识别中', tone: 'neutral' } as const
 
 /** 「识别中」的悬停说明 —— 与「无法判定」的「待人工判定」区分开 */
 export const RECOGNIZING_HINT = 'AI 识别中 —— 归属已确认，其余检测项完成后自动刷新结论'
-
-export function RiskTag({
-  level,
-  reasons,
-  pending,
-}: {
-  level: RiskLevel
-  reasons?: string[]
-  /** AI 识别中（银行函证阶段二尚未回填）—— 渲染中性「识别中」，不表达风险结论 */
-  pending?: boolean
-}) {
-  const cfg = pending ? PENDING_CFG : RISK_MAP[level]
-  const tips = pending ? [RECOGNIZING_HINT] : (reasons ?? [])
-  return (
-    <StatusTag
-      tone={cfg.tone}
-      tip={
-        tips.length ? (
-          <div style={{ fontSize: 13, lineHeight: 1.8 }}>
-            {tips.map((r) => (
-              <div key={r}>· {r}</div>
-            ))}
-          </div>
-        ) : undefined
-      }
-    >
-      {cfg.text}
-    </StatusTag>
-  )
-}
 
 /* ------------------- 回函进度步骤条 ------------------- */
 
@@ -254,7 +196,7 @@ export function ProgressSteps({
  *   「回函结果填写」页给；
  * · **已确认**（采纳了那项，或结果页填过 `matched`）→ 如实给「相符 / 不相符 / 无法判定」。
  *
- * 视觉口径与 `RiskTag` 一致（v2.23）：**浅底无边框 + 深档语义色文字 + 字重 500**（列表里的
+ * 视觉口径与结论标签（`MatchTag`）一致（v2.23）：**浅底无边框 + 深档语义色文字 + 字重 500**（列表里的
  * 标签是"结论徽标"、与整页一致）；「未确认 / 待人工判定 / 无法判定」走中性灰 ——
  * 它们都**不是结论**，只是"还没有结论"。
  */
@@ -271,7 +213,7 @@ export function MatchTag({
   matched: boolean | null
   /** 一句话依据，如「印章落于「信息证明无误」区」 */
   basis?: string
-  /** 不相符时的原因 / 差异说明（与「AI 风险」列一致：只用悬停，不加图标） */
+  /** 不相符时的原因 / 差异说明（只用悬停，不加图标） */
   reasons?: string[]
   /** 函证类型 —— 用于「无法判定」时给出与类型相符的归因（不得把银行函证归因到印章区域） */
   type?: ConfirmationType

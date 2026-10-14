@@ -6,7 +6,7 @@ import {
   DownOutlined,
   LoadingOutlined,
 } from '@ant-design/icons'
-import type { RecognitionStage, RecognitionTask, RiskLevel } from '@/types'
+import type { RecognitionStage, RecognitionTask } from '@/types'
 import { stagesOf } from '@/mock/recognition'
 import { MATCH_LEVEL_LABEL } from '@/components/BankTextRecognition'
 
@@ -268,33 +268,6 @@ export function StageList({ stages }: { stages: RecognitionStage[] }) {
 /* 派生（全部查表 / 复用既有口径，不写内联类型判断与新词）              */
 /* ------------------------------------------------------------------ */
 
-/* v3.16：改用与列表「AI 风险」列 / `Marks.RISK_MAP` 一致的**完整词**（高风险 / 中风险 / 低风险）——
-   识别界面的风险等级已由"染色数字"改为彩色标签，标签文字得自己说清是什么 */
-const RISK_LABEL: Record<RiskLevel, string> = {
-  high: '高风险',
-  medium: '中风险',
-  low: '低风险',
-  none: '待人工判定',
-}
-
-/**
- * 风险等级 → 标签档位（三档三色，v3.17）。
- *
- * **中风险自成橙档** —— 用户 2026-10-08：「这个风险，肯定是：低，中，高三个颜色」。
- * 此前 medium 并入 `high`（红档），旧口径与理由见 `Marks.RISK_MAP` 的注释。
- */
-export function riskTone(level?: RiskLevel): 'high' | 'medium' | 'low' | 'neutral' {
-  if (level === 'high') return 'high'
-  if (level === 'medium') return 'medium'
-  if (level === 'low') return 'low'
-  return 'neutral'
-}
-
-/** 风险等级文字（高风险 / 中风险 / 低风险 / 待人工判定）—— 供标签直接呈现 */
-export function riskText(level?: RiskLevel): string {
-  if (level === 'high' || level === 'medium' || level === 'low') return RISK_LABEL[level]
-  return RISK_LABEL.none
-}
 
 export function matchStageOf(task: RecognitionTask): RecognitionStage | undefined {
   return task.stages.find((s) => s.key === 'match')

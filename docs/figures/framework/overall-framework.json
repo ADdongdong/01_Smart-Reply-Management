@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "函证系统 · 回函管理智能化整体框架",
+    "output": "overall-framework.html",
+    "quality_profile": "showcase",
+    "locale": "zh-CN",
+    "animation": "trace",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主链路：上传 → 归属 → 列表 → 核验",
+        "focus": ["upload", "assign", "list", "verify"],
+        "note": "业务人员一次点进来的四个动作，每一步的产物都写进同一封回函记录。"
+      },
+      {
+        "id": "recognition",
+        "label": "识别与比对基准",
+        "focus": ["agency", "ai", "record", "upload"],
+        "note": "上传后识别即在后台并行推进；发函底稿与系统内格式一/二是两处比对的基准。"
+      },
+      {
+        "id": "data-exits",
+        "label": "数据落点：两笔留痕 + 一个出口",
+        "focus": ["assign", "verify", "record", "list"],
+        "note": "归属确定是唯一的落库入口；核验意见与回函结果都写在同一封记录上。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "agency",
+      "type": "external",
+      "label": "函证系统",
+      "sublabel": "发函底稿 · 格式一二",
+      "pos": [40, 70],
+      "size": [170, 68]
+    },
+    {
+      "id": "ai",
+      "type": "backend",
+      "label": "AI 识别服务",
+      "sublabel": "归属类一批 · 银行二批",
+      "pos": [360, 70],
+      "size": [190, 68]
+    },
+    {
+      "id": "upload",
+      "type": "frontend",
+      "label": "回函文件上传",
+      "sublabel": "往来 / 银行 两个入口",
+      "pos": [40, 380],
+      "size": [170, 68]
+    },
+    {
+      "id": "assign",
+      "type": "frontend",
+      "label": "回函切分与归属",
+      "sublabel": "手工切段 · 逐段指定归属",
+      "pos": [360, 380],
+      "size": [190, 68]
+    },
+    {
+      "id": "list",
+      "type": "frontend",
+      "label": "回函管理列表",
+      "sublabel": "一行 = 一封函证",
+      "pos": [660, 380],
+      "size": [180, 68]
+    },
+    {
+      "id": "verify",
+      "type": "frontend",
+      "label": "AI 智能核验页",
+      "sublabel": "三个检测页签 + 第 4 项",
+      "pos": [960, 380],
+      "size": [200, 68]
+    },
+    {
+      "id": "record",
+      "type": "database",
+      "label": "回函记录",
+      "sublabel": "一封函证的完整数据",
+      "pos": [660, 660],
+      "size": [200, 68]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "业务人员操作界面（四步动线）",
+      "wraps": ["upload", "assign", "list", "verify"]
+    },
+    {
+      "kind": "region",
+      "label": "AI 识别服务",
+      "wraps": ["ai"]
+    },
+    {
+      "kind": "region",
+      "label": "回函数据（一封一行）",
+      "wraps": ["record"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "upload-to-assign",
+      "from": "upload",
+      "to": "assign",
+      "label": "选文件"
+    },
+    {
+      "id": "assign-to-record",
+      "from": "assign",
+      "to": "record",
+      "label": "唯一落库入口",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "record-to-list",
+      "from": "record",
+      "to": "list",
+      "label": "落库入表",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "list-to-verify",
+      "from": "list",
+      "to": "verify",
+      "label": "进核验"
+    },
+    {
+      "id": "verify-to-record",
+      "from": "verify",
+      "to": "record",
+      "label": "表态 · 保存",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "upload-to-ai",
+      "from": "upload",
+      "to": "ai",
+      "label": "上传后并行识别",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "ai-to-record",
+      "from": "ai",
+      "to": "record",
+      "label": "识别结论回填",
+      "variant": "dashed"
+    },
+    {
+      "id": "agency-to-ai",
+      "from": "agency",
+      "to": "ai",
+      "label": "比对基准"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "一封记录上的三笔数据",
+      "items": [
+        "核验意见：采纳 / 不采纳 · 处理人 · 时间 · 不采纳原因",
+        "回函结果：相符性 · 印章三项 · 两句说明 · 两个附件 · 底稿指引",
+        "回函进度：待确认快递信息 → 待填写回函结果 → 已完成"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "归档条件（一套总判定）",
+      "items": [
+        "AI 核查项全部表过态（采纳或不采纳都算）",
+        "回函结果必填全部有值",
+        "两个保存出口都按这条判：核验页第 4 项、结果页"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "字段出处（一个字段一处）",
+      "items": [
+        "相符性：往来看印章落章区域，银行看询证事项逐项核对",
+        "四项判定与两句说明：核验页「人工确认」列（草稿态，保存才落库）",
+        "两个附件与底稿指引：第 4 项「回函结果补充」"
+      ]
+    }
+  ]
+}

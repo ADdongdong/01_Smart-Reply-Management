@@ -40,6 +40,8 @@ export default function ExpressImportDrawer() {
             type="primary"
             disabled={!r || r.matchedCount === 0}
             onClick={() => {
+              /* 真正把快递公司 / 单号写回匹配到的记录（v3.37）—— 此前只弹了一句成功提示 */
+              if (r) dispatch({ type: 'APPLY_EXPRESS', rows: r.rows })
               message.success(`已将 ${r?.matchedCount} 条快递信息代入对应函证`)
               dispatch({ type: 'CLOSE_EXPRESS' })
             }}

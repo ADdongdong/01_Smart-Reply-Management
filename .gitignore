@@ -11,3 +11,10 @@ dist-ssr
 
 # 抓图脚本的原始截图（docx 里用的是 docs/figures/ui/ 下处理过的那些；这批是中间产物，可随时重跑）
 docs/figures/_raw/
+
+# Python 字节码缓存
+__pycache__/
+*.pyc
+
+# archify 交付时的临时目录
+docs/figures/framework/.archify-delivery-*/

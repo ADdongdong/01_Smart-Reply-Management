@@ -141,7 +141,7 @@ export const CANDIDATE_SOURCES: BankCandidateSource[] = [
 /**
  * 表格模板（**发函侧**）—— 回函侧由它 + 单元格差异覆盖派生。
  *
- * 两套模板分别取自两份真实样例函证（**都是逐格取自原件**）：
+ * 两套模板分别对应两份样例函证（**逐格取自演示件**）：
  * · `cswl`    —— `fahan-cswl0526.pdf`（《企业询证函》，4 大类 / **6 张子表、列结构各不相同**），
  *                也是左栏「发函用印件」那份样例 —— **默认记录用它，双方同源**；
  * · `wanglai` —— `wanglai-1-SJ01YF001.pdf`（另一份《企业询证函》，4 张表），
@@ -178,7 +178,7 @@ type LetterPatch = Record<string, Record<number, Record<number, string>>>
 /**
  * `fahan-cswl0526.pdf` 的 **4 大类 / 6 张子表** —— 逐格取自原件（2026-09-28 按文字层坐标逐行还原）。
  *
- * 这封信是**「大类 → 子表」两级**结构（比 `wanglai` 那份更接近真实函证）：
+ * 这封信是**「大类 → 子表」两级**结构（比 `wanglai` 那份更接近实际函证结构）：
  * ```
  * 1. 销售与未结算  （1）销售与应（预）收账款  （2）应收贵公司票据
  * 2. 采购与未结算  （1）采购与预（应）付账款  （2）应付贵公司票据
@@ -620,48 +620,7 @@ const HANDWRITING_NORMAL: HandwritingResult = {
 /* 组装 AI 核验结果                                                    */
 /* ------------------------------------------------------------------ */
 
-/**
- * AI 风险等级与原因 —— **按函证类型分口径**（与 replyRule 的相符性判据配套）：
- * · 往来函证 —— 印章缺失 → 相符性「无法判定」；盖于「信息不符」区 → 不相符；
- *   两者都是高风险原因。
- * · 银行函证 —— 印章三项检测**只作风险提示**，不再推导「回函结果无法判定 / 不相符」；
- *   相符性只看询证事项逐项核对（bankDiffCount）。
- */
-function riskOf(type: ConfirmationType, v: { diffCount: number; seal: SealResult; bankDiffCount?: number }): {
-  level: 'high' | 'medium' | 'low' | 'none'
-  reasons: string[]
-} {
-  const reasons: string[] = []
-  if (type === '银行函证') {
-    // 印章问题单列为风险提示，与相符性分开表达
-    if (!v.seal.hasSeal) reasons.push('回函未检出印章，建议退回被询证方补盖银行印章')
-    if (v.seal.sealType === '财务章' && v.seal.nameMatched === false) {
-      reasons.push('印章名称与被询证单位不一致')
-    }
-    if ((v.bankDiffCount ?? 0) > 0) {
-      reasons.push(`回函与系统内询证事项逐项核对存在 ${v.bankDiffCount} 项差异`)
-    }
-    return {
-      level: !v.seal.hasSeal ? 'high' : (v.bankDiffCount ?? 0) > 0 ? 'medium' : 'low',
-      reasons,
-    }
-  }
-
-  // 往来函证 —— 印章落章区域仍参与相符性推导（口径不变）
-  if (!v.seal.hasSeal) reasons.push('未检出印章，回函结果无法判定')
-  if (v.seal.region === '信息不符区') reasons.push('印章盖于「信息不符」区，回函结果为不相符')
-  if (v.diffCount > 0) reasons.push(`一致性比对存在 ${v.diffCount} 项金额差异`)
-  if (v.seal.sealType === '财务章' && v.seal.nameMatched === false) {
-    reasons.push('印章名称与被询证单位不一致')
-  }
-  const level: 'high' | 'medium' | 'low' | 'none' =
-    !v.seal.hasSeal || v.seal.region === '信息不符区'
-      ? 'high'
-      : v.diffCount > 0
-        ? 'medium'
-        : 'low'
-  return { level, reasons }
-}
+/* 原 riskOf()（AI 风险等级与原因）已于 2026-10-14 随「AI 风险」一并删除。 */
 
 /**
  * 广东证券：印章落「信息不符」区 + 2 项金额差异 → 高风险。
@@ -674,13 +633,10 @@ const VERIFY_GD: AiVerification = (() => {
     'other-accounts': { 2: { 1: '' } },
   })
   const seal = SEAL_ABNORMAL
-  const { level, reasons } = riskOf('往来函证', { diffCount: consistency.diffCount, seal })
   return {
     consistency: { ...consistency, confidence: 0.95 },
     seal,
     handwriting: HANDWRITING_ABNORMAL,
-    riskLevel: level,
-    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }
@@ -699,13 +655,10 @@ const VERIFY_GD_W: AiVerification = (() => {
     trade: { 2: { 1: '' } },
   })
   const seal = SEAL_ABNORMAL
-  const { level, reasons } = riskOf('往来函证', { diffCount: consistency.diffCount, seal })
   return {
     consistency: { ...consistency, confidence: 0.95 },
     seal,
     handwriting: HANDWRITING_ABNORMAL,
-    riskLevel: level,
-    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }
@@ -725,13 +678,10 @@ const VERIFY_ZX: AiVerification = (() => {
     'other-accounts': { 2: { 1: '' } },
   })
   const seal = SEAL_NORMAL
-  const { level, reasons } = riskOf('往来函证', { diffCount: consistency.diffCount, seal })
   return {
     consistency: { ...consistency, confidence: 0.97 },
     seal,
     handwriting: HANDWRITING_NORMAL,
-    riskLevel: level,
-    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }
@@ -743,13 +693,10 @@ const VERIFY_QS: AiVerification = (() => {
   const consistency = buildConsistency('cswl')
   const seal = SEAL_MISSING
   const bankDiffCount = BANK_ITEMS_QS.filter((i) => !i.match).length
-  const { level, reasons } = riskOf('银行函证', { diffCount: 0, seal, bankDiffCount })
   return {
     consistency: { ...consistency, confidence: 0.9 },
     seal,
     bankText: BANK_TEXT,
-    riskLevel: level,
-    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }
@@ -761,13 +708,10 @@ const VERIFY_JH: AiVerification = (() => {
   const consistency = buildConsistency('cswl')
   const seal = SEAL_NORMAL
   const bankDiffCount = BANK_ITEMS_QS.filter((i) => !i.match).length
-  const { level, reasons } = riskOf('银行函证', { diffCount: 0, seal, bankDiffCount })
   return {
     consistency: { ...consistency, confidence: 0.92 },
     seal,
     bankText: BANK_TEXT,
-    riskLevel: level,
-    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }
@@ -799,17 +743,10 @@ export const BANK_VERIFY_FALLBACK: Record<string, AiVerification> = {
 export function fallbackVerification(type: ConfirmationType): AiVerification {
   const bank = type === '银行函证'
   const seal = SEAL_NORMAL
-  const { level, reasons } = riskOf(type, {
-    diffCount: 0,
-    seal,
-    bankDiffCount: bank ? BANK_ITEMS_QS.filter((i) => !i.match).length : undefined,
-  })
   return {
     consistency: { ...buildConsistency('cswl'), confidence: 0.95 },
     seal,
     ...(bank ? { bankText: BANK_TEXT } : { handwriting: HANDWRITING_NORMAL }),
-    riskLevel: level,
-    riskReasons: reasons,
     completedModules: 6,
     totalModules: 6,
   }
@@ -841,13 +778,6 @@ const VERIFY_HT: AiVerification = (() => {
       conclusion: '手写说明位于「信息不符」区，与印章区域不一致，建议人工复核',
       confidence: 0.82,
     },
-    riskLevel: 'medium',
-    riskReasons: [
-      '一致性比对存在 1 项金额差异',
-      '多页回函未检出骑缝章',
-      '手写说明区域与印章区域不一致',
-      '回函加盖的是财务章，非公章',
-    ],
     completedModules: 6,
     totalModules: 6,
   }
@@ -878,13 +808,6 @@ const VERIFY_HT_W: AiVerification = (() => {
       conclusion: '手写说明位于「信息不符」区，与印章区域不一致，建议人工复核',
       confidence: 0.82,
     },
-    riskLevel: 'medium',
-    riskReasons: [
-      '一致性比对存在 1 项金额差异',
-      '多页回函未检出骑缝章',
-      '手写说明区域与印章区域不一致',
-      '回函加盖的是财务章，非公章',
-    ],
     completedModules: 6,
     totalModules: 6,
   }
@@ -933,13 +856,13 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     sendMethod: '邮寄发函',
     sendDate: '2026-09-09 09:30:11',
     replyDate: '2026-09-10 16:05:44',
-    expressCompany: '顺丰（系统对接）',
+    registeredAt: '2026-09-10 16:07:12',
+    expressCompany: '顺丰速运',
     expressNo: 'SF7444706556901',
     replyFile: 'whzf0010005_reply_v1.pdf',
     faceSheet: 'SF7444706556901.jpg',
     replyProgress: '已完成',
     hasReplied: true,
-    risk: 'high',
     verifyStatus: 'verified',
     verifiedBy: '李复核',
     verifiedAt: '2026-09-10 17:12:08',
@@ -957,13 +880,13 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     sendMethod: '邮寄发函',
     sendDate: '2026-09-14 15:20:02',
     replyDate: '2026-09-14 15:31:20',
-    expressCompany: '顺丰（系统对接）',
+    registeredAt: '2026-09-14 15:33:04',
+    expressCompany: '顺丰速运',
     expressNo: 'SF7444706556947',
     replyFile: '1-SJ01YF001_p2.pdf',
     faceSheet: 'SF7444706556947.jpg',
     replyProgress: '待填写回函结果',
     hasReplied: true,
-    risk: 'medium',
     verifyStatus: 'pending',
     aiFilled: true,
     /* 该函证预览的样例是 `wanglai-1-SJ01YF001.pdf`（4 张表），故用同结构的核验数据 */
@@ -978,15 +901,16 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     confirmationNo: 'QS2024-031',
     entity: '齐商银行股份有限公司',
     type: '银行函证',
-    sendMethod: '邮寄发函',
+    /* 演示「电子函证」—— 银行独有（v3.37） */
+    sendMethod: '电子函证',
     sendDate: '2026-09-14 14:58:40',
     replyDate: '2026-09-14 15:12:05',
-    expressCompany: '中国邮政（系统对接）',
+    registeredAt: '2026-09-14 15:14:20',
+    expressCompany: '中国邮政',
     expressNo: 'EMS1122334455667',
     replyFile: '齐商银行股份有限公司-20240331.pdf',
     replyProgress: '待确认快递信息',
     hasReplied: true,
-    risk: 'high',
     verifyStatus: 'pending',
     aiFilled: true,
     periodStart: '2024-01-01',
@@ -1003,16 +927,16 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     confirmationNo: 'whzf0010004',
     entity: '国泰君安证券股份有限公司',
     type: '往来函证',
-    sendMethod: '电子发函',
+    sendMethod: '电子邮件发函',
     sendDate: '2026-09-12 10:31:20',
     replyDate: '2026-09-13 14:08:55',
-    expressCompany: '京东物流（系统对接）',
+    registeredAt: '2026-09-13 14:11:47',
+    expressCompany: '京东物流',
     expressNo: 'JD0033445566778',
     replyFile: 'whzf0010004_reply.pdf',
     faceSheet: 'JD0033445566778.jpg',
     replyProgress: '已完成',
     hasReplied: true,
-    risk: 'low',
     verifyStatus: 'verified',
     verifiedBy: '李复核',
     verifiedAt: '2026-09-13 15:20:31',
@@ -1024,7 +948,7 @@ export const REPLY_RECORDS: ReplyRecord[] = [
     expressInfo: {
       replyFile: 'whzf0010004_reply.pdf',
       faceSheet: 'JD0033445566778.jpg',
-      expressCompany: '京东物流（系统对接）',
+      expressCompany: '京东物流',
       expressNo: 'JD0033445566778',
       senderName: '陈静',
       senderPhone: '13800000005',

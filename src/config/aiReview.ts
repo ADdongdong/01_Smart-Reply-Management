@@ -57,7 +57,7 @@ export const AI_REVIEW_ITEMS: Record<ConfirmationType, AiReviewItem[]> = {
   往来函证: [
     {
       key: 'seal',
-      label: '印章识别',
+      label: '印章核查',
       panelKey: 'seal',
       hint: '是否盖章 / 公章还是财务章 / 名称一致性 / 骑缝章 —— 往来函证的「回函是否相符」由印章落章区域判定',
     },
@@ -88,7 +88,7 @@ export const AI_REVIEW_ITEMS: Record<ConfirmationType, AiReviewItem[]> = {
     },
     {
       key: 'seal',
-      label: '印章识别',
+      label: '印章核查',
       panelKey: 'seal',
       hint: '是否有印章 / 印章名称与被询证单位是否一致（只作风险提示，不影响相符性）',
     },

@@ -2,15 +2,13 @@ import { Layout } from 'antd'
 const { Content } = Layout
 import { Outlet } from 'react-router-dom'
 import AssignView from '@/components/AssignView'
-import OnboardingGuide from '@/components/OnboardingGuide'
 
 /**
  * 工作台外壳（v2.57；v3.28 收敛为**只有一个全屏界面**）。
  *
  * ## 现在挂什么
  *
- * · `AssignView` —— 归属界面（切分与指定归属），上传后进入，点「确定」即回主界面；
- * · `OnboardingGuide` —— 新手引导（手动点开）。
+ * · `AssignView` —— 归属界面（切分与指定归属），上传后进入，点「确定」即回主界面。
  *
  * ## 摘掉了什么、为什么
  *
@@ -32,7 +30,6 @@ export default function WorkbenchLayout() {
       </Content>
 
       <AssignView />
-      <OnboardingGuide />
     </Layout>
   )
 }

@@ -3,6 +3,7 @@ import type {
   AiReviewKey,
   ConfirmationType,
   ExpressImportResult,
+  ExpressMatchRow,
   RecognitionTask,
   ReplyRecord,
   UploadBatch,
@@ -11,6 +12,8 @@ import { BANK_ITEMS_QS, BANK_VERIFY_FALLBACK, REPLY_RECORDS, fallbackVerificatio
 import { makeSegmentTask, makeStages } from '@/mock/recognition'
 import { advanceBatch } from '@/services/mockRecognition'
 import { TYPE_RULE } from '@/services/replyRule'
+import { aiReviewItemsOf } from '@/config/aiReview'
+import { replyTaskSummaryOf } from '@/config/replyTasks'
 import dayjs from 'dayjs'
 
 /**
@@ -66,10 +69,6 @@ interface AppState {
    * 清掉才能让同一封（重新识别后再次入表）**再播一次**。
    */
   insertedRowIds: string[]
-  /** 操作指引弹窗是否展开 —— **不自动弹出**，只由「操作指引」入口 / 顶部问号图标手动打开 */
-  onboardingVisible: boolean
-  /** 演示数据是否已加载 */
-  demoLoaded: boolean
   /** 快递数据导入结果（不做步骤化处理，直接展示匹配代入结果） */
   expressResult: ExpressImportResult | null
   expressOpen: boolean
@@ -139,9 +138,15 @@ type Action =
   | { type: 'CLEAR_FLASH' }
   /** 插入动效播完 —— 由列表在过渡结束后派发（见 `AppState.insertedRowIds`） */
   | { type: 'CLEAR_INSERTED' }
-  | { type: 'OPEN_ONBOARDING' }
-  | { type: 'CLOSE_ONBOARDING' }
   | { type: 'IMPORT_EXPRESS'; result: ExpressImportResult }
+  /**
+   * 把导入的快递数据**代入**匹配到的回函记录（v3.37）—— 「确认代入」那一下的落点。
+   *
+   * 只写**当前有效那一次回函**的 `expressCompany` / `expressNo`：快递数据按运单号匹配，
+   * 运单号属于某一次回函；历史回函已被覆盖，改它没有意义（数据层也不留'两次'的说法）。
+   * 不写收件人三项 —— 那三项 AI 与快递数据都给不了，只能人工在「回函快递信息」里补。
+   */
+  | { type: 'APPLY_EXPRESS'; rows: ExpressMatchRow[] }
   | { type: 'CLOSE_EXPRESS' }
   | { type: 'CONFIRM_ASSIGN'; taskId: string }
   | { type: 'MANUAL_MATCH'; taskId: string; confirmationNo: string; entity: string }
@@ -223,13 +228,6 @@ const initialState: AppState = {
   floatingVisible: false,
   flashRowId: null,
   insertedRowIds: [],
-  /**
-   * 操作指引**不自动弹出**（默认关闭）。
-   * 进入页面即弹会打断正在用它的人，而且刷新一次弹一次；
-   * 需要时从主操作行的「操作指引」按钮、或顶部导航的问号图标手动打开。
-   */
-  onboardingVisible: false,
-  demoLoaded: false,
   expressResult: null,
   expressOpen: false,
   /* 默认**手动模式**（初稿 = 整份一段）：智能识别那条路要用户/上传弹窗明确点过才走 */
@@ -318,6 +316,11 @@ function applyRecognizedReply(
     sendMethod: base?.sendMethod ?? '邮寄发函',
     sendDate: base?.sendDate ?? now,
     replyDate: now,
+    /*
+     * **回函数据登记时间**（v3.37）= 这条回函记录**录入函证系统**的时刻（精确到分），
+     * 落库那一刻写入、用户只读 —— 与「回函日期」（函件上的日期）不是一回事。
+     */
+    registeredAt: dayjs().format('YYYY-MM-DD HH:mm'),
     replyFile: task.fileName,
     replyProgress: '待确认快递信息',
     hasReplied: true,
@@ -335,7 +338,6 @@ function applyRecognizedReply(
      * **结论还没就绪（`!settledAtLanding`）时记 `none`** —— 没结论就没有风险可报，
      * 结案那一遍（`settleTask`）再按核验结论的等级写入。
      */
-    risk: verification?.riskLevel ?? 'none',
     verifyStatus: 'pending',
     aiFilled: true,
     /*
@@ -532,8 +534,7 @@ function settleTask(state: AppState, taskId: string): AppState {
           verification: v,
           /* 失败的那封不继承任何历史询证事项 —— 它没有结论可对 */
           bankItems: failed ? r.bankItems : (prior?.bankItems ?? BANK_ITEMS_QS),
-          risk: v?.riskLevel ?? 'none',
-          recognitionPending: false,
+                recognitionPending: false,
           recognitionFailed: failed || undefined,
           recognitionFailReason: failed ? task.failReason : undefined,
         }
@@ -552,6 +553,34 @@ function withMatchDetail(task: RecognitionTask, detail: string): RecognitionTask
     ...task,
     stages: task.stages.map((s) => (s.key === 'match' ? { ...s, status: 'done' as const, percent: 100, detail } : s)),
   }
+}
+
+/**
+ * **保存回函结果时，自动带出一份核查事项表态**（v3.43，用户口径）：
+ * 「回函结果填写完成后，核查事项复核就要自动带出回函结果填写的结果并且标记为完成。」
+ *
+ * 只在**回函结果的必填字段都已填齐**（总判定 `done`）时补：那一刻结果已经定下来，
+ * 前面那些 AI 核查项不必再逐条点「采纳」；仍未表态的项按**采纳**记一条留痕
+ * （处理人 = 当前用户、时间 = 保存时刻），列表「核查事项复核」随即变「已复核」。
+ *
+ * **人已经表过态的项一律不动**（含「不采纳」与它填的原因）：自动带出只补空缺，
+ * 不覆盖人的判断。
+ */
+function withAutoAiReview(r: ReplyRecord): ReplyRecord {
+  if (!replyTaskSummaryOf(r).done) return r
+  const filled: NonNullable<ReplyRecord['aiReview']> = { ...r.aiReview }
+  let changed = false
+  for (const item of aiReviewItemsOf(r.type)) {
+    if (!filled[item.key]) {
+      filled[item.key] = {
+        status: 'adopted',
+        by: CURRENT_USER,
+        at: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      }
+      changed = true
+    }
+  }
+  return changed ? { ...r, aiReview: filled } : r
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -688,13 +717,35 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, flashRowId: null }
     case 'CLEAR_INSERTED':
       return state.insertedRowIds.length ? { ...state, insertedRowIds: [] } : state
-    case 'OPEN_ONBOARDING':
-      return { ...state, onboardingVisible: true }
-    case 'CLOSE_ONBOARDING':
-      return { ...state, onboardingVisible: false, demoLoaded: true }
+    /* 原 `OPEN_ONBOARDING` / `CLOSE_ONBOARDING`（操作指引弹窗）已于 2026-10-14 随该功能删除。 */
 
     case 'IMPORT_EXPRESS':
       return { ...state, expressResult: action.result, expressOpen: true }
+
+    case 'APPLY_EXPRESS': {
+      /* 按函证编号归并：每个函证只认**最新那一次**回函（sendSeq 最大者） */
+      const latest = new Map<string, string>()
+      state.records.forEach((r) => {
+        const cur = latest.get(r.confirmationNo)
+        if (!cur || r.sendSeq > (state.records.find((x) => x.id === cur)?.sendSeq ?? 0)) {
+          latest.set(r.confirmationNo, r.id)
+        }
+      })
+      const byId = new Map<string, ExpressMatchRow>()
+      action.rows.forEach((row) => {
+        if (row.status !== 'matched' || !row.matchedConfirmationNo) return
+        const id = latest.get(row.matchedConfirmationNo)
+        if (id) byId.set(id, row)
+      })
+      return {
+        ...state,
+        records: state.records.map((r) => {
+          const row = byId.get(r.id)
+          if (!row) return r
+          return { ...r, expressCompany: row.expressCompany, expressNo: row.expressNo }
+        }),
+      }
+    }
     case 'CLOSE_EXPRESS':
       return { ...state, expressOpen: false }
 
@@ -977,8 +1028,7 @@ function reducer(state: AppState, action: Action): AppState {
                   ...r,
                   verification: undefined,
                   bankItems: undefined,
-                  risk: 'none' as const,
-                  recognitionPending: true,
+                                recognitionPending: true,
                   recognitionFailed: undefined,
                   recognitionFailReason: undefined,
                 }
@@ -1046,7 +1096,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         records: state.records.map((r) =>
           r.id === action.recordId
-            ? {
+            ? withAutoAiReview({
                 ...r,
                 ...action.patch,
                 /*
@@ -1058,7 +1108,7 @@ function reducer(state: AppState, action: Action): AppState {
                   : {}),
                 lastEditedBy: CURRENT_USER,
                 lastEditedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-              }
+              })
             : r,
         ),
       }
@@ -1081,7 +1131,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         records: state.records.map((r) =>
           r.id === action.recordId
-            ? {
+            ? withAutoAiReview({
                 ...r,
                 ...action.patch,
                 /* 同 `UPDATE_RESULT`：来自核验页第 4 项的保存留一枚标记（v3.35） */
@@ -1089,7 +1139,7 @@ function reducer(state: AppState, action: Action): AppState {
                   ? { resultExtraSavedAt: dayjs().format('YYYY-MM-DD HH:mm:ss') }
                   : {}),
                 replyProgress: r.verifyStatus === 'verified' ? '已完成' : '待确认快递信息',
-              }
+              })
             : r,
         ),
       }

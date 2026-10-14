@@ -3026,6 +3026,26 @@ body {
 }
 
 
+/*
+ * 展开行「回函记录」表的两个列头说明（v3.36）—— 虚线下划线 + 问号光标，表示悬停可看含义与由来。
+ * 只给真正需要解释的两列（发函记录编号 / 回函情况），不是给所有列都挂一个。
+ */
+.col-help {
+  border-bottom: 1px dashed var(--c-hairline);
+  cursor: help;
+}
+/*
+ * 定长串（记录编号 / 快递单号）—— 放得下就一行，放不下用省略号，不要折成两截；
+ * 完整值在 `title` 里（v3.36）。
+ */
+.nowrap-ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+
 /* ⑦ 无障碍降级 —— 用户开启「减少动态效果」时全部退回静态 */
 @media (prefers-reduced-motion: reduce) {
   *,

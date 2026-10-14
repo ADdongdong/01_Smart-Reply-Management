@@ -206,12 +206,23 @@ export function replyTaskSummaryOf(
 ): ReplyTaskSummary {
   const tasks = replyTasksOf(record.type)
   const pending = tasks.filter((t) => !isReplyTaskDone(record, t, draft))
+  const fieldPending = pending.filter((t) => t.kind === 'field')
   return {
-    done: pending.length === 0,
+    /*
+     * **完成的唯一标准 = 回函结果的必填字段都有值**（v3.43，用户口径）：
+     * 「回函结果完成只有一个标准，就是该表单里的所有必填字段都被填完了，
+     * 无论是从回函结果填的，还是从核查事项复核填的。」
+     *
+     * 所以 `done` **不看 AI 核查项表没表态** —— 原先按 `pending.length === 0` 判，
+     * 后果是逐项点完「不采纳」（一个字段都没填）也被判成完成、直接归档（用户实测报错）。
+     * AI 核查项仍留在 `pending` 里（"人这边还有没有要做的事"由那一列表达），
+     * 但它**不再参与"回函结果完成没有"**这个判定。
+     */
+    done: fieldPending.length === 0,
     tasks,
     pending,
     aiPending: pending.filter((t) => t.kind === 'ai'),
-    fieldPending: pending.filter((t) => t.kind === 'field'),
+    fieldPending,
   }
 }
 

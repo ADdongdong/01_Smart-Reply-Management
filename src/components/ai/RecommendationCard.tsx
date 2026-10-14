@@ -29,20 +29,20 @@ export function RecommendationCard({
   tone,
   /** 一行依据摘要 */
   basis,
-  /** 风险原因等补充行 */
+  /** 补充行（如不一致的具体项） */
   reasons,
-  /** 风险等级标签文字（高风险 / 中风险 / 低风险 / 待人工判定）—— 卡头右侧彩色标签（v3.14，v3.16 改标签） */
-  riskLabel,
-  /** 风险语义档：决定标签配色（红 = 高 / 橙 = 中 / 绿 = 低 / 中性） */
-  riskTone,
+  /** 卡头右侧彩色标签的文字（相符 / 不相符 / 待人工判定） */
+  tagLabel,
+  /** 标签语义档：决定配色（红 = 不相符 / 绿 = 相符 / 中性 = 待人工判定） */
+  tagTone,
 }: {
   owner?: string
   verdict: string
   tone: 'high' | 'low' | 'neutral'
   basis?: string
   reasons?: string[]
-  riskLabel?: string
-  riskTone?: 'high' | 'medium' | 'low' | 'neutral'
+  tagLabel?: string
+  tagTone?: 'high' | 'medium' | 'low' | 'neutral'
 }) {
   /* 浅色底上用**深档**语义色文字（`-text`），不用原色 —— 原色在浅底上饱和度偏低、读起来发飘 */
   const toneColor =
@@ -55,20 +55,20 @@ export function RecommendationCard({
   return (
     <div className="insight-card">
       {/*
-       * 卡头：编号 · 单位 ／（右侧）风险等级。
+       * 卡头：编号 · 单位 ／（右侧）结论标签。
        *
        * **风险等级随结论卡走（v3.14）** —— 用户要求：「风险等级也放在这个区域吧，
        * 这个区域相当于是结论区域。底下的风险等级的数据就可以不要了」。
        * 原先它只在页面底部出现**一次**、取的是 `primary`（第一封）的等级，
        * 多封一起识别时"这行风险是谁的"与当初那句「下面的不相符是什么意思」是同一个歧义。
        */}
-      {(owner || riskLabel) && (
+      {(owner || tagLabel) && (
         <div
           className="insight-card__owner"
           style={{ display: 'flex', alignItems: 'center', gap: 10 }}
         >
           <span>{owner}</span>
-          {riskLabel && (
+          {tagLabel && (
             /*
              * 风险等级 = **彩色标签**（v3.16，用户要求：「这个风险等级也用不同颜色的标签来展示，
              * 标签可以稍微大一点」）。
@@ -81,8 +81,8 @@ export function RecommendationCard({
              * 因此**「风险等级」前缀不再需要**：标签文字自己就带「风险」二字。
              */
             <span style={{ marginLeft: 'auto' }}>
-              <StatusTag tone={riskTone} size="lg">
-                {riskLabel}
+              <StatusTag tone={tagTone} size="lg">
+                {tagLabel}
               </StatusTag>
             </span>
           )}

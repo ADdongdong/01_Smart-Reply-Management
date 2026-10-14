@@ -41,9 +41,9 @@
 - **⚠️ 已退役的入口**：右下角识别进度卡与它点开的**全屏「智能识别」界面**在 v3.28 **不再挂载**
   （识别过程搬到了列表页），故原 `ui_identify` / `ui_identify_card` 两张图**下线**；
   识别依据现由「AI 核验事项」列的事项详情承担（`ui_verify_actions` / `ui_verify_consistency` /
-  `ui_verify_seal` / `ui_verify_handwrite`，入口都是 `open_chip`）。
+  `ui_verify_seal` / `ui_verify_handwrite`，入口都是 `open_verify`）。
 - **「更多」下拉已移除**（v3.28）——「回函快递信息 / 回函结果」改点**进度列的步骤条**（`open_step`），
-  「AI 核验」改点**事项文字链**（`open_chip`），删除入口不复存在（原 `ui_delete_confirm` 下线）。
+  「AI 核验」改点**核查事项复核那一格**（`open_verify`，v3.31 起该格不再逐项列事项名）；删除入口不复存在（原 `ui_delete_confirm` 下线）。
 - **事项详情截"已采纳留痕"要走两步**（v3.29）—— 点「采纳识别数据」后弹窗**自动关闭**，
   故先采纳、再点同一条事项重新打开，才拍得到页脚那行留痕。
 """
@@ -57,11 +57,13 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 from PIL import Image, ImageChops
 from playwright.sync_api import sync_playwright
 
-BASE = 'http://127.0.0.1:15178/reply'
+# 默认 15178（本机 dev server 的约定端口）；换端口时用环境变量覆盖，别改源码：
+#   $env:APP_BASE='http://127.0.0.1:8899/reply'; python docs/figures/capture_ui_screenshots.py
+BASE = os.environ.get('APP_BASE', 'http://127.0.0.1:15178/reply')
 # v3.05 起往来与银行是两个页面（两条路由）—— 抓图要**按类走对应的页**：
 # 列表图两张（各页一张），银行上传弹窗那张必须去银行页（往来页上没有那个按钮）。
-PAGE_WANGLAI = 'http://127.0.0.1:15178/reply/wanglai'
-PAGE_BANK = 'http://127.0.0.1:15178/reply/bank'
+PAGE_WANGLAI = BASE + '/wanglai'
+PAGE_BANK = BASE + '/bank'
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_DIR = os.path.join(HERE, 'ui')
 RAW_DIR = os.path.join(HERE, '_raw')
@@ -162,7 +164,7 @@ def to_assign_bank_smart(page):
     page.wait_for_timeout(800)
 
 
-def to_recog_board(page):
+def _retired_recog_board(page):
     """走到**列表页的「正在智能识别」区**（v3.28，取代原右下角悬浮卡 + 全屏识别界面；v3.29 起独立成块、位于输入卡与列表之间）。
 
     路径：银行页 → 上传弹窗点「智能识别」→ 归属界面点「确定」→ 回列表，
@@ -203,30 +205,34 @@ def open_step(page, n, label):
     page.wait_for_timeout(2800)
 
 
-def open_chip(page, n, label):
-    """点第 n 行「AI 核验事项」列的某一项 → 打开该项的识别详情（v3.28）。
+def open_verify(page, n=0, tab=None):
+    """点第 n 行「核查事项复核」格 → 打开核验页，再按需切到某个页签。
 
-    这是「AI 核验」的唯一入口：打开即**定位到被点的那一项**，页脚给「采纳 / 不采纳识别数据」。
-    v3.29 起事项是**一行文字链**（类名由 `.ai-review__chip` 改为 `.ai-review__link`）。
+    ⚠️ **v3.31 起那一格只报状态**（勾选框 + 待复核 / 已复核），**不再逐项列事项名** ——
+    所以旧写法「按事项名点文字链」会找不到元素（2026-10-14 实测 6 张图全超时）。
+    现在点整格即打开核验页、落点是**第一个未完成事项**；要拍某一页签就再多点一下页签。
     """
-    page.locator('.ant-table-row').nth(n).locator('.ai-review__link', has_text=label).first.click()
-    page.locator('.vw-right').first.wait_for(state='visible', timeout=12000)
+    page.locator('.ant-table-row').nth(n).locator('.ai-review__link').first.click()
+    page.locator('.vw-right').first.wait_for(state='visible', timeout=15000)
     page.wait_for_timeout(1800)
+    if tab:
+        page.locator('.ant-modal-content button', has_text=tab).first.click()
+        page.wait_for_timeout(1600)
 
 
 STEPS = [
     # (文件名, 说明, 操作, 是否只截弹窗元素)  —— 默认都在**往来页**，见 BANK_STEPS
     ('ui_reply_list', '往来函证回函列表（页面/菜单一）', lambda p: None, False),
     ('ui_reply_list_bank', '银行函证回函列表（页面/菜单二）', lambda p: None, False),
-    ('ui_expand_row', '展开行：回函记录表 + 留痕',
+    ('ui_expand_row', '展开行：回函记录表（8 列 = 回函次序 / 记录编号 / 发函方式 / 快递公司 / 单号 / 登记时间 / 回函情况 / 操作）',
      lambda p: p.locator('.ant-table-row').first.locator('td').first.click(), False),
-    ('ui_view_file', '「查看函证」原始文件视图',
+    ('ui_view_file', '「查看函证」弹窗（批次层恒显 —— v3.35 起不再有「原始文件 / AI 批注」切换）',
      lambda p: p.locator('.ant-table-row').first.locator('button', has_text='查看').first.click(), True),
-    ('ui_view_annot', '「查看函证」AI 批注视图（点预览上方的「AI 批注」模式）', lambda p: (
+    # 视图切换已于 v3.35 全局删除，故这张改为**预览区近景**（只截 pdf 画布那一片，看清批注）。
+    ('ui_view_annot', '「查看函证」预览区近景（原件 + 印章定位框 / 落章区域）', lambda p: (
         p.locator('.ant-table-row').first.locator('button', has_text='查看').first.click(),
-        p.wait_for_timeout(2500),
-        p.locator('button', has_text=re.compile(r'^\s*AI\s*批注\s*$')).first.click(),
-    ), True),
+        p.wait_for_timeout(3200),
+    ), '.ant-modal-content canvas'),
     ('ui_upload_current', '「上传往来函证回函」弹窗',
      lambda p: p.locator('button', has_text='上传往来函证回函').first.click(), True),
     ('ui_upload_bank', '「上传银行函证回函」弹窗',
@@ -237,19 +243,26 @@ STEPS = [
      to_assign_bank, False),
     ('ui_assign_bank_smart', '「回函切分与归属」全屏界面 · 银行侧「智能识别」初稿态（初稿即切分结果：20 段 / 4 包裹 / 归属与单号已带入）',
      to_assign_bank_smart, False),
-    # v3.28：识别过程搬上列表页（`to_recog_board`）—— v3.29 起独立成块、位于输入卡与列表之间；
-    # 整屏截，要看"上面在认、下面已入表"的对照
-    ('ui_recog_board', '「正在智能识别」区（独立成块、位于输入卡与列表之间；逐封一行 + 与下方表格同屏对照）',
-     to_recog_board, False),
+    # ⚠️ `ui_recog_board`（「正在智能识别」区）**已于 2026-10-14 撤除**，本脚本不再抓它：
+    # 用户把口径整个调过来 ——「智能核查过程的显示的位置，放在表单中」，即表格里的
+    # 「智能核查状态」+「智能核查进度」两列；原独立区块 `RecognitionProgressBoard`
+    # 保留备用、不再挂载（同 v3.28 退役的悬浮卡与全屏识别界面）。
     # v3.28：事项详情 = 点列表「AI 核验事项」某一项打开，页签落在该项、页脚给采纳 / 不采纳
     # v3.29：点「采纳」后弹窗**自动关闭**，故采纳完再点一次同一项，才能拍到页脚那行留痕
+    # v3.34 起表态后**不关窗**（自动前进到下一项），故要拍到「已采纳」留痕得：采纳 → 关掉 → 再点进来
     ('ui_verify_actions', 'AI 核验事项详情（打开即定位被点项 + 页脚采纳 / 不采纳；截**已采纳**后的留痕态）',
-     lambda p: (open_chip(p, 0, '印章识别'),
+     lambda p: (open_verify(p, 0, '印章识别'),
                 p.locator('.ant-modal-wrap:visible .ant-modal-footer button',
                           has_text=re.compile('^采纳识别数据$')).first.click(),
+                p.wait_for_timeout(1400),
+                p.locator('.ant-modal-wrap:visible .ant-modal-footer button',
+                          has_text=re.compile('^关\\s*闭$')).first.click(),
                 p.wait_for_timeout(1200),
-                open_chip(p, 0, '印章识别')), True),
-    ('ui_verify_consistency', 'AI 核验 · 发函回函一致性检测', lambda p: open_chip(p, 0, '发函回函一致性检测'), True),
+                open_verify(p, 0, '印章识别')), True),
+    ('ui_verify_consistency', 'AI 核验 · 发函回函一致性检测', lambda p: open_verify(p, 0, '发函回函一致性检测'), True),
+    # v3.33 新增的第 4 项「回函结果补充」（它不在列表的核查事项列里，故从核验页里切页签）
+    ('ui_verify_result_extra', 'AI 核验 · 第 4 项「回函结果补充」（两个附件 + 底稿指引文本 + 保存）',
+     lambda p: open_verify(p, 0, '回函结果补充'), True),
     ('ui_express', '「回函快递信息」弹窗', lambda p: open_step(p, 0, '快递信息'), True),
     ('ui_result', '「填写回函结果」页', lambda p: open_step(p, 0, '回函结果'), True),
     # ⚠ 这一张**必须整屏截**：它是个抽屉 + 结果弹窗的组合，只截 `.ant-modal-content` 会超时
@@ -262,8 +275,7 @@ MODES = [('ui_verify_seal', 'AI 核验 · 印章识别', '印章识别'),
          ('ui_verify_handwrite', 'AI 核验 · 手写体识别', '手写体识别')]
 
 # 这几个文件要去**银行页**抓（其余都在往来页）—— v3.05 拆页之后必须各去各的
-BANK_STEPS = {'ui_reply_list_bank', 'ui_upload_bank', 'ui_assign_bank', 'ui_assign_bank_smart',
-              'ui_recog_board'}
+BANK_STEPS = {'ui_reply_list_bank', 'ui_upload_bank', 'ui_assign_bank', 'ui_assign_bank_smart'}
 
 
 def main():
@@ -276,7 +288,10 @@ def main():
         errs = []
         page.on('pageerror', lambda e: errs.append(str(e)[:200]))
 
+        want = set(sys.argv[1:])   # 可选：只重抓指定几张（换端口 / 修选择器后重跑单张）
         for name, desc, act, only_modal in STEPS:
+            if want and name not in want:
+                continue
             try:
                 page.goto(PAGE_BANK if name in BANK_STEPS else PAGE_WANGLAI,
                           wait_until='domcontentloaded')
@@ -296,12 +311,14 @@ def main():
                 print('  [fail]', name, desc, str(e).split('\n')[0][:70])
 
         for name, desc, mode in MODES:
+            if want and name not in want:
+                continue
             try:
                 page.goto(BASE, wait_until='domcontentloaded')
                 page.wait_for_selector('.page-head__title', timeout=30000)
                 page.wait_for_timeout(1800)
                 # v3.28：直接点「AI 核验事项」列里那一项（打开即定位到它），不必再切页签
-                open_chip(page, 0, mode)
+                open_verify(page, 0, mode)
                 shot(page, name, '.ant-modal-content')
                 ok.append(name)
             except Exception as e:

@@ -7,7 +7,6 @@ import { TYPE_RULE, evaluateMatch, isRecognitionPending } from '@/services/reply
 import AttachmentField from '@/components/AttachmentField'
 import PdfPreview from '@/components/PdfPreview'
 import FullscreenModal from '@/components/FullscreenModal'
-import VerificationPanel from '@/components/VerificationPanel'
 import BankItemsTable from '@/components/BankItemsTable'
 import { AiGlyph, ResultBar } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
@@ -179,7 +178,7 @@ export default function ReplyResultModal({
    * AI 推导「函证结果是否相符」—— 调用 `evaluateMatch` **唯一出口**（services/replyRule.ts）：
    *   往来函证 —— 由印章落章区域判定；
    *   银行函证 —— **只看询证事项逐项核对**（回函 × 系统内格式一/二数据），印章不作相符性依据，
-   *   印章缺失 / 异常仅进入 AI 风险提示，两者分开表达。
+   *   印章缺失 / 异常只在核验页的「印章核查」里表达，两者分开表达。
    */
   const suggestion = useMemo(() => (record ? evaluateMatch(record) : undefined), [record])
   const aiMatched = suggestion?.matched ?? null
@@ -263,7 +262,6 @@ export default function ReplyResultModal({
    * 刻意**不走列表页的互斥弹窗状态** —— 若跳转到「AI 核验」弹窗，本弹窗会被卸载，
    * 已填但未保存的草稿会全部丢失；内嵌 Modal 不改变 activeModal，草稿完整保留。
    */
-  const [verifyOpen, setVerifyOpen] = useState(false)
   /** 提交校验：点击保存后若有必填未处理，高亮对应区块 */
   const [showErrors, setShowErrors] = useState(false)
 
@@ -622,7 +620,14 @@ export default function ReplyResultModal({
                 />
               )}
 
-              {/* 看全文的入口 —— 内嵌只读面板，不卸载本弹窗，草稿不丢 */}
+              {/*
+               * 本栏唯一动作：**一键采纳所有**（各结论条上的「采纳」逐个点也等价）。
+               *
+               * ⚠️ 原「查看完整核验」按钮已删（v3.42，用户：「回函结果这里，删除【查看完整核验】按钮」）——
+               * 「拿 AI 结论去原件上核对依据」这件事的入口只留**列表「核查事项复核」格**那一处
+               * （它打开的核验页左栏就是原件 + 批注、右栏是逐项依据与人工确认列）；
+               * 结果页再开一个看依据的口子，等于同一件事两个入口，用户得点两次才知道哪个是真的。
+               */}
               <div
                 style={{
                   display: 'flex',
@@ -632,21 +637,8 @@ export default function ReplyResultModal({
                   color: 'var(--c-text-3)',
                 }}
               >
-                <span>完整核验明细（{rule?.verifyItemsLabel ?? '一致性比对 / 印章 / 手写体'}）</span>
-                {/*
-                 * v2.66：链接 → **实心按钮**（用户要求「改成按钮，更明显一些」）。
-                 * 链接形态混在灰字说明里，存在感太弱 —— 而它是「核对 AI 结论的依据」的唯一入口，
-                 * 分量不该低于一行说明文字。用默认小按钮（带边框与底色）即可明显，
-                 * 不用主色实心 —— 那会和上方各结论条上的「采纳」抢主操作的注意力。
-                 */}
-                <Button size="small" onClick={() => setVerifyOpen(true)}>
-                  查看完整核验
-                </Button>
-                {/*
-                 * v3.11：**一键采纳所有**（用户要求「在查看完整核验后面加上」）。
-                 * 与左边那个同为**默认小按钮** —— 理由同上：本栏的主操作是各条结论上的「采纳」，
-                 * 这里两个是辅助动作，抢主色会把注意力从"逐条看结论"上引开。
-                 */}
+                <span>以上结论可逐条采纳，也可</span>
+                
                 <Button size="small" onClick={adoptAll}>
                   一键采纳所有
                 </Button>
@@ -1006,33 +998,6 @@ export default function ReplyResultModal({
           )}
         </div>
       </div>
-
-      {/*
-       * 内嵌只读核验明细 —— **全屏弹窗**（v2.66，用户要求「不要只是局部弹窗」）。
-       *
-       * ① **为什么全屏**：§7.6 #10 的既有规范本就是「四类明细统一走全屏弹窗」—— 查看函证 /
-       *    列表 AI 核验 / 回函快递信息 / 结果填写全是 `FullscreenModal`，唯独这里用了 1280 宽的
-       *    局部 Modal，属于漏网；核验页是「左常驻预览 + 右明细」的分栏布局，1280 宽里预览被压得
-       *    很小，全屏后预览才有"对着原件看批注"该有的尺寸。
-       * ② **不卸载外层**：用独立的 `verifyOpen` 开关、不走列表页的互斥状态 —— 点开核验时
-       *    外层结果填写弹窗**不卸载、已填草稿不丢**，关掉核验回来接着填。
-       * ③ **两层全屏弹窗的层级**由 antd 自动管理（后打开的在上）。
-       */}
-      <FullscreenModal
-        open={verifyOpen}
-        title="AI 智能核验"
-        subtitle={`${record.confirmationNo} · ${record.entity}`}
-        onClose={() => setVerifyOpen(false)}
-        footer={
-          <div style={{ display: 'flex' }}>
-            <Button style={{ marginLeft: 'auto' }} onClick={() => setVerifyOpen(false)}>
-              关闭
-            </Button>
-          </div>
-        }
-      >
-        <VerificationPanel record={record} />
-      </FullscreenModal>
     </FullscreenModal>
   )
 }

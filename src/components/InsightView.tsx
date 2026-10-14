@@ -3,7 +3,7 @@ import { Button } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 import { useApp } from '@/store/AppStore'
 import { isRecognitionPending, evaluateMatch } from '@/services/replyRule'
-import { verifyItemsOf, matchLineOf, riskTone, riskText, replySeqOf } from '@/components/recognition/shared'
+import { verifyItemsOf, matchLineOf, replySeqOf } from '@/components/recognition/shared'
 import { PixelLoader } from '@/components/ai/PixelLoader'
 import { TaskGroups, type TaskGroup, type TaskRowItem } from '@/components/ai/TaskRows'
 import { RecommendationCard } from '@/components/ai/RecommendationCard'
@@ -163,11 +163,12 @@ export default function InsightView() {
                     : e.evaluation.matched === false
                       ? '不相符'
                       : '待人工判定',
-                tone: riskTone(e.record?.verification?.riskLevel) as
-                  | 'high'
-                  | 'medium'
-                  | 'low'
-                  | 'neutral',
+                /* 结论标签的档位看相符性（原 AI 风险等级已于 2026-10-14 删除）：相符绿 / 不相符红 / 待判定中性 */
+                tone: (e.evaluation.matched === true
+                  ? 'low'
+                  : e.evaluation.matched === false
+                    ? 'high'
+                    : 'neutral') as 'low' | 'high' | 'neutral',
               }
 
         return {
@@ -215,8 +216,7 @@ export default function InsightView() {
         (e) =>
           !e.pending &&
           e.evaluation != null &&
-          (e.record?.verification?.riskLevel === 'high' ||
-            e.record?.verification?.riskLevel === 'medium'),
+          e.evaluation.matched === false,
       ),
     [evaluated],
   )
@@ -320,14 +320,6 @@ export default function InsightView() {
                       : 'neutral'
                 }
                 basis={f.evaluation!.basis}
-                reasons={f.record?.verification?.riskReasons}
-                /*
-                 * 风险等级随卡走（v3.14）—— 见 `RecommendationCard` 的卡头说明。
-                 * 原先这一栏在页面底部**只出现一次**（取第一段的等级），
-                 * 而"结论区"里每封各有自己的等级，放在底部既从属不明、也漏掉其余各封。
-                 */
-                riskLabel={riskText(f.record?.verification?.riskLevel)}
-                riskTone={riskTone(f.record?.verification?.riskLevel)}
               />
             ))}
 

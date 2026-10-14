@@ -372,7 +372,7 @@ export default function VerificationPanel({
     {
       key: 'seal',
       done: doneOf('seal'),
-      title: '印章识别',
+      title: '印章核查',
       icon: <SafetyCertificateOutlined />,
       risk: !sealNormal,
       /* 银行函证：不渲染骑缝章行（v2.39 起 R-03 限定往来），结论条也不推导相符性 */

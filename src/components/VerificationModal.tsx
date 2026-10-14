@@ -15,7 +15,7 @@ import {
 import { RESULT_EXTRA_PANEL_KEY, replyTaskSummaryOf } from '@/config/replyTasks'
 import FullscreenModal from '@/components/FullscreenModal'
 import VerificationPanel from '@/components/VerificationPanel'
-import { RiskTag, VerifyBadge } from '@/components/Marks'
+import { VerifyBadge } from '@/components/Marks'
 
 /**
  * 把一段 AI 说明**并进**说明字段 —— 已有内容则分段追加，已包含则不重复（v3.34）。
@@ -225,7 +225,6 @@ export default function VerificationModal({
       open={open}
       title="AI 智能核验"
       subtitle={v ? `${record.confirmationNo} · ${record.entity}` : record.confirmationNo}
-      extra={v ? <RiskTag level={v.riskLevel} reasons={v.riskReasons} /> : undefined}
       onClose={onClose}
       footer={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

@@ -1,4 +1,4 @@
-import type { ConfirmationType, ReplyRecord } from '@/types'
+import type { ConfirmationType, ReplyRecord, SendMethod } from '@/types'
 import { buildBankItemsForRecord } from '@/mock/confirmations'
 
 /**
@@ -83,6 +83,11 @@ export interface TypeRule {
   verifyItemsLabel: string
   /** 「函证结果是否相符」旁的业务规则提示（Tooltip） */
   matchRuleHint: string
+  /**
+   * **该类型可用的发函方式**（v3.37）—— 银行多一项「电子函证」：
+   * 银行自有电子函证平台，往来的函证没有这个渠道。筛选下拉与本类演示数据都读它。
+   */
+  sendMethods: SendMethod[]
   /** 「回函结果不相符处的描述」占位符 */
   diffPlaceholder: string
 }
@@ -100,6 +105,8 @@ export const TYPE_RULE: Record<ConfirmationType, TypeRule> = {
     batchPanelOpenByDefault: false,
     presetBatchId: 'A',
     entryTitle: '上传往来函证回函',
+    /* 往来没有「电子函证」渠道（v3.37） */
+    sendMethods: ['邮寄发函', '跟函', '电子邮件发函'],
     verifyItemsLabel: '一致性比对 / 印章 / 手写体',
     matchRuleHint: '依据函证业务规则：印章盖在「信息证明无误」区判定为相符；盖在「信息不符」区判定为不相符',
     diffPlaceholder: '请描述不符项目及差异缘由，可由上方「手写体识别」一键带入',
@@ -116,6 +123,8 @@ export const TYPE_RULE: Record<ConfirmationType, TypeRule> = {
     batchPanelOpenByDefault: true,
     presetBatchId: 'B',
     entryTitle: '上传银行函证回函',
+    /* 银行多一项「电子函证」—— 银行自有电子函证平台（v3.37） */
+    sendMethods: ['邮寄发函', '跟函', '电子邮件发函', '电子函证'],
     verifyItemsLabel: '询证事项逐项核对 / 印章 / 银行函证文本识别',
     matchRuleHint: '依据函证业务规则：银行函证与系统内格式一 / 格式二数据逐项核对，有差异即判不相符（印章位置不参与相符性判定）',
     diffPlaceholder: '请描述不符项目及差异缘由，可参考上方「询证事项逐项核对」结果',
@@ -141,7 +150,7 @@ export interface MatchEvaluation {
  *   AI 只出建议、人工确认才写入；已确认的值必须原样回显）。
  * · 否则按 `TYPE_RULE[record.type].matchBy` 分流：
  *   - 银行函证（consistencyOnly）：只看询证事项逐项核对，有差异即不相符、
- *     全部一致即相符；**印章状态不参与**（印章问题走 AI 风险提示）。
+ *     全部一致即相符；**印章状态不参与**（印章问题单独在核验页的印章核查里表达）。
  *   - 往来函证（sealRegion）：由印章落章区域判定；未识别 → 无法判定。
  */
 /**
@@ -193,7 +202,6 @@ export function evaluateMatch(record: ReplyRecord): MatchEvaluation {
           matched: false,
           byAi: true,
           basis: `回函与系统内询证事项逐项核对有 ${c.diffCount} 项差异`,
-          reasons: v?.riskReasons,
         }
       : { matched: true, byAi: true, basis: '回函与系统内询证事项逐项核对全部一致' }
   }
@@ -208,7 +216,6 @@ export function evaluateMatch(record: ReplyRecord): MatchEvaluation {
       matched: false,
       byAi: true,
       basis: '印章落于「信息不符」区',
-      reasons: v?.riskReasons,
     }
   }
   return { matched: null, byAi: true }
