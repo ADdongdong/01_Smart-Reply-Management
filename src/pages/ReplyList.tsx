@@ -676,7 +676,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
      * 读到「下一步做什么」时，动作就在紧右边，不需要横向来回找。
      */
     {
-      title: '回函进度',
+      title: '回函信息录入进度',
       key: 'progress',
       /* v2.51：两行文字 → 步骤条（两个步骤 + 分隔 + 箭头），需要更宽一点，176 → 200 */
       width: 200,
@@ -924,7 +924,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
                           : {
                               kind: 'view',
                               recordId: h.id,
-                              note: `这是第 ${seq} 次回函，已被后续回函覆盖，仅供参考；当前有效为第 ${times} 次。本页为只读查看；如需修改，请在列表行的「回函进度」列点开对应步骤（补正的是当前有效那一次）。`,
+                              note: `这是第 ${seq} 次回函，已被后续回函覆盖，仅供参考；当前有效为第 ${times} 次。本页为只读查看；如需修改，请在列表行的「回函信息录入进度」列点开对应步骤（补正的是当前有效那一次）。`,
                             },
                       )
                     }
