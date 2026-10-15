@@ -377,7 +377,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
     const chips: { key: keyof FilterState; label: string }[] = []
     if (filter.keyword) chips.push({ key: 'keyword', label: `关键字：${filter.keyword}` })
     if (filter.sendMethod) chips.push({ key: 'sendMethod', label: `发函方式：${filter.sendMethod}` })
-    if (filter.progress) chips.push({ key: 'progress', label: `回函进度：${filter.progress}` })
+    if (filter.progress) chips.push({ key: 'progress', label: `回函信息录入进度：${filter.progress}` })
     return chips
   }, [filter])
 
@@ -1056,7 +1056,7 @@ export default function ReplyList({ type }: { type: ConfirmationType }) {
           <Col flex="140px">
             <Select
               allowClear
-              placeholder="回函进度"
+              placeholder="回函信息录入进度"
               style={{ width: '100%' }}
               value={form.progress}
               onChange={(v) => setForm({ ...form, progress: v })}
