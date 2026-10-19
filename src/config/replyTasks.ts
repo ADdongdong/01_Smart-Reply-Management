@@ -58,6 +58,11 @@ export interface ResultField {
  * 为什么按类型分流：**银行函证不检测骑缝章**（v2.39，R-03 限定往来），
  * 那一项在银行行不渲染、也不该要求人工填（"系统不检测的项不该要求人工填"）。
  * 结果页那处注释记着这条来由，这里照搬同一口径。
+ *
+ * **v3.48 又减一项**：银行函证的印章核查只核「有没有章、章名与被询证单位一致否」
+ * （用户口径：印章数量 / 印章类型 / 落章区域都不核；「是否为公章」随之一并去掉）——
+ * 银行回函用印是固定格式的回函专用章，判"是不是公章"没有业务意义。故「是否为公章」
+ * 从银行的必填清单里移除，核验页与结果页两处都不再要求填。
  */
 export const RESULT_REQUIRED_FIELDS: Record<ConfirmationType, ResultField[]> = {
   往来函证: [
@@ -112,14 +117,7 @@ export const RESULT_REQUIRED_FIELDS: Record<ConfirmationType, ResultField[]> = {
         { label: '否', value: false },
       ],
     },
-    {
-      key: 'officialSeal',
-      label: '是否为公章',
-      options: [
-        { label: '是', value: true },
-        { label: '否（财务章等其他印章）', value: false },
-      ],
-    },
+    /* v3.48：「是否为公章」不再进银行的必填清单（印章类型不核，见文件头的说明） */
   ],
 }
 

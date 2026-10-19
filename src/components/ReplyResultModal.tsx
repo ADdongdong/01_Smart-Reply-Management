@@ -301,7 +301,8 @@ export default function ReplyResultModal({
       setSealConsistent(v.seal.nameMatched)
       markAdopt('seal')
       n += 1
-      if (aiOfficialSeal !== undefined) {
+      /* 是否为公章仅往来（v3.48：银行不核印章类型，该字段在银行侧不存在） */
+      if (!isBank && aiOfficialSeal !== undefined) {
         setOfficialSeal(aiOfficialSeal)
         markAdopt('official')
         n += 1
@@ -323,15 +324,16 @@ export default function ReplyResultModal({
   /**
    * 必填 —— 未处理时保存被拦下，并明确指出是哪几项（而非按钮点不动却说不出原因）。
    *
-   * **按类型分流（v2.41）**：往来 = 4 项（含「是否有骑缝章」）；**银行 = 3 项** ——
-   * 自 v2.39 起银行函证不检测骑缝章（R-03 限定往来），该字段在银行行不渲染，
-   * 校验自然也不该要求它（**系统不检测的项不该要求人工填**）。
+   * **按类型分流**：往来 = 4 项（含「是否有骑缝章」「是否为公章」）；
+   * **银行 = 2 项**（相符性 + 章名一致）—— 自 v2.39 起银行不检测骑缝章（R-03 限定往来），
+   * v3.48 起银行也不再核印章类型（「是否为公章」随印章数量 / 类型 / 落章区域一并去掉）。
+   * 该字段在银行侧不渲染，校验自然也不该要求它（**系统不检测的项不该要求人工填**）。
    */
   const missingRequired = () => {
     const miss: string[] = []
     if (matched === undefined) miss.push('函证结果是否相符')
     if (sealConsistent === undefined) miss.push('回函盖章是否与被询证方名称一致')
-    if (officialSeal === undefined) miss.push('是否为公章')
+    if (!isBank && officialSeal === undefined) miss.push('是否为公章')
     if (!isBank && crossSeal === undefined) miss.push('是否有骑缝章')
     return miss
   }
@@ -379,7 +381,8 @@ export default function ReplyResultModal({
                   diffDesc,
                   sealConsistent,
                   sealReason,
-                  officialSeal,
+                  /* 银行侧没有这个字段（v3.48）—— 显式写 undefined，把历史数据里可能存在的值一并清掉 */
+                  officialSeal: isBank ? undefined : officialSeal,
                   crossSeal,
                   altTestFiles,
                   diffAdjustFiles,
@@ -524,7 +527,8 @@ export default function ReplyResultModal({
                 }
               />
 
-              {/* 是否为公章 */}
+              {/* 是否为公章 —— 仅往来（v3.48：银行不核印章类型，该字段在银行侧整体去掉） */}
+              {!isBank && (
               <ResultBar
                 status={aiOfficialSeal === undefined ? 'info' : aiOfficialSeal ? 'ok' : 'risk'}
                 message={
@@ -556,6 +560,7 @@ export default function ReplyResultModal({
                   </span>
                 }
               />
+              )}
 
               {/* 是否有骑缝章 —— 仅往来函证（v2.39 起银行不检测骑缝章） */}
               {!isBank && (
@@ -758,34 +763,36 @@ export default function ReplyResultModal({
                 />
               </div>
 
-              {/* 是否为公章 */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  background:
-                    showErrors && officialSeal === undefined ? 'var(--c-risk-high-bg)' : undefined,
-                }}
-              >
-                <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
-                  <span style={{ color: 'var(--c-risk-high)' }}>* </span>是否为公章
-                </span>
-                <Radio.Group
-                  value={officialSeal}
-                  onChange={(e) => setOfficialSeal(e.target.value)}
-                  optionType="button"
-                  buttonStyle="solid"
-                  size="small"
-                  options={[
-                    { label: '是', value: true },
-                    { label: '否（财务章等其他印章）', value: false },
-                  ]}
-                />
-                {/* 「ⓘ 建议值见上方 AI 核验结论」已于 v2.45 移除 —— 同一页上方已有一处，不重复 */}
-              </div>
+              {/* 是否为公章 —— 仅往来（v3.48：银行不核印章类型，该字段在银行侧整体去掉） */}
+              {!isBank && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    background:
+                      showErrors && officialSeal === undefined ? 'var(--c-risk-high-bg)' : undefined,
+                  }}
+                >
+                  <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
+                    <span style={{ color: 'var(--c-risk-high)' }}>* </span>是否为公章
+                  </span>
+                  <Radio.Group
+                    value={officialSeal}
+                    onChange={(e) => setOfficialSeal(e.target.value)}
+                    optionType="button"
+                    buttonStyle="solid"
+                    size="small"
+                    options={[
+                      { label: '是', value: true },
+                      { label: '否（财务章等其他印章）', value: false },
+                    ]}
+                  />
+                  {/* 「ⓘ 建议值见上方 AI 核验结论」已于 v2.45 移除 —— 同一页上方已有一处，不重复 */}
+                </div>
+              )}
 
               {/* 是否有骑缝章 —— 仅往来函证（v2.39 起银行不检测骑缝章） */}
               {!isBank && (

@@ -22,11 +22,13 @@ import { RESULT_NOTE_FIELDS, RESULT_REQUIRED_FIELDS, type ResultFieldKey } from 
  * 不一致时，回函结果也需要填写不相符说明，这两个字段，也需要加入到这个页面」。
  *
  * 所以右栏给的**就是回函结果里那几个字段**（同名字段、同选项，草稿态）：
- * · 往来 —— 函证结果是否相符 / 回函盖章是否与被询证方名称一致 / 是否为公章 / 是否有骑缝章，
- *   外加**名称不一致的原因**（`RESULT_NOTE_FIELDS.sealReason`）。**往来函证的相符性由落章区域判定**，
- *   故"是否相符"这一格只在这一侧出现；
- * · 银行 —— **印章不参与相符性判定**（R-01：只由「询证事项逐项核对」决定，那一格在
- *   「回函是否相符检测」页里给），故银行侧只有名称一致 / 是否公章 + 名称不一致的原因。
+ * · 往来 —— 回函盖章是否与被询证方名称一致 / 是否为公章 / 是否有骑缝章，外加**名称不一致的原因**
+ *   （`RESULT_NOTE_FIELDS.sealReason`）。
+ *   ⚠️ **「函证结果是否相符」不在本页**（v3.47 起，用户口径：「往来函不需要这部分，原型删除就行」）——
+ *   往来相符性由落章区域判定（R-01），这一格原先挂在本页，现只在「回函结果填写」页填；
+ * · 银行 —— 印章不参与相符性判定（R-01：只由「询证事项逐项核对」决定，那一格在
+ *   「回函是否相符检测」页里给）；且 v3.48 起**只核两件事**：有没有盖章、章名与被询证单位一致否 ——
+ *   印章数量 / 印章类型 / 落章区域 / 是否为公章在银行侧全部不核（用户口径：这四项去掉）。
  *
  * ⚠️ **「回函结果不相符处的描述」不在本页**（v3.35 末，用户口径：「在印章识别的地方，把这个
  * 字段去掉。**这是手写体识别时候需要填写的**」）—— 它一度被放到本页"相符性"的下面（当时的口径是
@@ -89,11 +91,18 @@ export default function SealRecognition({
         value={seal.hasSeal ? '已盖章' : '未盖章'}
         tone={seal.hasSeal ? 'ok' : 'risk'}
       />
-      <InfoRow
-        label="印章数量"
-        value={`${seal.sealCount} 枚`}
-        hint={seal.sealCount > 1 ? '存在多枚印章，建议确认是否均有效' : undefined}
-      />
+      {/*
+       * v3.48：银行侧**只核两件事** —— 有没有盖章、章名与被询证单位一致否。
+       * 印章数量 / 印章类型 / 落章区域对银行回函没有业务意义（回函专用章是固定格式），
+       * 故三项在银行侧整行不渲染（用户口径：「银行的印章核查，对如下项不进行核查，可去掉对应字段」）。
+       */}
+      {!isBank && (
+        <InfoRow
+          label="印章数量"
+          value={`${seal.sealCount} 枚`}
+          hint={seal.sealCount > 1 ? '存在多枚印章，建议确认是否均有效' : undefined}
+        />
+      )}
       {/* 骑缝章：仅往来函证检测（v2.39 起 R-03 限定往来；银行回函无此业务要求） */}
       {!isBank && (
         <InfoRow
@@ -103,7 +112,7 @@ export default function SealRecognition({
           hint={!seal.crossPageSeal ? '建议加盖' : undefined}
         />
       )}
-      <InfoRow label="印章类型" value={seal.sealType} />
+      {!isBank && <InfoRow label="印章类型" value={seal.sealType} />}
       <InfoRow label="印章名称" value={seal.sealName} />
       <InfoRow
         label="与被询证单位一致"
@@ -111,12 +120,9 @@ export default function SealRecognition({
         tone={seal.nameMatched ? 'ok' : 'risk'}
         hint={seal.nameMatched ? undefined : `发函单位：${entity}`}
       />
-      <InfoRow
-        label="落章区域"
-        value={seal.region}
-        tone={regionIsMismatch ? 'risk' : 'ok'}
-        hint={isBank ? '不影响相符性' : undefined}
-      />
+      {!isBank && (
+        <InfoRow label="落章区域" value={seal.region} tone={regionIsMismatch ? 'risk' : 'ok'} />
+      )}
     </div>
   )
 
@@ -133,22 +139,14 @@ export default function SealRecognition({
           note={
             isBank
               ? '以回函原件为准，逐项确认'
-              : '本函落章区域「' + seal.region + '」—— 相符性由它判定'
+              : '以回函原件为准，逐项确认；相符性在「回函结果填写」页确认'
           }
         >
-          {/* 相符性：仅往来（银行由「回函是否相符检测」那一项判定，见文件头） */}
-          {!isBank && (
-            <ManualRow label={labelOf('matched')}>
-              <Radio.Group
-                size="small"
-                optionType="button"
-                buttonStyle="solid"
-                value={draft?.matched}
-                options={optionsOf('matched')}
-                onChange={(e) => patch({ matched: e.target.value })}
-              />
-            </ManualRow>
-          )}
+          {/*
+           * ⚠️ **往来侧已无「函证结果是否相符」这一格**（v3.47，用户口径：「往来函不需要这部分，
+           * 原型删除就行」—— 他看的是银行侧截图，银行侧保留）。往来不再在这一栏确认相符性，
+           * 该字段只在「回函结果填写」页填；本页只管印章本身（是否一致 / 是否公章 / 骑缝章 / 不一致原因）。
+           */}
           <ManualRow label={labelOf('sealConsistent')}>
             <Radio.Group
               size="small"
@@ -169,16 +167,19 @@ export default function SealRecognition({
             />
           </ManualRow>
 
-          <ManualRow label={labelOf('officialSeal')}>
-            <Radio.Group
-              size="small"
-              optionType="button"
-              buttonStyle="solid"
-              value={draft?.officialSeal}
-              options={optionsOf('officialSeal')}
-              onChange={(e) => patch({ officialSeal: e.target.value })}
-            />
-          </ManualRow>
+          {/* v3.48：银行侧不核印章类型，故「是否为公章」整行不渲染（往来保留） */}
+          {!isBank && (
+            <ManualRow label={labelOf('officialSeal')}>
+              <Radio.Group
+                size="small"
+                optionType="button"
+                buttonStyle="solid"
+                value={draft?.officialSeal}
+                options={optionsOf('officialSeal')}
+                onChange={(e) => patch({ officialSeal: e.target.value })}
+              />
+            </ManualRow>
+          )}
           {!isBank && (
             <ManualRow label={labelOf('crossSeal')}>
               <Radio.Group

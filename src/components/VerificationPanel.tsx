@@ -18,7 +18,7 @@ import {
   sampleFileOf,
   sentSampleFileOf,
 } from '@/config/preview'
-import { aiReviewItemsOf, aiReviewStateOf } from '@/config/aiReview'
+import { aiReviewItemsOf, aiReviewStateOf, aiReviewTip } from '@/config/aiReview'
 import { RESULT_EXTRA_PANEL_KEY, RESULT_NOTE_FIELDS, RESULT_REQUIRED_FIELDS } from '@/config/replyTasks'
 import { TYPE_RULE, isRecognitionPending } from '@/services/replyRule'
 import { buildBankItemGroups, buildBankItemsForRecord } from '@/mock/confirmations'
@@ -443,6 +443,23 @@ export default function VerificationPanel({
   const current = items.find((it) => it.key === active) ?? items[0]
 
   /**
+   * **本页的核验留痕**（v3.47 建，v3.48 收窄）—— **只讲当前这一项**：
+   * 「项名：采纳 / 不采纳（原因：…）· 谁 · 何时」，由 `aiReviewTip` 生成。
+   *
+   * 为什么要有它：**不采纳的原因此前只在"悬停列表那一格"里看得到** —— 用户问
+   * 「不采纳的原因填完以后在哪里能看到呢」，答案是"得去悬停"未免太隐蔽。
+   *
+   * ⚠️ **为什么只给当前项**（v3.48，用户口径：「印章核查这里，不要展示别的 AI 核验项的核验留痕内容，
+   * 只展示印章核查的…如果目前还没留痕，那就不展示」）：留痕是**这一页**的收尾账，
+   * 把别项的处理结果也堆在这里，等于在印章页读到一致性的结论 —— 页签各管一件事，
+   * 谁的账记在谁的页上。整条回函的全量处置在列表「核查事项复核」格悬停里看。
+   */
+  const currentReview = aiReviewItemsOf(record.type).find((i) => i.panelKey === current.key)
+  const currentTip = currentReview
+    ? aiReviewTip(aiReviewStateOf(record, currentReview.key))
+    : undefined
+
+  /**
    * 点选核验项 —— **只管"当前项是谁"**：清定位、按项取景这两件事
    * 已挪到上面那条跟着 `active` 的 effect 里（承载者换项也要同样处理，见其注释）。
    */
@@ -501,8 +518,13 @@ export default function VerificationPanel({
             <PdfPreview
               confirmationNo={record.confirmationNo}
               entity={record.entity}
-              showRegions
-              activeRegion={v.seal.region}
+              /*
+               * 落章区域框**仅往来**（v3.48）：银行侧不再核「落章区域」，连这两个框
+               * （信息证明无误 / 信息不符）也一并撤掉 —— 银行回函原件上本就没有这两个区，
+               * 留着框等于把不核查的概念又画回页面上。印章框照旧。
+               */
+              showRegions={!isBank}
+              activeRegion={isBank ? undefined : v.seal.region}
               sealBoxes={v.seal.boxes}
               handwriting={rule.detectHandwriting ? v.handwriting?.text : undefined}
               page={repliedAbs?.start ?? 1}
@@ -601,6 +623,30 @@ export default function VerificationPanel({
         </div>
 
         {current.children}
+
+        {/*
+         * **核验留痕（本页）** —— 一行，摆在明细下方（用户口径：「加一行台账即可」），
+         * 内容只有**当前这一项**自己的处置（v3.48）；该项还没表态就整行不出现 ——
+         * 空账不留行（"如果目前还没留痕，那就不展示留痕内容"）。
+         */}
+        {currentTip && currentReview && (
+          <div
+            style={{
+              marginTop: 14,
+              paddingTop: 10,
+              borderTop: '1px solid var(--c-hairline)',
+              fontSize: 12,
+              lineHeight: 1.9,
+              color: 'var(--c-text-3)',
+            }}
+          >
+            <span style={{ color: 'var(--c-text-2)' }}>核验留痕：</span>
+            {/* 项名取**当前页签的名字**，不取事项标签 —— 银行侧两者不同名
+                （页签「询证事项逐项核对」/ 事项标签「回函是否相符检测」），
+                台账长在这一页上，就该用这一页的名字 */}
+            {`${current.title}：${currentTip}`}
+          </div>
+        )}
       </div>
     </div>
   )

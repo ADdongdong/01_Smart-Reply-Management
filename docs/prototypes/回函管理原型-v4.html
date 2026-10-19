@@ -1,0 +1,2295 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="jRMKS57GjzbHDVCk3CfLmc" style=""><head data-page-node-id="a60fVB7PSek1n2KUblm5iX">
+<meta charset="utf-8" data-page-node-id="tRB6slWt5QpkyGvrYRXRAt">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="u8CgMZw5Zd7VOFBy2KCSt0">
+<title data-page-node-id="Qv6g3Uf8BW2TPnoNhYTjBw">回函管理智能化 · 原型 v4（优化版）</title>
+<style data-page-node-id="f31I8H7Ai3JM3cauv0HjPx">
+/* ==================================================================
+   设计令牌 —— 与 src/theme.ts + src/styles/global.css 同源
+   ================================================================== */
+:root{
+  --c-primary:#3b5bdb;
+  --c-primary-strong:#4a68e0;
+  --c-risk-high:#e5484d;
+  --c-risk-medium:#e8912d;
+  --c-risk-low:#3fa34d;
+
+  --c-neutral-bg:rgba(16,24,40,.03);
+  --c-primary-bg:rgba(59,91,219,.08);
+  --c-ai-bg:rgba(59,91,219,.05);
+  --c-risk-high-bg:rgba(229,72,77,.12);
+  --c-risk-medium-bg:rgba(232,145,45,.12);
+  --c-risk-low-bg:rgba(63,163,77,.12);
+  --c-tag-bg:rgba(16,24,40,.05);
+
+  --c-text-1:#1d2129;
+  --c-text-2:#5b6270;
+  --c-text-3:#7a808c;
+
+  --c-hairline:rgba(16,24,40,.09);
+  --c-border:#dfe3ec;
+  --c-border-light:#eaedf4;
+  --c-fill-light:#f7f9fc;
+  --c-bg-layout:#ffffff;
+  --c-preview-bg:#e6eaf3;
+
+  --c-risk-high-text:#c0292e;
+  --c-risk-medium-text:#a85200;
+  --c-risk-low-text:#237804;
+
+  --radius-card:12px;
+  --radius-control:8px;
+  --radius-tag:6px;
+
+  --h-tag:20px;
+  --h-tag-sm:16px;
+  --h-tag-lg:26px;
+  --h-control:30px;
+
+  --shadow-card:0 0 0 1px rgba(20,28,45,.06),0 1px 2px -1px rgba(20,28,45,.1),0 2px 4px -1px rgba(20,28,45,.06);
+  --shadow-hover:0 0 0 1px rgba(20,28,45,.08),0 1px 2px -1px rgba(20,28,45,.1),0 4px 8px -2px rgba(20,28,45,.1),0 8px 16px -4px rgba(20,28,45,.07);
+  --shadow-pop:0 0 0 1px rgba(20,28,45,.06),0 1px 2px -1px rgba(20,28,45,.08),0 4px 8px -2px rgba(20,28,45,.08),0 8px 16px -4px rgba(20,28,45,.08),0 16px 24px -8px rgba(20,28,45,.1),0 32px 48px -16px rgba(20,28,45,.12);
+
+  --motion-fast:150ms;
+  --motion-base:180ms;
+  --ease-out:cubic-bezier(.16,1,.3,1);
+
+  --z-nav:60;
+  --z-modal:1000;
+  --z-zoom:1010;
+  --z-note:1020;
+
+  --label-w:132px;
+}
+
+/* ==================================================================
+   基础
+   ================================================================== */
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  font:14px/1.5715 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  color:var(--c-text-1);
+  background:var(--c-bg-layout);
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  /* 氛围性渐变：页面顶一抹主色径向高光（不承载数据/状态） */
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(1200px 420px at 12% -8%,rgba(74,104,224,.09),transparent 70%);
+}
+:focus-visible{outline:2px solid var(--c-primary);outline-offset:2px;border-radius:4px}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+svg{display:block}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.muted{color:var(--c-text-3)}
+.ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ic--sm{width:14px;height:14px}
+.ic--lg{width:20px;height:20px}
+
+/* ==================================================================
+   页面骨架
+   ================================================================== */
+.page{position:relative;z-index:1;padding:24px;max-width:1600px;margin:0 auto}
+.page-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.page-head__title{margin:0;font-size:20px;font-weight:600;letter-spacing:.2px;display:flex;align-items:baseline;gap:10px}
+.page-head__title small{font-size:13px;font-weight:400;color:var(--c-text-3)}
+.page-head__title small b{font-weight:600;color:var(--c-text-2)}
+
+.panel{background:#fff;border-radius:var(--radius-card);box-shadow:var(--shadow-card);transition:box-shadow var(--motion-base) var(--ease-out)}
+.panel+.panel{margin-top:16px}
+
+.section-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.section-title .muted{font-weight:400;font-size:13px}
+
+/* 分段控件 */
+.seg{display:inline-flex;background:var(--c-neutral-bg);border-radius:var(--radius-control);padding:2px;gap:2px}
+.seg button{padding:5px 14px;border-radius:6px;font-size:13px;color:var(--c-text-2);transition:background var(--motion-fast) var(--ease-out),color var(--motion-fast) var(--ease-out)}
+.seg button[aria-pressed="true"]{background:#fff;color:var(--c-text-1);font-weight:500;box-shadow:0 1px 2px rgba(20,28,45,.08)}
+
+/* ==================================================================
+   控件
+   ================================================================== */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:var(--h-control);padding:0 12px;border-radius:var(--radius-control);
+  font-size:14px;border:1px solid var(--c-border);background:#fff;color:var(--c-text-1);
+  transition:transform var(--motion-fast) var(--ease-out),box-shadow var(--motion-fast) var(--ease-out),background var(--motion-fast) var(--ease-out),border-color var(--motion-fast) var(--ease-out);
+  white-space:nowrap;
+}
+.btn:hover{border-color:#c9d2e6;color:var(--c-primary)}
+.btn:active{transform:scale(.99)}
+.btn--primary{
+  border-color:transparent;color:#fff;
+  background:linear-gradient(180deg,var(--c-primary-strong),var(--c-primary));
+  box-shadow:0 1px 2px rgba(20,28,45,.12);
+}
+.btn--primary:hover{color:#fff;box-shadow:0 4px 10px -2px rgba(59,91,219,.35)}
+.btn--primary:not(:disabled):hover{filter:brightness(1.04)}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--c-primary);padding:0 6px;height:auto}
+.btn--ghost:hover{background:var(--c-primary-bg);border-color:transparent}
+.btn--sm{height:26px;padding:0 10px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn--danger-text{color:var(--c-risk-high-text)}
+.link{color:var(--c-primary);cursor:pointer;font-weight:500}
+.link:hover{text-decoration:underline}
+
+.field{display:flex;align-items:center;gap:8px}
+.input,.select,.textarea{
+  height:var(--h-control);border:1px solid var(--c-border);border-radius:var(--radius-control);
+  padding:0 10px;background:#fff;width:100%;font-size:14px;
+  transition:border-color var(--motion-fast) var(--ease-out),box-shadow var(--motion-fast) var(--ease-out);
+}
+.textarea{height:auto;padding:8px 10px;line-height:1.7;resize:vertical}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--c-primary);box-shadow:0 0 0 3px var(--c-primary-bg)}
+.input::placeholder,.textarea::placeholder{color:var(--c-text-3)}
+.select{appearance:none;padding-right:26px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a808c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat:no-repeat;background-position:right 9px center;}
+.with-prefix{position:relative}
+.with-prefix .input{padding-left:30px}
+.with-prefix>svg.ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--c-text-3);pointer-events:none}
+
+/* ==================================================================
+   标签
+   ================================================================== */
+.tag{
+  display:inline-flex;align-items:center;gap:4px;height:var(--h-tag);padding:0 8px;
+  border-radius:var(--radius-tag);font-size:12px;font-weight:500;line-height:1;white-space:nowrap;
+  background:var(--c-tag-bg);color:var(--c-text-2);
+}
+.tag--sm{height:var(--h-tag-sm);font-size:11px;padding:0 6px}
+.tag--lg{height:var(--h-tag-lg);font-size:13px;padding:0 10px}
+.tag--high{background:var(--c-risk-high-bg);color:var(--c-risk-high-text)}
+.tag--medium{background:var(--c-risk-medium-bg);color:var(--c-risk-medium-text)}
+.tag--low{background:var(--c-risk-low-bg);color:var(--c-risk-low-text)}
+.tag--primary{background:var(--c-primary-bg);color:var(--c-primary)}
+.tag--ai{background:var(--c-ai-bg);color:var(--c-primary);border:1px dashed rgba(59,91,219,.32);padding:0 7px}
+.tag__mark{font-size:11px;opacity:.85}
+.tag--live{position:relative;overflow:hidden}
+.tag--live::after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(105deg,transparent 20%,rgba(255,255,255,.75) 48%,transparent 72%);
+  transform:translateX(-100%);animation:sweep 1.9s var(--ease-out) infinite;
+}
+@keyframes sweep{0%{transform:translateX(-100%)}60%,100%{transform:translateX(220%)}}
+.tag-help{cursor:help}
+
+/* ==================================================================
+   筛选区
+   ================================================================== */
+.filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.filters .f-keyword{flex:0 0 260px;max-width:100%}
+.filters .f-select{flex:0 0 140px}
+.chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:var(--radius-tag);font-size:12px;background:var(--c-primary-bg);color:var(--c-primary)}
+.chip button{color:inherit;opacity:.6;line-height:1}
+.chip button:hover{opacity:1}
+.actions{display:flex;align-items:center;gap:12px;margin-top:24px;flex-wrap:wrap}
+
+/* ==================================================================
+   表格 —— 优化点 ①：分组表头带；②：列宽重排后 1280 免横滚
+   ================================================================== */
+.tablewrap{overflow-x:auto;overflow-y:hidden}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:14px;table-layout:fixed}
+.tbl th{
+  font-size:13px;font-weight:500;color:var(--c-text-3);text-align:left;
+  padding:9px 12px;background:var(--c-fill-light);border-bottom:1px solid var(--c-hairline);
+  white-space:nowrap;
+}
+.tbl th:first-child{border-top-left-radius:8px}
+.tbl th:last-child{border-top-right-radius:8px}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--c-hairline);vertical-align:middle;overflow:hidden}
+.tbl tbody tr{transition:background var(--motion-fast) var(--ease-out)}
+.tbl tbody tr:hover{background:var(--c-fill-light)}
+.tbl tbody tr.is-open{background:var(--c-fill-light)}
+.tbl td.col-act,.tbl th.col-act{text-align:right}
+.col-help{border-bottom:1px dotted var(--c-border);cursor:help}
+/* 分组带 */
+.grp-band{display:flex;align-items:stretch;height:22px;font-size:11px;color:var(--c-text-3);background:#fff}
+.grp-band div{display:flex;align-items:center;padding:0 12px;position:relative;flex:none;overflow:hidden}
+.grp-band div+div::before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:1px;background:var(--c-hairline)}
+/* 展开箭头 */
+.exp-btn{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;color:var(--c-text-3);transition:transform var(--motion-fast) var(--ease-out),color var(--motion-fast) var(--ease-out),background var(--motion-fast) var(--ease-out)}
+.exp-btn:hover{background:var(--c-neutral-bg)}
+.exp-btn .ic{transition:transform var(--motion-fast) var(--ease-out)}
+.exp-btn[aria-expanded="true"] .ic{transform:rotate(90deg)}
+.exp-btn[aria-expanded="true"]{color:var(--c-primary)}
+/* 行入场动效 */
+@keyframes rowIn{from{transform:translateY(-6px);background:var(--c-primary-bg)}to{transform:none;background:transparent}}
+tr.row-insert{animation:rowIn .9s var(--ease-out)}
+@keyframes rowFlash{0%,100%{background:transparent}30%{background:var(--c-primary-bg)}}
+tr.row-flash{animation:rowFlash 1.1s var(--ease-out)}
+
+/* 单元格：被询证单位 */
+.cell-entity{font-weight:500}
+.cell-sub{font-size:12px;color:var(--c-text-3);margin-top:2px}
+
+/* 智能核查进度 —— 优化点 ③：紧凑排布（标识 + 简称） */
+.smart-check{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
+.smart-check__item{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--c-text-3);white-space:nowrap}
+.smart-check__item.is-running{color:var(--c-primary);font-weight:500}
+.smart-check__item.is-done{color:var(--c-text-2)}
+.smart-check__item.is-failed{color:var(--c-risk-high-text)}
+.smart-check__mark{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.smart-check__mark svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.smart-check__item.is-done .smart-check__mark{color:var(--c-primary)}
+.smart-check__item.is-failed .smart-check__mark{color:var(--c-risk-high)}
+.smart-check__dash{display:block;width:10px;height:2px;border-radius:1px;background:var(--c-border);}
+/* 像素网格加载器（3×3，扫描波前） */
+.px-grid{display:grid;grid-template-columns:repeat(3,3px);grid-template-rows:repeat(3,3px);gap:1.5px}
+.px-grid i{display:block;width:3px;height:3px;border-radius:.5px;background:var(--c-primary);opacity:.22;animation:pxpulse 1.1s ease-in-out infinite}
+.px-grid i:nth-child(1){animation-delay:0ms}.px-grid i:nth-child(2){animation-delay:70ms}.px-grid i:nth-child(3){animation-delay:140ms}
+.px-grid i:nth-child(4){animation-delay:220ms}.px-grid i:nth-child(5){animation-delay:290ms}.px-grid i:nth-child(6){animation-delay:360ms}
+.px-grid i:nth-child(7){animation-delay:440ms}.px-grid i:nth-child(8){animation-delay:510ms}.px-grid i:nth-child(9){animation-delay:580ms}
+@keyframes pxpulse{0%,100%{opacity:.2;transform:scale(.85)}45%{opacity:1;transform:scale(1)}}
+
+/* 核查事项复核（todo 勾选框） */
+.ai-review__link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--c-text-1);padding:2px 4px;margin:-2px -4px;border-radius:6px;transition:background var(--motion-fast) var(--ease-out)}
+.ai-review__link:hover{background:var(--c-primary-bg)}
+.ai-review__box{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--c-primary)}
+.ai-review__box svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ai-review__link.is-done .ai-review__box{color:var(--c-text-3)}
+.ai-review__link.is-done .ai-review__state{color:var(--c-text-3)}
+.ai-review__ai{color:var(--c-primary);font-size:12px}
+
+/* 进度步骤条 */
+.progress-steps{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+.progress-steps__sep{color:var(--c-border)}
+.progress-steps__step{display:inline-flex;align-items:center;gap:5px;color:var(--c-text-3);padding:2px 2px;border-radius:6px;transition:color var(--motion-fast) var(--ease-out),background var(--motion-fast) var(--ease-out)}
+.progress-steps__step:hover{background:var(--c-primary-bg);color:var(--c-primary)}
+.progress-steps__step.is-current{color:var(--c-text-1);font-weight:500}
+.progress-steps__dot{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--c-border);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.progress-steps__dot.is-done{background:var(--c-risk-low);border-color:var(--c-risk-low);color:#fff}
+.progress-steps__dot.is-done svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.progress-steps__arrow{color:var(--c-border);margin-left:-1px}
+
+/* 展开行：回函记录表 */
+.exp{padding:4px 12px 10px}
+.exp-grid{display:grid;gap:8px;padding:7px 12px;font-size:13px;color:var(--c-text-3);white-space:nowrap}
+.exp-grid.is-head{border-bottom:1px solid var(--c-hairline)}
+.exp-row{display:grid;gap:8px;padding:8px 12px;font-size:13px;align-items:center;border-top:1px solid var(--c-hairline)}
+.exp-row.is-current{color:var(--c-text-1)}
+.exp-row.is-old{color:var(--c-text-3)}
+
+/* 空状态 */
+.empty{padding:44px 0;text-align:center;color:var(--c-text-2)}
+.empty__title{font-weight:500;color:var(--c-text-1);margin-bottom:4px}
+/* 空状态插画 —— 一叠带回函页的实物纸（有厚度、有投影、有折角与待盖章位） */
+.empty__art{display:block;width:96px;height:72px;margin:0 auto 12px;filter:drop-shadow(0 1px 1px rgba(20,28,45,.04))}
+
+/* 分页 */
+.pager{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 16px;font-size:13px;color:var(--c-text-3)}
+.pager button{min-width:28px;height:26px;padding:0 6px;border-radius:6px;border:1px solid var(--c-border);font-size:13px}
+.pager button[aria-current="true"]{border-color:var(--c-primary);color:var(--c-primary);background:var(--c-primary-bg)}
+
+/* ==================================================================
+   全屏工作区（容器形态统一）
+   ================================================================== */
+.fs{position:fixed;inset:0;z-index:var(--z-modal);background:#fff;display:flex;flex-direction:column;animation:fsIn 220ms var(--ease-out)}
+@keyframes fsIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.fs-mask{position:fixed;inset:0;z-index:calc(var(--z-modal) - 1);background:rgba(16,24,40,.18);backdrop-filter:blur(2px)}
+.fs-head{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid var(--c-hairline);flex:none}
+.fs-head__t{font-size:15px;font-weight:600}
+.fs-head__s{font-size:13px;color:var(--c-text-3);margin-left:2px}
+.fs-head__x{width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--c-text-3);margin-left:auto;transition:background var(--motion-fast) var(--ease-out)}
+.fs-head__x:hover{background:var(--c-neutral-bg);color:var(--c-text-1)}
+.fs-body{flex:1;min-height:0;overflow:auto;padding:16px 24px}
+.fs-body-inner{max-width:1600px;margin:0 auto}
+.fs-foot{flex:none;display:flex;align-items:center;gap:12px;padding:12px 24px;box-shadow:0 -8px 16px -12px rgba(16,24,40,.14)}
+.fs-foot__note{font-size:13px;color:var(--c-text-3);display:flex;align-items:center;gap:6px;min-width:0}
+.fs-foot__btns{margin-left:auto;display:flex;align-items:center;gap:8px}
+.fs-split{display:flex;gap:16px;min-height:0}
+.fs-split.is-fill{height:100%}
+.col-scroll{overflow-y:auto;min-height:0}
+
+/* 结论条 / 事实行 */
+.tone-block{border-radius:var(--radius-control);padding:10px 12px;font-size:13px;line-height:1.7;display:flex;align-items:flex-start;gap:8px}
+.tone-neutral{background:var(--c-neutral-bg)}
+.tone-ai{background:var(--c-ai-bg)}
+.tone-primary{background:var(--c-primary-bg)}
+.tone-risk{background:var(--c-risk-high-bg)}
+.tone-ok{background:var(--c-risk-low-bg)}
+.info-row{display:flex;align-items:center;gap:8px;padding:9px 0;font-size:13px;border-bottom:1px solid var(--c-hairline)}
+.info-row:last-child{border-bottom:0}
+.info-row__k{width:var(--label-w);flex:none;color:var(--c-text-2)}
+.info-row__v{font-weight:600}
+.info-row__v.is-risk{color:var(--c-risk-high)}
+.info-row__v.is-ok{color:var(--c-risk-low)}
+.info-row__hint{font-size:12px;color:var(--c-text-3)}
+
+/* 表单行（标签在上、控件占满整行） */
+.form-row{padding:10px 0;border-bottom:1px solid var(--c-hairline)}
+.form-row:last-child{border-bottom:0}
+.form-row__k{font-size:13px;color:var(--c-text-2);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.form-row__req{color:var(--c-risk-high)}
+.form-row.is-error{background:var(--c-risk-high-bg);border-radius:6px;padding:10px 8px}
+.form-row__hint{font-size:12px;color:var(--c-text-3);margin-top:6px}
+.radio-row{display:flex;gap:16px;flex-wrap:wrap}
+.radio{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+.radio input{accent-color:var(--c-primary)}
+
+/* 对照表 */
+.cmp{width:100%;border-collapse:collapse;font-size:12px;background:#fff}
+.cmp th,.cmp td{border:1px solid var(--c-border-light);padding:6px 8px;text-align:left;white-space:nowrap}
+.cmp th{font-size:11px;color:var(--c-text-3);background:var(--c-fill-light);font-weight:500;white-space:normal}
+.cmp td.diff{background:var(--c-risk-high-bg);color:var(--c-risk-high-text);font-weight:600;box-shadow:inset 0 0 0 1px var(--c-risk-high)}
+.cmp-group{border-radius:var(--radius-control);box-shadow:var(--shadow-card);margin-bottom:10px;overflow:hidden}
+.cmp-group__head{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff;border-bottom:1px solid var(--c-hairline)}
+.cmp-side{padding:10px 12px}
+.cmp-side+.cmp-side{border-top:1px dashed var(--c-hairline)}
+.cmp-side__t{font-size:12px;color:var(--c-text-3);margin-bottom:6px}
+
+/* 附件卡 */
+.attach{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-control);background:var(--c-neutral-bg);font-size:13px}
+.attach+.attach{margin-top:8px}
+.attach__ic{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:var(--c-risk-high-bg);color:var(--c-risk-high);flex:none}
+
+/* 预览（纸页占位） */
+.paper{
+  background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(20,28,45,.14);
+  margin:0 auto;position:relative;overflow:hidden;background-image:
+    linear-gradient(90deg,transparent 0,transparent 100%);
+}
+.paper__lines{padding:26px 22px;font-size:9px;line-height:2.1;color:#c9ced9;user-select:none}
+.paper__lines b{display:block;height:7px;background:#dfe3ec;border-radius:2px;margin-bottom:9px}
+.paper__lines i{display:block;height:5px;background:#eef1f6;border-radius:2px;margin-bottom:7px}
+.pv-stack{display:flex;flex-direction:column;min-height:0;background:var(--c-preview-bg);border-radius:var(--radius-card);padding:10px;gap:10px}
+.pv-pane{display:flex;flex-direction:column;flex:1;min-height:0;background:#fff;border-radius:10px;box-shadow:var(--shadow-card);overflow:hidden}
+.pv-pane.is-collapsed{flex:none}
+.pv-pane.is-collapsed .pv-pane__body{display:none}
+.pv-pane__head{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--c-hairline);flex:none}
+.pv-pane__name{font-size:13px;font-weight:600}
+.pv-pane__file{font-size:12px;color:var(--c-text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-pane__body{flex:1;min-height:0;overflow:auto;background:var(--c-preview-bg);padding:12px}
+.pv-pane.is-collapsed{border-radius:10px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--c-text-3);padding:8px 2px 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:12px;height:12px;border-radius:2px;display:inline-block}
+
+/* 页签（分段控件样式） */
+.tabs{display:flex;gap:2px;padding:3px;background:var(--c-neutral-bg);border-radius:var(--radius-control);position:relative}
+.tabs button{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;font-size:13px;color:var(--c-text-3);transition:all var(--motion-fast) var(--ease-out)}
+.tabs button[aria-selected="true"]{background:#fff;color:var(--c-text-1);font-weight:500;box-shadow:0 1px 2px rgba(20,28,45,.1)}
+.tabs button.has-risk .ic{color:var(--c-risk-high)}
+.tabs button[aria-selected="true"] .ic{color:var(--c-primary)}
+.tabs-progress{display:flex;gap:3px;margin-top:8px}
+.tabs-progress i{height:3px;flex:1;border-radius:2px;background:rgba(16,24,40,.1)}
+.tabs-progress i.is-done{background:var(--c-primary)}
+
+/* 归属界面 */
+.assign-pane{display:flex;gap:16px;min-height:0}
+.board{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:12px 0;align-content:flex-start;padding:4px 2px}
+.pagewrap{position:relative;display:flex;align-items:center;padding:0 6px;margin-bottom:12px}
+.pagecard{width:104px;border-radius:8px;overflow:hidden;box-shadow:var(--shadow-card);background:#fff;cursor:pointer;transition:transform var(--motion-fast) var(--ease-out),box-shadow var(--motion-fast) var(--ease-out)}
+.pagecard:hover{transform:translateY(-1px);box-shadow:var(--shadow-hover)}
+.pagecard__p{height:132px;background:#fff;position:relative;overflow:hidden;padding:12px 10px}
+.pagecard__p i{display:block;height:4px;background:#e4e8f0;border-radius:2px;margin-bottom:6px}
+.pagecard__p b{display:block;height:6px;width:60%;background:#d5dae5;border-radius:2px;margin-bottom:10px}
+.pagecard__f{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;font-size:11px;color:var(--c-text-3);border-top:1px solid var(--c-hairline)}
+.scissor{width:0;display:flex;align-items:center;justify-content:center;position:relative;flex:none}
+.scissor button{position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:var(--shadow-card);display:flex;align-items:center;justify-content:center;color:var(--c-text-3);left:-11px;transition:all var(--motion-fast) var(--ease-out)}
+.scissor button:hover{color:var(--c-primary);box-shadow:var(--shadow-hover);transform:scale(1.08)}
+.scissor.is-cut button{color:#fff;background:var(--c-primary)}
+.right-rail{flex:0 0 var(--rail-w,360px);display:flex;flex-direction:column;gap:12px}
+.rail-section{background:#fff;border-radius:var(--radius-card);box-shadow:var(--shadow-card);overflow:hidden}
+.rail-section__head{display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:14px;font-weight:600}
+.rail-section__head .count{font-weight:400;font-size:12px;color:var(--c-text-3)}
+.rail-section__body{padding:2px 14px 14px}
+.seg-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--c-hairline)}
+.seg-item:last-child{border-bottom:0}
+.seg-item__no{font-size:12px;color:var(--c-text-3);flex:none;width:38px}
+.seg-item__main{flex:1;min-width:0}
+.seg-item__pg{font-size:12px;color:var(--c-text-3);margin-top:2px}
+.pkg{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:4px;font-size:11px;color:#fff;font-weight:500}
+.pkg--0{background:#3b5bdb}.pkg--1{background:#e8590c}.pkg--2{background:#0b7285}.pkg--3{background:#7048e8}
+.pkg--4{background:#c2255c}.pkg--5{background:#2f9e44}.pkg--6{background:#b5179e}.pkg--7{background:#5c940d}
+
+/* 上传弹窗（居中） */
+.dlg{position:fixed;inset:0;z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;padding:24px}
+.dlg__mask{position:absolute;inset:0;background:rgba(16,24,40,.24);backdrop-filter:blur(2px)}
+.dlg__box{position:relative;width:520px;max-width:100%;background:#fff;border-radius:var(--radius-card);box-shadow:var(--shadow-pop);animation:dlgIn 200ms var(--ease-out)}
+@keyframes dlgIn{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
+.dlg__head{padding:14px 20px;border-bottom:1px solid var(--c-hairline);font-size:15px;font-weight:600}
+.dlg__body{padding:18px 20px;max-height:60vh;overflow:auto}
+.dlg__foot{display:flex;align-items:center;gap:8px;padding:12px 20px;box-shadow:0 -8px 16px -12px rgba(16,24,40,.14)}
+.dlg__foot .btn:last-child{margin-left:auto}
+.dropzone{border:1.5px dashed var(--c-border);border-radius:var(--radius-card);padding:26px;text-align:center;color:var(--c-text-3);background:var(--c-fill-light);transition:all var(--motion-fast) var(--ease-out)}
+.dropzone:hover{border-color:var(--c-primary);background:var(--c-primary-bg);color:var(--c-primary)}
+.dropzone .ic{width:26px;height:26px;margin:0 auto 8px}
+
+/* ==================================================================
+   原型专用：场景导航 / 改动标注
+   ================================================================== */
+.protobar{position:fixed;right:20px;bottom:20px;z-index:var(--z-nav);display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.proto-btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:18px;background:#fff;box-shadow:var(--shadow-pop);font-size:13px;font-weight:500;transition:transform var(--motion-fast) var(--ease-out)}
+.proto-btn:hover{transform:translateY(-1px)}
+.proto-btn.is-on{background:var(--c-primary);color:#fff}
+.menu{position:fixed;z-index:var(--z-note);min-width:280px;max-height:70vh;overflow:auto;background:#fff;border-radius:var(--radius-card);box-shadow:var(--shadow-pop);padding:8px;animation:dlgIn 160ms var(--ease-out)}
+.menu__g{font-size:11px;color:var(--c-text-3);padding:8px 10px 4px}
+.menu button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;font-size:13px;transition:background var(--motion-fast) var(--ease-out)}
+.menu button:hover{background:var(--c-primary-bg);color:var(--c-primary)}
+.menu button.is-cur{background:var(--c-primary);color:#fff}
+.notepanel{position:fixed;top:0;right:0;bottom:0;width:400px;max-width:92vw;z-index:var(--z-note);background:#fff;box-shadow:var(--shadow-pop);display:flex;flex-direction:column;animation:slideIn 220ms var(--ease-out)}
+@keyframes slideIn{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
+.notepanel__h{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--c-hairline);font-size:15px;font-weight:600}
+.notepanel__b{flex:1;overflow:auto;padding:14px 18px}
+.note{display:flex;gap:10px;padding:10px 0;border-bottom:1px dashed var(--c-hairline)}
+.note:last-child{border-bottom:0}
+.note__n{flex:none;width:22px;height:22px;border-radius:50%;background:var(--c-primary);color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.note__t{font-size:13px;font-weight:600;margin-bottom:3px}
+.note__d{font-size:12.5px;color:var(--c-text-2);line-height:1.75}
+.badge-num{position:absolute;z-index:var(--z-note);display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--c-primary);color:#fff;font-size:11px;font-weight:600;box-shadow:0 2px 6px rgba(59,91,219,.4);pointer-events:none}
+.badge-num.is-hidden{display:none}
+.toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);z-index:var(--z-note);background:rgba(29,33,41,.92);color:#fff;font-size:13px;padding:9px 16px;border-radius:8px;box-shadow:var(--shadow-pop);animation:dlgIn 180ms var(--ease-out)}
+
+/* 卡片形态（窄屏） */
+.cards{display:none}
+.card-item{border:1px solid var(--c-hairline);border-radius:var(--radius-card);padding:14px;margin-bottom:12px;box-shadow:var(--shadow-card);background:#fff}
+.card-item__h{display:flex;align-items:flex-start;gap:8px}
+.card-item__t{font-weight:600;font-size:14px}
+.card-kv{display:flex;gap:8px;font-size:13px;padding:5px 0}
+.card-kv__k{width:104px;flex:none;color:var(--c-text-3)}
+
+/* ==================================================================
+   响应式断点（优化点 ④：全站零断点 → 四档）
+   ================================================================== */
+@media (max-width:1439px){
+  .fs-body,.fs-head,.fs-foot{padding-left:16px;padding-right:16px}
+  .page{padding:20px 16px}
+}
+@media (max-width:1279px){
+  /* 表格仍横滚，但把右栏 / 工作区两栏压成更紧的比例 */
+  .right-rail{flex-basis:340px}
+}
+@media (max-width:1103px){
+  /* 表格退化为卡片列表 —— 不再让用户在手机上横拖一张 8 列表 */
+  .tablewrap,.grp-band,.pager{display:none}
+  .cards{display:block}
+  .panel>.empty{display:none}   /* 空状态只在卡片区出现一份 */
+  .fs-split{flex-direction:column;overflow:auto}
+  .fs-split>*{flex:none!important;overflow:visible!important}
+  .pv-stack{min-height:0}
+  .pv-pane__body{max-height:420px}
+  .assign-pane{flex-direction:column}
+  .right-rail{flex-basis:auto;width:100%}
+}
+@media (max-width:767px){
+  .page{padding:16px 12px}
+  .filters .f-keyword,.filters .f-select{flex:1 1 160px}
+  .fs-foot{flex-direction:column;align-items:stretch;gap:8px}
+  .fs-foot__btns{margin-left:0;justify-content:flex-end}
+}
+</style>
+<style id="__dm_no_drag_style__">* { -webkit-user-drag: none !important; }</style><style id="__dm_bindable_badge_style__">[data-sp-bindable="database"]{outline:1px dashed #0088ff;outline-offset:2px;border-radius:4px;}[data-sp-bindable="database"] *{pointer-events:none !important;transition:none !important;animation:none !important;}[data-sp-bindable="database"]{transition:none !important;animation:none !important;}</style></head>
+<body data-page-node-id="9hZMcXwsl8hLmEFi29Kbmy" style="position: relative;">
+
+<!-- 主页面 -->
+<main class="page" id="page" data-page-node-id="ZtZVYzmtDm4zCCeIUXzkAi">
+  <div class="page-head" data-page-node-id="oJ1s9A8kKoqMdQvDvNwPJ9">
+    <h1 class="page-head__title" data-note="1" data-page-node-id="1yqdgPosfpUZqhc5thPg0R">
+      往来函证回函
+      <small data-page-node-id="Lcm9otjI2SrNzjEOleWdTh">共 <b class="num" data-page-node-id="jv9zet1bK1AeHEiWiqG7Jq">5</b> 封函证</small>
+    </h1>
+    <div class="seg" style="margin-left:auto" role="group" aria-label="函证类型" data-page-node-id="FI7z7Z9rPuqLtNshhMkFPV">
+      <button data-type="往来函证" aria-pressed="true" data-page-node-id="hFd0rauy7fDvAVbBjXDzDZ">往来函证</button>
+      <button data-type="银行函证" aria-pressed="false" data-page-node-id="KPmQiEAFCR5NiCNaiVKlkl">银行函证</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:16px" data-page-node-id="h8z1EjalzkXPvnJwfEAI1k">
+    <div class="filters" data-page-node-id="vHHgtPewELMHtvHxgvZf61">
+      <div class="f-keyword with-prefix" data-page-node-id="KDWbOrjW6HQhAOeL538E7N"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="sJI1HQTUMNuT5bipAvd9nS"><path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6-6" data-page-node-id="65TuufMPfFQrwuHvrNngHH"></path></svg>
+        <input class="input" id="f-kw" placeholder="被询证单位 / 函证编号 / 发函记录编号" value="" data-page-node-id="EeQsO1PNqhs3QI9oqfEGT5">
+      </div>
+      <div class="f-select" data-page-node-id="CxMjXSuDYFtfxLJDcquywE">
+        <select class="select" id="f-sm" data-page-node-id="YXWbgbVFRcFWcogUuDcO5J">
+          <option value="" data-page-node-id="kSykP5SUA62j5tz2UwcL4G">发函方式</option>
+          <option data-page-node-id="L6CdESELdKFbQJAKUIx4eJ">邮寄发函</option><option data-page-node-id="OKhJ3rjak3RjBK2oqC1DON">跟函</option><option data-page-node-id="QfQUDU7OF1PIxngnBFKsij">电子邮件发函</option>
+        </select>
+      </div>
+      <div class="f-select" data-page-node-id="Sge5eSHnTKzaTaw2lg3gbD">
+        <select class="select" id="f-pg" data-page-node-id="YBbHKACMArcXyhjgiFDcBF">
+          <option value="" data-page-node-id="k5lHcA1NemV2ZaWWqbv9Lu">回函信息录入进度</option>
+          <option data-page-node-id="T6kKlBpT2wFEludteq24cl">待确认快递信息</option><option data-page-node-id="pY91uScM9iiTATDXfXVieD">待填写回函结果</option><option data-page-node-id="LmVtL8cxZEv79WHVnFofEF">已完成</option>
+        </select>
+      </div>
+      <button class="btn btn--primary" id="f-query" data-page-node-id="PUoPGyGlAQovDeiFQhEiDa"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="4g9RUtLMeJVmKwJ7izkP4B"><path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6-6" data-page-node-id="gROXlfIc54rZeBprAtCamH"></path></svg>查询</button>
+      <button class="btn" id="f-reset" data-page-node-id="XHXOuV54RDY70waGXcLSnV"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="z12gzJAFxGDpfeLm3TGASv"><path d="M20 11A8 8 0 0 0 6.3 5.3L4 7.5M4 4v4h4M4 13a8 8 0 0 0 13.7 5.7L20 16.5M20 20v-4h-4" data-page-node-id="GL94fzZvnYmUB87HNRwGF1"></path></svg>重置</button>
+    </div>
+    
+    <div class="actions" data-note="2" data-page-node-id="0UtdhqGvLbZslANh98iTae">
+      <button class="btn btn--primary" id="btn-upload" data-page-node-id="cZ5qc18usf37jOtQBCf9un"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="tXbCLoqqNxAuiHAsvot53N"><path d="M7 18a4 4 0 0 1 .9-7.9A6 6 0 0 1 20 9.5a3.5 3.5 0 0 1 .5 6.5M12 13v8M9 16l3-3 3 3" data-page-node-id="CizxehxzhiEFZTz282FTJP"></path></svg>上传往来函证回函</button>
+      <button class="btn" id="btn-express" data-page-node-id="TofWwfn9vVnM8KwNNACiHB"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="VgLaAV0EAqv45d65LBAPXt" style=""><path d="M14 3v5h5M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM9 13l6 5M15 13l-6 5" data-page-node-id="By83XDiKk8GG0MtnA3aDRn"></path></svg>导入快递数据</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:4px 0" data-note="3" data-page-node-id="oYKDm3KGOvpTO5GHrSFo7V">
+    
+  <div class="grp-band" aria-hidden="true" data-page-node-id="jAts8G73MREjWUjnLcrCO6"><div style="width:324px" data-page-node-id="7AFVqYlgPBI7BOkt5bhZqk">函证信息</div><div style="width:336px" data-page-node-id="rCjXk6N1JyszKBJjxPM0Ba">智能核查</div><div style="width:264px" data-page-node-id="yZJd21AkRTaeQbXNTvzyVE">结论与人工复核</div><div style="width:296px" data-page-node-id="EXb3qgDo9pkK2cOPnh84Mt">进度与操作</div></div>
+  <div class="tablewrap" data-page-node-id="FEUJv9OVUl5Ry0FvIy8lur">
+  <table class="tbl" style="min-width:1220px" data-page-node-id="eCacm0XMEiPqXg61m7WSZ0">
+    <colgroup data-page-node-id="suaeJEh6PW6ypo8Jb5CNZ8"><col style="width:32px" data-page-node-id="WR9xiERAYT7evr5ylHHmTT"><col style="width:176px" data-page-node-id="WLC7B5KAfYt05cPhxZupqI"><col style="width:116px" data-page-node-id="XiV4Mr9tGfsfGc4z7TPkV1"><col style="width:108px" data-page-node-id="n49JzoyBXvcYyn8BOcy1AC"><col style="width:228px" data-page-node-id="9nJe0jIphmBLA6AeOf6GGG"><col style="width:116px" data-page-node-id="jbA7LgKRoPouRRR9jETSvs"><col style="width:148px" data-page-node-id="WAEAh6hBWbb5B7BXCQw6AM"><col style="width:176px" data-page-node-id="bNcBR0a6aw9dcQOzdzyFmF"><col style="width:120px" data-page-node-id="pDTLw0GAFIuPEV2u0hCGdQ"></colgroup>
+    <thead data-page-node-id="PdHi9LsqU5J9MF8pzpwtt3"><tr data-page-node-id="cVqUGEobXZ6dyBeIZHiAlE">
+      <th data-page-node-id="BDAktSyB6qaey5JZxvuBXE"></th>
+      <th data-page-node-id="NoWU7Sg2MbvT22dFUDAnRN">被询证单位</th>
+      <th data-page-node-id="VATbrBm1PxXR4pLoGfxjCf">函证编号</th>
+      <th data-page-node-id="YEIgJEMZMCQYMSm0DHiFut">智能核查状态</th>
+      <th data-page-node-id="xedsZJL0t7MJM3GKDjaiC4">智能核查进度</th>
+      <th data-page-node-id="NTcDhzCpQDVu2ogkVqbxsb">回函是否相符</th>
+      <th data-page-node-id="wqEQwI7yu9Vjp2BDvCJ3zY">核查事项复核</th>
+      <th data-page-node-id="YxVGLyn1GXb2HlxZULoLYv">回函信息录入进度</th>
+      <th class="col-act" data-page-node-id="FzAKMRVmiGrDc1lWVSVZOK">操作</th>
+    </tr></thead>
+    <tbody data-page-node-id="lB3AaZHjUFRHqAQh21Bgh2">
+  <tr class="" data-row="whzf0010010-1" data-page-node-id="AA64Bkb0aIn8jx9Fxu8pDK">
+    <td data-page-node-id="lq3CtGx8TYG0RX7FWlkxrT"><button class="exp-btn" data-exp="whzf0010010-1" aria-expanded="false" aria-label="展开详情" data-page-node-id="FmCE60ATdfB1gScaZZ9dcd"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="3RjD18nMDJw9JndOnoFiCV"><path d="M9 6l6 6-6 6" data-page-node-id="HeaG6GOBNJac5G1FzBD4Ki"></path></svg></button></td>
+    <td data-page-node-id="lTVCCyILdOGQCtWZaTMjBM"><div class="cell-entity ellipsis" data-page-node-id="oVCDPPsABl620Xcc82Y7NU"><button class="link" data-open="view" data-id="whzf0010010-1" data-page-node-id="XhnDaNsr1a9yEBzf2eaCyd">平安证券股份有限公司</button></div></td>
+    <td data-page-node-id="urlDj7GQmfHD8JdMXuIfKs"><span class="num" data-page-node-id="wnVqoIwRYylrsij41DEeVS">whzf0010010</span></td>
+    <td data-note="4" data-page-node-id="nc7oH0i55V6HaCwb3oIqSk"><span class="tag tag--high " data-page-node-id="qcWYP2iKwn8XO1iSNxitfB">核查失败</span></td>
+    <td data-note="5" data-page-node-id="r76qwbmTGeKD1ETYH4KWn7"><span class="smart-check" data-page-node-id="wnQeWLQqUJa5oxSpy3uxv6"><span class="smart-check__item is-done" title="发函回函一致性检测 · 已核查完成" data-page-node-id="3wxeJCjYLmbba9qFGcOzQH"><span class="smart-check__mark" data-page-node-id="OxwxVYbZrtDbzJsFwMqrGU"><svg viewBox="0 0 24 24" data-page-node-id="r0myBM9bKqQc0dsoS5fmFM"><path d="m5 12l5 5L20 7" data-page-node-id="WGcnumu16VGMifRJ83VLZ8"></path></svg></span>发函回函一致性</span><span class="smart-check__item is-failed" title="印章核查 · 核查失败 —— 可在「操作」列点「重新识别」重跑" data-page-node-id="MHXpz8eOqpZFtMzomktWvO"><span class="smart-check__mark" data-page-node-id="bBRHzpKLN2l4BnPhIBxmY9"><svg viewBox="0 0 24 24" data-page-node-id="j7tmTuq8MUDNYgGSfy0pJP"><path d="M18 6L6 18M6 6l12 12" data-page-node-id="SNE7TGIAlwsxPSanxQhrUf"></path></svg></span>印章核查</span><span class="smart-check__item is-waiting" title="手写体识别 · 尚未开始核查" data-page-node-id="G9UFRHVtXQk92rIbMTqORQ"><span class="smart-check__mark" data-page-node-id="FzRhrYqwkgSuAxNBRF70Uv"><span class="smart-check__dash" data-page-node-id="4CjGadlDSaLq9NEIUvlzMb"></span></span>手写体识别</span></span></td>
+    <td data-page-node-id="d4r32YAhVZMMGh0Npg3mox"><span class="tag tag--neutral tag-help" title="印章区域图像模糊，未能定位落章位置 —— 可在「操作」列点「重新识别」重跑，或直接人工核对" data-page-node-id="VZza5chJCK6EAHOA01JwZE">识别失败</span></td>
+    <td data-note="6" data-page-node-id="nFbxb9KKUtG3cZjagCUAjV"><button class="ai-review__link" data-open="verify" data-id="whzf0010010-1" aria-label="核查事项复核：待复核（印章核查、手写体识别）" title="待复核：印章核查、手写体识别
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="fNsQsRoL81iOa4DrvaJ8W7">
+    <span class="ai-review__box" data-page-node-id="bkXCCwLCGEv4jTuKEDiU6A"><svg viewBox="0 0 24 24" data-page-node-id="rmGgaRW79mr90bwce5Qtj4"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="g6AqbevODtuFQXiUbpDyfu"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="6iweGomXr4qHMgtTivWayR">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="loBZtN7yZvhT60GnCPIZGC">✦</span>
+  </button></td>
+    <td data-page-node-id="QJ4Xxckasy3fNNaDOBK2Ge"><span class="progress-steps" title="「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档" data-page-node-id="ZJ3msrXcnvdvxnnPNk9nCs">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010010-1" data-page-node-id="fWiJVUL7lD7S2Iyvp2kX8M">
+      <span class="progress-steps__dot is-done" data-page-node-id="FzgJEKOSFK5JKzOjqx5QT1"><svg viewBox="0 0 24 24" data-page-node-id="RUhugQLpBcocxowXGPzgWw"><path d="m5 12l5 5L20 7" data-page-node-id="EWBPWmBJ15vl9hdxCdZ8Q4"></path></svg></span>
+      <span data-page-node-id="e5FcEIJxtrwAC8Gf03fxTu">快递信息</span><span class="progress-steps__arrow" data-page-node-id="SUyhAiO8UvBwQ8E6B2tJAx">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="4SOap2WwD1BxULk4Y9uN57">|</span>
+    <button class="progress-steps__step is-current" data-open="result" data-id="whzf0010010-1" data-page-node-id="Dpjtj8UMhfxNvjZQV9JgUH">
+      <span class="progress-steps__dot" data-page-node-id="z6h1CjkKyJj2hECKGppIcR"></span>
+      <span data-page-node-id="e4EC8MuhAZja3XDvmAdU1B">回函结果</span><span class="progress-steps__arrow" data-page-node-id="Tl55CfPM6G9iEnUofPTfOd">›</span>
+    </button></span></td>
+    <td class="col-act" data-page-node-id="7XRnCIZxnqp3NujqjWmNd6"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="5uE2zBvqGSULtL61s0vb8S">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010010-1" data-page-node-id="O7ZFuPSmpG8teKKiHBIFtv">查看</button>
+    <button class="btn btn--ghost btn--sm" data-retry="whzf0010010-1" style="color:var(--c-risk-high-text)" data-page-node-id="Pvd9wrXuu3S1XuLlpdZEUz"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="aVqHHTDCBCntgOhwHuK0iQ"><path d="M20 11A8 8 0 0 0 6.3 5.3L4 7.5M4 4v4h4M4 13a8 8 0 0 0 13.7 5.7L20 16.5M20 20v-4h-4" data-page-node-id="o7kxIOmWOHkls7osTb6M1C"></path></svg>重新识别</button>
+  </span></td>
+  </tr>
+  
+  <tr class="" data-row="whzf0010009-1" data-page-node-id="BqWNpcRrKmcXGYRc6N59Cg">
+    <td data-page-node-id="BUJMQ2eQzZTJOGwBMfyKhG"><button class="exp-btn" data-exp="whzf0010009-1" aria-expanded="false" aria-label="展开详情" data-page-node-id="xHpY7kNAPbK9MSQLmJR7KM"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="rkwAyBweHfRr6Kq0ggHo6F"><path d="M9 6l6 6-6 6" data-page-node-id="Z3rPYU60EcFlIfc84GM7hc"></path></svg></button></td>
+    <td data-page-node-id="gF6faAUJzwCTPdFOg2VDqZ"><div class="cell-entity ellipsis" data-page-node-id="doE2ZGbRUKlCXDV6MMSWhT"><button class="link" data-open="view" data-id="whzf0010009-1" data-page-node-id="VK4WjA874vt4Sj4oHFQ5Li">中金财富证券股份有限公司</button></div></td>
+    <td data-page-node-id="6I75sxfOvxQ21vRkHtI8Br"><span class="num" data-page-node-id="CPDbKqZrNXMzDiSg1G1okn">whzf0010009</span></td>
+    <td data-note="4" data-page-node-id="x2HhZYiLp2oL2O0JIbkHSV"><span class="tag tag--low " data-page-node-id="idThxAuuQG8lH1nBTWuiF3">已核查</span></td>
+    <td data-note="5" data-page-node-id="PBx1T1NbkbRMo8SNPV7Ktl"><span class="smart-check" data-page-node-id="EcpAw0BjbgHM5xbu1jzGo0"><span class="smart-check__item is-done" title="发函回函一致性检测 · 已核查完成" data-page-node-id="B5BuFL8hFhUvfDTaIh6yYy"><span class="smart-check__mark" data-page-node-id="KNdvRjxToGymuvzasXx2G5"><svg viewBox="0 0 24 24" data-page-node-id="8VJygFNYllcbhINuJ76aH4"><path d="m5 12l5 5L20 7" data-page-node-id="w0Y1eGQfKEmLNEDeVAS7Yz"></path></svg></span>发函回函一致性</span><span class="smart-check__item is-done" title="印章核查 · 已核查完成" data-page-node-id="FyJ9Cmg13uUfEFxZH5r9zH"><span class="smart-check__mark" data-page-node-id="SYvcVw5Ohup2mqmZ80846x"><svg viewBox="0 0 24 24" data-page-node-id="X0boLUJ928TE0c3obsZoCO"><path d="m5 12l5 5L20 7" data-page-node-id="To34j5tqAbp67RX8OzOs5m"></path></svg></span>印章核查</span><span class="smart-check__item is-done" title="手写体识别 · 已核查完成" data-page-node-id="4GgtS7LpAHp9wPUQ71BYkl"><span class="smart-check__mark" data-page-node-id="qYBEMDdOis0bTtiuGxOz5n"><svg viewBox="0 0 24 24" data-page-node-id="ycPQo0bBCKqpKjZf2o3pSn"><path d="m5 12l5 5L20 7" data-page-node-id="S85Q0D0lNh8RqSlXrcr5JM"></path></svg></span>手写体识别</span></span></td>
+    <td data-page-node-id="sBVR45lOJXCI7nMp1O4aAr"><span class="tag tag--high tag-help" title="已确认 —— 依据：印章落于「信息不符」区" data-page-node-id="ajweH0BT3LWODY3E3SgdJL">不相符</span></td>
+    <td data-note="6" data-page-node-id="kpZVGwFLfXTOUWajez4x9f"><button class="ai-review__link" data-open="verify" data-id="whzf0010009-1" aria-label="核查事项复核：待复核（印章核查）" title="待复核：印章核查
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="oi3lrHVPfqTFL4WikF4ma0">
+    <span class="ai-review__box" data-page-node-id="MHT35K6qtLcU184BDUZPFW"><svg viewBox="0 0 24 24" data-page-node-id="uX2vt3dfAbJnWqoiFw7clK"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="s9QPfyL3c57wGma3Hi0VqV"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="T97xFlbNeRXQRdKfcsnx2D">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="cyICzjUKTP9ZrIQwi7BnWe">✦</span>
+  </button></td>
+    <td data-page-node-id="ED7kPTO5zt65pUBc2vnlAZ"><span class="progress-steps" title="「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档" data-page-node-id="87Ch81b8cNgXLRE8a6LOx9">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010009-1" data-page-node-id="979OBbegVjCIhE1MIHIx3O">
+      <span class="progress-steps__dot is-done" data-page-node-id="0lvzAHfvqpaY5FeZsk9R8M"><svg viewBox="0 0 24 24" data-page-node-id="lKupsmwGVG61MRxXSmP321"><path d="m5 12l5 5L20 7" data-page-node-id="5z7B4scgHf9ravHBddAVkD"></path></svg></span>
+      <span data-page-node-id="R5tbHAnHWO1QUmN5rrGZtU">快递信息</span><span class="progress-steps__arrow" data-page-node-id="2rSOe0Ql2qr9vap6Cao75w">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="B2hlFAoRF21XQVgKBGOgsP">|</span>
+    <button class="progress-steps__step is-current" data-open="result" data-id="whzf0010009-1" data-page-node-id="eMAOqtfhkKBHpAmaRhJHtb">
+      <span class="progress-steps__dot" data-page-node-id="4PBbfD8SHVvpF4zYNTJw4T"></span>
+      <span data-page-node-id="Hne20VuLEEhwN1GLxDjaaN">回函结果</span><span class="progress-steps__arrow" data-page-node-id="HjTY2mwk0N3e4MVUFFONPS">›</span>
+    </button></span></td>
+    <td class="col-act" data-page-node-id="Fwdq4aDf7kaL6uIib44790"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="XXSHXevPfezofLYhMvDSYW">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010009-1" data-page-node-id="NIxzigek48AMj7vjN2F2c3">查看</button>
+    
+  </span></td>
+  </tr>
+  
+  <tr class="" data-row="whzf0010008-1" data-page-node-id="EV3Uo329udgogZ1XYMM5vo">
+    <td data-page-node-id="OSGSwLQk4ZEiqdTEUl6o2k"><button class="exp-btn" data-exp="whzf0010008-1" aria-expanded="false" aria-label="展开详情" data-page-node-id="1eilgFq8AkMW2Ga8Md0zaG"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="T6f06zUkLHGWjsOguRuGWj"><path d="M9 6l6 6-6 6" data-page-node-id="lTxXlYLBn9KtRmnDy1nf3S"></path></svg></button></td>
+    <td data-page-node-id="ObU1AtRtJiS7dYLuPyGktu"><div class="cell-entity ellipsis" data-page-node-id="BE0nxnnkDvrXr60OeWUIOg"><button class="link" data-open="view" data-id="whzf0010008-1" data-page-node-id="3mFJsYxBWFRpHI6sY6t4yO">东方财富证券股份有限公司</button></div></td>
+    <td data-page-node-id="sko0KWx5T6rDEdbcSxCuMH"><span class="num" data-page-node-id="uqsrDmJnBiR67yhvp5EILS">whzf0010008</span></td>
+    <td data-note="4" data-page-node-id="ErWkQSrUDgDGk1Eci1YbHI"><span class="tag tag--primary tag--live" data-page-node-id="MJHOfofwM69pYyZwaTxwDP">正在核查</span></td>
+    <td data-note="5" data-page-node-id="msvaBqpaA7rK3AEkw49eoZ"><span class="smart-check" data-page-node-id="49BGcnACsxIUYaG2PSmweK"><span class="smart-check__item is-done" title="发函回函一致性检测 · 已核查完成" data-page-node-id="WwjET82VkTov5LLfjnUX5n"><span class="smart-check__mark" data-page-node-id="uplaAFqmV7AepukcGKqEwz"><svg viewBox="0 0 24 24" data-page-node-id="7SQq8xJiWUm2ML8OvjHq3y"><path d="m5 12l5 5L20 7" data-page-node-id="p8BiRyNw3Yt5y2k4kydwmZ"></path></svg></span>发函回函一致性</span><span class="smart-check__item is-running" title="印章核查 · 正在核查这一项…" data-page-node-id="0F3mBQS0WlMZkoNoKOUGZz"><span class="smart-check__mark" data-page-node-id="jBYjDdu26bjJVSiWgp3Rfc"><span class="px-grid" data-page-node-id="1PNDVjPRFF1taO6RZMRqLH"><i data-page-node-id="TAwsBHalGLZXkzrOVaNIDe"></i><i data-page-node-id="FIIdtePr1C5eyJXZs8feE2"></i><i data-page-node-id="Tp8iDkSwxra3aGJ8U8tiDc"></i><i data-page-node-id="iqLVHPwSjMIFp3CBW31hON"></i><i data-page-node-id="z7X7Cls0NoLnCV3HahJzQa"></i><i data-page-node-id="GGKAgUSatIDpcQN4sFztbw"></i><i data-page-node-id="cNZAbuCGyTdCOZZkBMG4L4"></i><i data-page-node-id="VNNRQ1d2DoQoIpHWH8du0y"></i><i data-page-node-id="pyRI9GDfzYdX1gLmNkxRDo"></i></span></span>印章核查</span><span class="smart-check__item is-waiting" title="手写体识别 · 尚未开始核查" data-page-node-id="jeY4ZDPBAShklc08kmZRqe"><span class="smart-check__mark" data-page-node-id="LOpFKFlBvvl5nK92LgLaQ6"><span class="smart-check__dash" data-page-node-id="NeHd0FrYb8V5J2KYKxaSBG"></span></span>手写体识别</span></span></td>
+    <td data-page-node-id="VeYjziokcVHlgQnm19va93"><span class="tag tag--neutral tag-help" title="待确认 —— 相符性以你在「核查事项复核」里确认的结论为准；确认后这里才显示结果" data-page-node-id="CJtmeCpq3j6bBJidBZBbhK">未确认</span></td>
+    <td data-note="6" data-page-node-id="TIbpbyCWqtBgti50T8yNHx"><button class="ai-review__link" data-open="verify" data-id="whzf0010008-1" aria-label="核查事项复核：待复核（发函回函一致性、印章核查、手写体识别）" title="待复核：发函回函一致性、印章核查、手写体识别
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="a5v8rNUasnEvZW9r2EZQVR">
+    <span class="ai-review__box" data-page-node-id="V7dDOvsZ3ssJGUxHA61YnZ"><svg viewBox="0 0 24 24" data-page-node-id="3WNGa4eNWVz8TDL56CQLJ5"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="zDhPzoYM6mGls3KJAUxCA0"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="XA6HSYnm8nTYvCoPWvCljr">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="A47urd1NgCgC5SIQdPXvPC">✦</span>
+  </button></td>
+    <td data-page-node-id="gF341GLCSPonwJaeBn3tN1"><span class="progress-steps" title="确认即完成核验留痕" data-page-node-id="AoJAGO4bG4EwOpLj7ODITN">
+    
+    <button class="progress-steps__step is-current" data-open="doc" data-id="whzf0010008-1" data-page-node-id="fWpqkKKmjEKwbErEKdJHYn">
+      <span class="progress-steps__dot" data-page-node-id="QI4xebBUFVhuCgMCAxhjKq"></span>
+      <span data-page-node-id="iy1zRiifsLu0TKXGchtV8u">快递信息</span><span class="progress-steps__arrow" data-page-node-id="xj8DsaVsZRCrB62NXXjaE7">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="AhIiWUutJFbm6AbZJqAiJn">|</span>
+    <button class="progress-steps__step" data-open="result" data-id="whzf0010008-1" data-page-node-id="G3yHLuPcUWUA5WmvStFHNA">
+      <span class="progress-steps__dot" data-page-node-id="SyzLHCtdhUd28Demgnxzhk"></span>
+      <span data-page-node-id="zi4K5QtgmPVdiHH2mgwbGr">回函结果</span><span class="progress-steps__arrow" data-page-node-id="YYn4UZMr4LXQPOoi5oGiIJ">›</span>
+    </button></span></td>
+    <td class="col-act" data-page-node-id="W6jeAjS5ndOfQUQUvprIw6"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="qi8bCGLNJc1eb997raTKdJ">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010008-1" data-page-node-id="714U3kP6NybFD6Mv84rmDL">查看</button>
+    
+  </span></td>
+  </tr>
+  
+  <tr class="" data-row="whzf0010005-2" data-page-node-id="tG1us0nPBPLFG8e6XEsiWy">
+    <td data-page-node-id="y9Zcfnd2cZOsXXGRL2ZsCL"><button class="exp-btn" data-exp="whzf0010005-2" aria-expanded="false" aria-label="展开详情" data-page-node-id="1AuuxmQwHoOvv3XjqnSNXV"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="YXezGc8qUMcVVqPZshXyrk"><path d="M9 6l6 6-6 6" data-page-node-id="bUPlAGXEOARAxuCJ1KB6JR"></path></svg></button></td>
+    <td data-page-node-id="hnhOk3pmlIzedEWzNxIgn9"><div class="cell-entity ellipsis" data-page-node-id="HC37snQ3Ff7TaGGoyOjv8L"><button class="link" data-open="view" data-id="whzf0010005-2" data-page-node-id="xOQSbtmM9r4cREtFGInCh5">海通证券股份有限公司</button></div></td>
+    <td data-page-node-id="MD4fI5xK0qgk2qGx9K8rnr"><span class="num" data-page-node-id="wtcwgmeBJVcKMPJrHvT8QW">whzf0010005</span></td>
+    <td data-note="4" data-page-node-id="xLq4cq34DPhpDD5EDpLlPJ"><span class="tag tag--low " data-page-node-id="zQFGs3LPz4ZPMJdSlNMNOB">已核查</span></td>
+    <td data-note="5" data-page-node-id="mQSsCRKLJuWnGtg2UmMkq8"><span class="smart-check" data-page-node-id="BNrS9NvLJECvgGliv1QAIm"><span class="smart-check__item is-done" title="发函回函一致性检测 · 已核查完成" data-page-node-id="nhJ694OVGCvLvotaDwuYk2"><span class="smart-check__mark" data-page-node-id="xWWc2EbmAUFg7iKeCoQ5Jd"><svg viewBox="0 0 24 24" data-page-node-id="QmEMbHn8TGkiahTk4YDaQ2"><path d="m5 12l5 5L20 7" data-page-node-id="XtxdTo0YVSgQhkMBqgmHBG"></path></svg></span>发函回函一致性</span><span class="smart-check__item is-done" title="印章核查 · 已核查完成" data-page-node-id="gr2tnYWObYgxnNEC36SNiF"><span class="smart-check__mark" data-page-node-id="qJvPR3WjEhEXfneJ43QFTn"><svg viewBox="0 0 24 24" data-page-node-id="9QqAkQ2yRmL6FRS2FEs07j"><path d="m5 12l5 5L20 7" data-page-node-id="D7XpZRpC7qkpt9HZq7oDDt"></path></svg></span>印章核查</span><span class="smart-check__item is-done" title="手写体识别 · 已核查完成" data-page-node-id="iBVlbYG273i86XmiXFJgau"><span class="smart-check__mark" data-page-node-id="tWv59jxMrsgm9KV0KYfBss"><svg viewBox="0 0 24 24" data-page-node-id="GWSWBHRMz7KCnm7zHhm9fD"><path d="m5 12l5 5L20 7" data-page-node-id="9AwMHCPJIYPLVDxpAKDGYk"></path></svg></span>手写体识别</span></span></td>
+    <td data-page-node-id="OMSwVhz0QPQNKiJPmoMhhK"><span class="tag tag--neutral tag-help" title="待确认 —— 相符性以你在「核查事项复核」里确认的结论为准；确认后这里才显示结果" data-page-node-id="dmkotjCayzq2376H25lFst">未确认</span></td>
+    <td data-note="6" data-page-node-id="NA8yhyhF8aPLocksIHBDFm"><button class="ai-review__link" data-open="verify" data-id="whzf0010005-2" aria-label="核查事项复核：待复核（印章核查、手写体识别）" title="待复核：印章核查、手写体识别
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="0GxKlrMmfW1tB33TJETvah">
+    <span class="ai-review__box" data-page-node-id="I11ybemtBr5R6EwpSA8ZM9"><svg viewBox="0 0 24 24" data-page-node-id="FX9RkqUQYoFsBykzF9DjPg"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="tzPdY5jG3eSrX72DD7tgmw"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="dazWHZgeSC8OhV7OX5myUI">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="RhqCHw9AtCHSsOgSMnswxu">✦</span>
+  </button></td>
+    <td data-page-node-id="V7GHrVzHYdFlRyKBVPUSSE"><span class="progress-steps" title="「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档" data-page-node-id="4MgAkWNFDMbRTUy8jkDKHX">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010005-2" data-page-node-id="CMTvt45plkCxz0rkd5ak5S">
+      <span class="progress-steps__dot is-done" data-page-node-id="1MvwGJkGikrrSkggM97AHd"><svg viewBox="0 0 24 24" data-page-node-id="nWs7NVmhlch99tqjlIe4z1"><path d="m5 12l5 5L20 7" data-page-node-id="y9VmQWA2LI2uA0HkLDw2Ch"></path></svg></span>
+      <span data-page-node-id="WXaNe6wPLV2F0JZJZDyll2">快递信息</span><span class="progress-steps__arrow" data-page-node-id="wq8GvOllCdL5uDkyVOokEw">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="Teew6vGgfVptGCzVhRojJF">|</span>
+    <button class="progress-steps__step is-current" data-open="result" data-id="whzf0010005-2" data-page-node-id="AxbYyXiPDeg8ah4WL8zKSW">
+      <span class="progress-steps__dot" data-page-node-id="cAQZ1iGpMBu39zSH7s1KXa"></span>
+      <span data-page-node-id="vVwvY1QSBDvMjp1VhGiqNE">回函结果</span><span class="progress-steps__arrow" data-page-node-id="CzSaQHu2jz3IVgYL4rAOyj">›</span>
+    </button></span></td>
+    <td class="col-act" data-page-node-id="lmXfn9oUXwhHEfVe7towJu"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="orJZV3dBuEN0MUDuRtHwfl">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010005-2" data-page-node-id="M5m8RD0C5VEIRApvkp0pA3">查看</button>
+    
+  </span></td>
+  </tr>
+  
+  <tr class="" data-row="whzf0010004-1" data-page-node-id="pvuXLdslzmiH3ei876Sbj3">
+    <td data-page-node-id="KaMeDjVYkKJD7axUSbcxum"><button class="exp-btn" data-exp="whzf0010004-1" aria-expanded="false" aria-label="展开详情" data-page-node-id="9KRVH64wxO0NQZy3j5OH3V"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="EBpBStGZ4ueBW1QsmCpaHI"><path d="M9 6l6 6-6 6" data-page-node-id="bh75jvOK4PPYkekGW7lzK6"></path></svg></button></td>
+    <td data-page-node-id="0YARLjyMv7rsi2BicC4oxe" style="font-weight: 700;"><div class="cell-entity ellipsis" data-page-node-id="C2e2lLKFcNdYNqC1xFWeCY"><button class="link" data-open="view" data-id="whzf0010004-1" data-page-node-id="RZQcDdm0ML4nX4qwU8VxTR">国泰君安证券股份有限公司</button></div></td>
+    <td data-page-node-id="KwACgSMZzUu7e89Eg4KtY8"><span class="num" data-page-node-id="80lwGTITW4t7lTSPRF8pxy">whzf0010004</span></td>
+    <td data-note="4" data-page-node-id="yuFH5AyYmbPeM63A4blfaB"><span class="tag tag--low " data-page-node-id="7EKyd1roDrnSzvcckwDpZW">已核查</span></td>
+    <td data-note="5" data-page-node-id="oS9UIBD3fY9gJqJN5sR9Zs"><span class="smart-check" data-page-node-id="bnUdUAgOlBRMLu43K7PJVy"><span class="smart-check__item is-done" title="发函回函一致性检测 · 已核查完成" data-page-node-id="zBPWpFn743WT8ly8gftlRl"><span class="smart-check__mark" data-page-node-id="RStoo20dijTJfU8qKmqBXb"><svg viewBox="0 0 24 24" data-page-node-id="zcYkWLXfQqFE1iA5ZrSB6B"><path d="m5 12l5 5L20 7" data-page-node-id="0RulhWUlnm0InDhjiuI1b7"></path></svg></span>发函回函一致性</span><span class="smart-check__item is-done" title="印章核查 · 已核查完成" data-page-node-id="hpn9D32WCP8zXGKN6m2UyJ"><span class="smart-check__mark" data-page-node-id="OMC0PkANtdXUQ22lvGVQiy"><svg viewBox="0 0 24 24" data-page-node-id="l9FkDp3KNNtoCIxzxKyxvD"><path d="m5 12l5 5L20 7" data-page-node-id="ciEPjOIZ83ucMrjmnqHmrG"></path></svg></span>印章核查</span><span class="smart-check__item is-done" title="手写体识别 · 已核查完成" data-page-node-id="HN4Gh34hDKR0eSGR4dnCF0"><span class="smart-check__mark" data-page-node-id="BrsYGbCR45pt3ZsfPjoLs3"><svg viewBox="0 0 24 24" data-page-node-id="ZDOAyaKFe9azgeUqndelPJ"><path d="m5 12l5 5L20 7" data-page-node-id="UeIYVFYxirVBMOJCe2c0DC"></path></svg></span>手写体识别</span></span></td>
+    <td data-page-node-id="exJO4xD4fXjk6UGE9HKnIj"><span class="tag tag--low tag-help" title="已确认 —— 依据：印章落于「信息证明无误」区" data-page-node-id="bBzeGtDTS7x3gtzvpXIlCC">相符</span></td>
+    <td data-note="6" data-page-node-id="ZOQz8535vsgukVOOXqim3N"><button class="ai-review__link is-done" data-open="verify" data-id="whzf0010004-1" aria-label="核查事项复核：已复核" title="已复核全部核查事项
+· 发函回函一致性：已采纳
+· 印章核查：已采纳
+· 手写体识别：已采纳" data-page-node-id="CFKCAGrvaFantLp8Oz9tTR">
+    <span class="ai-review__box" data-page-node-id="AARlvNGmdjcq0qljpgVza5"><svg viewBox="0 0 24 24" data-page-node-id="FKGrhvEqrNZfGV6QasAMaV"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 12l2 2l4-4" data-page-node-id="WSdwlGptqJ3JdREGBkOIKt"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="K0PmrVsVwMpSe6JxV8pVyf">已复核</span>
+    <span class="ai-review__ai" data-page-node-id="FWTAwqrk83osiTdElIKjDD">✦</span>
+  </button></td>
+    <td data-page-node-id="Sp6mfGSwTHuXGs16qIr1dw"><span class="progress-steps" title="如需修正，点本列的步骤条打开对应步骤；改后仍保持「已完成」并记录修改人与时间" data-page-node-id="SeWAVLhfqOJbnbAsrFfN71">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010004-1" data-page-node-id="LCMRl2KlkrmSjDbRZjXWYg">
+      <span class="progress-steps__dot is-done" data-page-node-id="eBaFHyM1HY6MClZQLkJLJa"><svg viewBox="0 0 24 24" data-page-node-id="CWSoqJH1kDaBcFTsYpoylP"><path d="m5 12l5 5L20 7" data-page-node-id="abEgpM6Pou1yaZ9HVh8syQ"></path></svg></span>
+      <span data-page-node-id="MruBzDzFF8kQHZEETo7x2Z">快递信息</span><span class="progress-steps__arrow" data-page-node-id="TuHH9Hp6c6HDHXG6HPj3tI">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="aEVZAIqDfDBaFLgS5D9oCL">|</span>
+    <button class="progress-steps__step" data-open="result" data-id="whzf0010004-1" data-page-node-id="gvzd32e6ucz296g9tXhOH3">
+      <span class="progress-steps__dot is-done" data-page-node-id="sqR8ic03ncMb4RQJODDBVe"><svg viewBox="0 0 24 24" data-page-node-id="Iybw5Re5GLMPTB3cHTVdee"><path d="m5 12l5 5L20 7" data-page-node-id="aGwA7wqp6KqcQfqvIFpJdy"></path></svg></span>
+      <span data-page-node-id="UAyHEa7yrxxBTvPHYZrnlu">回函结果</span><span class="progress-steps__arrow" data-page-node-id="ZFsTCu8aQGOifPiJSw3uEK">›</span>
+    </button></span></td>
+    <td class="col-act" data-page-node-id="V6KVAtA5L0MfDeJvWySBFd"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="WdAkgCtTSw50L8G5jE1mxh">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010004-1" data-page-node-id="JnBZBpHgM17bHXqT7Rk5xG">查看</button>
+    
+  </span></td>
+  </tr>
+  </tbody>
+  </table>
+  </div>
+  <div class="pager" data-page-node-id="dL5nGnJg3HQEoAHYXj1hwD">
+    <span data-page-node-id="6zoe5dVLhzQu7HJwTTXPP8">每页 10 条</span>
+    <button data-page="1" aria-current="true" data-page-node-id="7wNOXbB5ycxqyiJBAAXhaG">1</button>
+  </div>
+  </div>
+
+  <div class="cards" data-page-node-id="v9HSBnd1BtF2eYptAIxq93"><div class="card-item" data-page-node-id="7yEApg3Y5vUOBYcQFsmG26">
+    <div class="card-item__h" data-page-node-id="EAsw5kJDlymDPOqEif74SW">
+      <button class="exp-btn" data-exp="whzf0010010-1" aria-expanded="false" data-page-node-id="zN7leNnkJquhmShTJ4H6sz"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="Dlq7wt6CRfFh8JLkhUUndq"><path d="M9 6l6 6-6 6" data-page-node-id="ZvhI6cXbOpwa46VRbO3hGI"></path></svg></button>
+      <div style="flex:1;min-width:0" data-page-node-id="5BBPbj4uO8E9rgnDyeuHco">
+        <div class="card-item__t ellipsis" data-page-node-id="9oHisyKPCgbvh7W2FbJSvy">平安证券股份有限公司</div>
+        <div class="muted num" style="font-size:12px" data-page-node-id="CJ2PkkwJ7DozJqakCaNtVo">whzf0010010</div>
+      </div>
+      <span class="tag tag--high " data-page-node-id="tYiDaavIZjRAuqftaq1HAV">核查失败</span>
+    </div>
+    <div class="card-kv" data-page-node-id="IMmQmAXCxwnaEd98sUfZNc"><span class="card-kv__k" data-page-node-id="TAnw9Z995BsE7wB9NnoODo">回函是否相符</span><span data-page-node-id="nnr8VP7g4mAqclvaFAIQwg"><span class="tag tag--neutral tag-help" title="印章区域图像模糊，未能定位落章位置 —— 可在「操作」列点「重新识别」重跑，或直接人工核对" data-page-node-id="OS8em2cNBfk5BHNM0d7ORO">识别失败</span></span></div>
+    <div class="card-kv" data-page-node-id="D8vJSvF7y8NT02153c0C99"><span class="card-kv__k" data-page-node-id="TXPdH6EZtOhKD7jx5Efrqp">核查事项复核</span><span data-page-node-id="L6lCbJyAoUj1HCYMMpXxH7"><button class="ai-review__link" data-open="verify" data-id="whzf0010010-1" aria-label="核查事项复核：待复核（印章核查、手写体识别）" title="待复核：印章核查、手写体识别
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="cdETBPgaY8EcZRVdeGwqZp">
+    <span class="ai-review__box" data-page-node-id="Dgt1VwinQYyn8oUTP5iO7J"><svg viewBox="0 0 24 24" data-page-node-id="7gEVDHEygKC9ZAo9XnpnA6"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="o6oEC6vjpg05EKBvM05PuH"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="xBNe6fY6GS2bC7hKXG1pN5">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="a9qRMILF9U3sq7yhnhmMuZ">✦</span>
+  </button></span></div>
+    <div class="card-kv" data-page-node-id="k57iDUn4BIXRieoJGwaALk"><span class="card-kv__k" data-page-node-id="6itrgvL5SoBNt3PQJ7cfZh">录入进度</span><span data-page-node-id="9Y09dpPb7wDexWxkMByegY"><span class="progress-steps" title="「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档" data-page-node-id="DhbMLp9BF5f6cC9mLzulLB">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010010-1" data-page-node-id="RG8VmDDGGxOLD7hggHRg3C">
+      <span class="progress-steps__dot is-done" data-page-node-id="bkX4Fv5fdUBGi4nKVjEeC9"><svg viewBox="0 0 24 24" data-page-node-id="08zyooczmlCREjYJSzTVuM"><path d="m5 12l5 5L20 7" data-page-node-id="BrFusVNinqHKE3A78f44HA"></path></svg></span>
+      <span data-page-node-id="uXWf8Kbb1Lfgjd8CaOBLH0">快递信息</span><span class="progress-steps__arrow" data-page-node-id="FIXwJUbxSQ0q3ZL2THrgbs">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="ESpaQ6PdyeOff6kY05g99z">|</span>
+    <button class="progress-steps__step is-current" data-open="result" data-id="whzf0010010-1" data-page-node-id="rZ92an1US5W0C1n0H7ysZF">
+      <span class="progress-steps__dot" data-page-node-id="ntkuoVlkxNua3r4tGJrbOa"></span>
+      <span data-page-node-id="7R5sh9TEEisypnkZbomkEd">回函结果</span><span class="progress-steps__arrow" data-page-node-id="oj8HF9YicabVeFHuYtfeqA">›</span>
+    </button></span></span></div>
+    <div class="card-kv" data-page-node-id="oDBlng6tRt50KGC7JcCGVU"><span class="card-kv__k" data-page-node-id="r8AIwSpxECUdXNJ1iNbNmk">操作</span><span data-page-node-id="TQdHd8cGMit8YpG1F0J7qY"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="2QwBtLoNEq1Wq8zjH3PUvM">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010010-1" data-page-node-id="CAhVr3r41PDAYQGYb3kYc1">查看</button>
+    <button class="btn btn--ghost btn--sm" data-retry="whzf0010010-1" style="color:var(--c-risk-high-text)" data-page-node-id="xGFftZUdlBu7AeEg8QcGWf"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="xpwTdw962mIdt05MKLkofO"><path d="M20 11A8 8 0 0 0 6.3 5.3L4 7.5M4 4v4h4M4 13a8 8 0 0 0 13.7 5.7L20 16.5M20 20v-4h-4" data-page-node-id="PFoI2t4UCkQig8j0UPiyRo"></path></svg>重新识别</button>
+  </span></span></div>
+    
+  </div><div class="card-item" data-page-node-id="GZENLt9wsdqVrJQdg1TxmU">
+    <div class="card-item__h" data-page-node-id="tJ8NaCXrGahbJiqYpiVgMA">
+      <button class="exp-btn" data-exp="whzf0010009-1" aria-expanded="false" data-page-node-id="cyCsZBdwG44oFJ0ZLyrniB"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="Vg5EF3UIJwb0veWOiR1a1s"><path d="M9 6l6 6-6 6" data-page-node-id="YTrYq8VJTt92r21D1HePtC"></path></svg></button>
+      <div style="flex:1;min-width:0" data-page-node-id="fe3CKktnAaXFdAQ26i2pnu">
+        <div class="card-item__t ellipsis" data-page-node-id="k9YCjeeaxgC1C98P4HiBuY">中金财富证券股份有限公司</div>
+        <div class="muted num" style="font-size:12px" data-page-node-id="bLfyQK2VHHfk6kW3UUDUQp">whzf0010009</div>
+      </div>
+      <span class="tag tag--low " data-page-node-id="EUmYsNG0XKZys4gkLVToSH">已核查</span>
+    </div>
+    <div class="card-kv" data-page-node-id="swUjJ4N5T34n2Cgd8rKJ4C"><span class="card-kv__k" data-page-node-id="QYCGxmdPimZ8HNahwCYC45">回函是否相符</span><span data-page-node-id="38sf8BvBT4h6KkBqXxIaUT"><span class="tag tag--high tag-help" title="已确认 —— 依据：印章落于「信息不符」区" data-page-node-id="vqEP5VFeBrRj0FbYAyg45u">不相符</span></span></div>
+    <div class="card-kv" data-page-node-id="9xHvt5dJYY9es1V28oO2ja"><span class="card-kv__k" data-page-node-id="gZJBAqCPJW0xUAnpP2JZ2M">核查事项复核</span><span data-page-node-id="WH7pLLFNrBF3GJ8rAoH17K"><button class="ai-review__link" data-open="verify" data-id="whzf0010009-1" aria-label="核查事项复核：待复核（印章核查）" title="待复核：印章核查
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="63nNRgjtbf8d8Uf9VSCl19">
+    <span class="ai-review__box" data-page-node-id="BOXxZI2dwAME0sVEIXAmOl"><svg viewBox="0 0 24 24" data-page-node-id="f6qjs0wEy4NRjBaRMGXDvG"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="G2LhSSfeDmqaBdaohGVHlz"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="QK9DfwVHfUH0YawJcCYMQz">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="P3EagDXufVmQTliNYvqjD0">✦</span>
+  </button></span></div>
+    <div class="card-kv" data-page-node-id="9efpD5TfSlswAxwpLCtitz"><span class="card-kv__k" data-page-node-id="313PYFdNHbj1LoamDsRFWn">录入进度</span><span data-page-node-id="TGpzFAERZkadumMn0MEBYj"><span class="progress-steps" title="「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档" data-page-node-id="jTRo5mE7Hlz7hFkCszhN1H">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010009-1" data-page-node-id="sK4xWJ02b64FJK3M4dEwYa">
+      <span class="progress-steps__dot is-done" data-page-node-id="B32xRl9BRaDXyMlkCUsqQr"><svg viewBox="0 0 24 24" data-page-node-id="b3gWZ8duuLNaam0N21kurQ"><path d="m5 12l5 5L20 7" data-page-node-id="Y7HXHC2OEmaRQQi0QAZgGR"></path></svg></span>
+      <span data-page-node-id="Y3PBCc2OeRek97tqBUG1TN">快递信息</span><span class="progress-steps__arrow" data-page-node-id="rdSqZlGp9MGXaDkSJpz1l4">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="Gk54A5OoBtKBxUYypLKyVp">|</span>
+    <button class="progress-steps__step is-current" data-open="result" data-id="whzf0010009-1" data-page-node-id="9G9nvBiMRptsHFDmh6Lxws">
+      <span class="progress-steps__dot" data-page-node-id="1wEPYmNIOI2HT2uEdBX1jN"></span>
+      <span data-page-node-id="CoatVuEcrdi8oXo3HWlC5V">回函结果</span><span class="progress-steps__arrow" data-page-node-id="ykF2Ynv6Z0pf1EFI7XBwJW">›</span>
+    </button></span></span></div>
+    <div class="card-kv" data-page-node-id="QAZJ4oIaTmKBlcYuqkfClY"><span class="card-kv__k" data-page-node-id="AuaaqNe4kMVxxrGg6AMqYS">操作</span><span data-page-node-id="XL50Fntm8PxvIwCW76W5Eg"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="8MFchCv6ecfaV3HxerBYyJ">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010009-1" data-page-node-id="tC28ABqU2EVrlr21o6KH5H">查看</button>
+    
+  </span></span></div>
+    
+  </div><div class="card-item" data-page-node-id="qB4XcMjLCRMXGL75xFmJNv">
+    <div class="card-item__h" data-page-node-id="mo2TMJL3PEXgP9GdLuuNAK">
+      <button class="exp-btn" data-exp="whzf0010008-1" aria-expanded="false" data-page-node-id="Dj79IdILnTMKVDoWcGbZgC"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="KfOwaM0DC1A7MlJbvSJ9YH"><path d="M9 6l6 6-6 6" data-page-node-id="HBtwP6JczT1vTmKoCWBpe8"></path></svg></button>
+      <div style="flex:1;min-width:0" data-page-node-id="ShB2QwwKKIqOBfcDR8SoxH">
+        <div class="card-item__t ellipsis" data-page-node-id="SeoA4spEWuFGdF57Ifk2Q7">东方财富证券股份有限公司</div>
+        <div class="muted num" style="font-size:12px" data-page-node-id="WTC4PH8OI1iXTmiuJCUljx">whzf0010008</div>
+      </div>
+      <span class="tag tag--primary " data-page-node-id="ldRpo1lnnvN72ATuJ7v0LK">正在核查</span>
+    </div>
+    <div class="card-kv" data-page-node-id="3A4TckCP6RXGWEUAGA8a4Z"><span class="card-kv__k" data-page-node-id="UEg2pzT0xv1GsQeyLgflO1">回函是否相符</span><span data-page-node-id="GmV5jBDd93feHn5RWN9Brd"><span class="tag tag--neutral tag-help" title="待确认 —— 相符性以你在「核查事项复核」里确认的结论为准；确认后这里才显示结果" data-page-node-id="fcyP5jNhQ63GamDsA9sg1m">未确认</span></span></div>
+    <div class="card-kv" data-page-node-id="Dupm8NDUIosrBUAdkzd1WK"><span class="card-kv__k" data-page-node-id="EhWfmh8vds8L6N2utmNREd">核查事项复核</span><span data-page-node-id="lsLLiItV8CfDqOedcUL8BE"><button class="ai-review__link" data-open="verify" data-id="whzf0010008-1" aria-label="核查事项复核：待复核（发函回函一致性、印章核查、手写体识别）" title="待复核：发函回函一致性、印章核查、手写体识别
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="HhbQgXrO3updZhpYVjZrwY">
+    <span class="ai-review__box" data-page-node-id="EUkHxroob1mH7nmNUBB4UE"><svg viewBox="0 0 24 24" data-page-node-id="tCzjLp5oxSvC6kddlxsyGH"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="GS785eHJ9E9pFzBQWYTGbF"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="KzKBvWqv2dR4t2vj66tati">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="fZyEE7AM4aAJa04XZ4xzLV">✦</span>
+  </button></span></div>
+    <div class="card-kv" data-page-node-id="QPo5gAiHOzknfkrR7aFr0d"><span class="card-kv__k" data-page-node-id="3YcRvIfrn7S1S9E9GvoAr5">录入进度</span><span data-page-node-id="j7Wmvnb90d7yPTVEwMoX2i"><span class="progress-steps" title="确认即完成核验留痕" data-page-node-id="tWABdPk5fE7q3SjNu3U1Rf">
+    
+    <button class="progress-steps__step is-current" data-open="doc" data-id="whzf0010008-1" data-page-node-id="8XX0RDp7CldiSMtq37CAGg">
+      <span class="progress-steps__dot" data-page-node-id="jHnMIEu0UbFpPC3DT1kjBL"></span>
+      <span data-page-node-id="Acb2tDI3uEDcZD2fe07cIT">快递信息</span><span class="progress-steps__arrow" data-page-node-id="O1CWNDp1a4AaOdEPc6VZy0">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="KzewGc2MPS3G2NVxtXLh3f">|</span>
+    <button class="progress-steps__step" data-open="result" data-id="whzf0010008-1" data-page-node-id="zzS6APj6uBhc5ossYpAwil">
+      <span class="progress-steps__dot" data-page-node-id="XIQEhDs4EHTRGP87wFUrxb"></span>
+      <span data-page-node-id="z5tOSwkExqJwhWUjM8ldaA">回函结果</span><span class="progress-steps__arrow" data-page-node-id="yLLLbnNTp3YvmPNHsnEMFE">›</span>
+    </button></span></span></div>
+    <div class="card-kv" data-page-node-id="fHvf9WISvxIi9GUo0BEqGJ"><span class="card-kv__k" data-page-node-id="pAZJIKspk3VtLW9Lff20EK">操作</span><span data-page-node-id="0MAPPFPfRz6BJNDY8nUr03"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="9HLXtVRJYispYVdaCsxyWl">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010008-1" data-page-node-id="1wBPkPLWJosW2X9hJMBmEh">查看</button>
+    
+  </span></span></div>
+    
+  </div><div class="card-item" data-page-node-id="9owcUttGBS8CIroVDRnjBi">
+    <div class="card-item__h" data-page-node-id="z3Qs0NxVjTlukhNIsSTeRd">
+      <button class="exp-btn" data-exp="whzf0010005-2" aria-expanded="false" data-page-node-id="S43fGrhavPHXIVPjwVmcQt"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="biv6zmNHdVFHmZD0NOupB1"><path d="M9 6l6 6-6 6" data-page-node-id="bovHGRFCEEzeCi1DQH0pwn"></path></svg></button>
+      <div style="flex:1;min-width:0" data-page-node-id="ZizwOGJEXcCMncLtOmBXt1">
+        <div class="card-item__t ellipsis" data-page-node-id="Yat1dOgYkDm76ayVXa1NXj">海通证券股份有限公司</div>
+        <div class="muted num" style="font-size:12px" data-page-node-id="7b5lUCnCekvNT18ddMi2mp">whzf0010005</div>
+      </div>
+      <span class="tag tag--low " data-page-node-id="MDK5OOjlb8pn0rFH9N9Wqo">已核查</span>
+    </div>
+    <div class="card-kv" data-page-node-id="HUbbSEIwxs3WKxGD8bHAQj"><span class="card-kv__k" data-page-node-id="CFPXlnxEXgB0H5X58dhVdO">回函是否相符</span><span data-page-node-id="hvmaCM9Eeuqi1F5IBWThJ2"><span class="tag tag--neutral tag-help" title="待确认 —— 相符性以你在「核查事项复核」里确认的结论为准；确认后这里才显示结果" data-page-node-id="p257IjClh3xH3fWd57Hn93">未确认</span></span></div>
+    <div class="card-kv" data-page-node-id="qOqbcjiq0znlCSTdGyNSJK"><span class="card-kv__k" data-page-node-id="FOiGgDYFgM6wnirSbNMEXZ">核查事项复核</span><span data-page-node-id="7EA7Be0asYftsDZi0qIrJb"><button class="ai-review__link" data-open="verify" data-id="whzf0010005-2" aria-label="核查事项复核：待复核（印章核查、手写体识别）" title="待复核：印章核查、手写体识别
+点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳" data-page-node-id="Vm1DJp9h9553Xd2yQCU4dK">
+    <span class="ai-review__box" data-page-node-id="cvJdVDa4VW9kXYCZ3WposO"><svg viewBox="0 0 24 24" data-page-node-id="bKw0Y6sR0CyVVZaBbEHIXu"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="GGi4ZQjRzMfYuWuA0nijNV"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="ltdeFf8ju20iXePXrwT0Mo">待复核</span>
+    <span class="ai-review__ai" data-page-node-id="c0zQNPoapZsUPgrCEAtRwo">✦</span>
+  </button></span></div>
+    <div class="card-kv" data-page-node-id="qvx1ViA5oKadyScg0zNg9T"><span class="card-kv__k" data-page-node-id="aPHFaDzOZE6w2Qad3vII8d">录入进度</span><span data-page-node-id="NNDPFQ42KJ8f3TEwJmmHaK"><span class="progress-steps" title="「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档" data-page-node-id="lmwVfDhgpAyHMvExOXN1O2">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010005-2" data-page-node-id="RAYHoMiill73zpIsUEAvit">
+      <span class="progress-steps__dot is-done" data-page-node-id="lWt1WWcXbqIZtMkZOUEtKz"><svg viewBox="0 0 24 24" data-page-node-id="EXXA2eyHFUBREhDlfndeAQ"><path d="m5 12l5 5L20 7" data-page-node-id="HQm3P9pQ140grZmw5KHU0U"></path></svg></span>
+      <span data-page-node-id="cTVwxjRYj0vvdBXVY9if5d">快递信息</span><span class="progress-steps__arrow" data-page-node-id="nEDTtlwFxO9SjMWMPUxlYH">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="LYwQiLE488wpAZ9OOsIILZ">|</span>
+    <button class="progress-steps__step is-current" data-open="result" data-id="whzf0010005-2" data-page-node-id="Zzkm1dEcsr1eoDSTjzU16t">
+      <span class="progress-steps__dot" data-page-node-id="QJfaIaN8DJHCsnL0nBhYav"></span>
+      <span data-page-node-id="MUFalQb3JvtunpklWrXX8M">回函结果</span><span class="progress-steps__arrow" data-page-node-id="0FJzcaro4vyGDa8s2vGq6a">›</span>
+    </button></span></span></div>
+    <div class="card-kv" data-page-node-id="8dhFMv0z0GMhh91GeqsvoR"><span class="card-kv__k" data-page-node-id="TC94PkzGFieD8WkWHI8SZf">操作</span><span data-page-node-id="IvkFHiEbNQzIZ57KkhWZJq"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="sHnkEpWwhnByDhCuMfJyNP">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010005-2" data-page-node-id="mCuS7J12PEzpT0seAg8Dt7">查看</button>
+    
+  </span></span></div>
+    
+  </div><div class="card-item" data-page-node-id="NMvGW9UiWoNWZvvRFbsSqE">
+    <div class="card-item__h" data-page-node-id="cE9mXKDUDFphR5WWPAqkwJ">
+      <button class="exp-btn" data-exp="whzf0010004-1" aria-expanded="false" data-page-node-id="95syO40WlMLNJSk8lGZ9fP"><svg class="ic ic--sm" viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="tGE1LNdk2swz3X0VqLiKKO"><path d="M9 6l6 6-6 6" data-page-node-id="NocdgDihXcpnfeAfSgukYU"></path></svg></button>
+      <div style="flex:1;min-width:0" data-page-node-id="yOsmeNQqaG58r8DrBtrAVO">
+        <div class="card-item__t ellipsis" data-page-node-id="k5xzxOForogfmF4bOh3FWq">国泰君安证券股份有限公司</div>
+        <div class="muted num" style="font-size:12px" data-page-node-id="hEz3A5yt3GPG6FH4AejyZe">whzf0010004</div>
+      </div>
+      <span class="tag tag--low " data-page-node-id="y68COAQEdyxIRMVbP7jTPp">已核查</span>
+    </div>
+    <div class="card-kv" data-page-node-id="2nDaFPzBXCDNiPuREOfozn"><span class="card-kv__k" data-page-node-id="OXYmGbb1OpHZ8njhsDA04m">回函是否相符</span><span data-page-node-id="jxOsMl9Qs8ySGU8CLtZztI"><span class="tag tag--low tag-help" title="已确认 —— 依据：印章落于「信息证明无误」区" data-page-node-id="8fCet7Foiq0Fh7HayKMXCP">相符</span></span></div>
+    <div class="card-kv" data-page-node-id="yk9ZfSz2PMG4nVUCqpVDAX"><span class="card-kv__k" data-page-node-id="7TEb5H3mH4mYZtciK4ZxUP">核查事项复核</span><span data-page-node-id="d77vkUE5wZOCa4aCHf4WXi"><button class="ai-review__link is-done" data-open="verify" data-id="whzf0010004-1" aria-label="核查事项复核：已复核" title="已复核全部核查事项
+· 发函回函一致性：已采纳
+· 印章核查：已采纳
+· 手写体识别：已采纳" data-page-node-id="jtbZlCyVGUw8loC45JOulW">
+    <span class="ai-review__box" data-page-node-id="hK8XMCk5MtwkEiUHgNCUgM"><svg viewBox="0 0 24 24" data-page-node-id="vgFGOVK6LFhBBkbqpG1IvI"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 12l2 2l4-4" data-page-node-id="YtoeqXKZQt5lD2jwM029CP"></path></svg></span>
+    <span class="ai-review__state" data-page-node-id="o2qzFyhrqSC0t6jXulbam2">已复核</span>
+    <span class="ai-review__ai" data-page-node-id="1c4kzj06z9uCbpApAF9o82">✦</span>
+  </button></span></div>
+    <div class="card-kv" data-page-node-id="PWWcGV8U5FBc5CxG9Wrvpd"><span class="card-kv__k" data-page-node-id="OG8BC3ScR2b3HFBClpsdrl">录入进度</span><span data-page-node-id="2ZhMEPkjcHfCitHWIHrM2C"><span class="progress-steps" title="如需修正，点本列的步骤条打开对应步骤；改后仍保持「已完成」并记录修改人与时间" data-page-node-id="0mHvuTUj3MlbLQofvg4Fnc">
+    
+    <button class="progress-steps__step" data-open="doc" data-id="whzf0010004-1" data-page-node-id="FlJbRqzjZiDnlMZAV1BssR">
+      <span class="progress-steps__dot is-done" data-page-node-id="0DuURXEUt4iaSsZ8rh4BHW"><svg viewBox="0 0 24 24" data-page-node-id="iGE0Bcy1fBJja6VAClcZFh"><path d="m5 12l5 5L20 7" data-page-node-id="w7dRlAYofkzVgI6Aoj6b14"></path></svg></span>
+      <span data-page-node-id="f54mWUiMUcBL43H98HhMsc">快递信息</span><span class="progress-steps__arrow" data-page-node-id="STUZy1feglXBYHrEJXw8uV">›</span>
+    </button>
+    <span class="progress-steps__sep" data-page-node-id="0KyaOP41r3t2bRtTPYRzrf">|</span>
+    <button class="progress-steps__step" data-open="result" data-id="whzf0010004-1" data-page-node-id="TiKaW0rUKCZHLCLt7rUlQp">
+      <span class="progress-steps__dot is-done" data-page-node-id="2jvLRNTMmHuobLVHoPklkw"><svg viewBox="0 0 24 24" data-page-node-id="4dC0mmGtHTaAyt8OY5tTCI"><path d="m5 12l5 5L20 7" data-page-node-id="iFSsFmqa5uKumuPUWTpMJh"></path></svg></span>
+      <span data-page-node-id="I8Ckm2eZT0aWzIdHy62mIO">回函结果</span><span class="progress-steps__arrow" data-page-node-id="7yweuS3oarT7XAuSVDweDd">›</span>
+    </button></span></span></div>
+    <div class="card-kv" data-page-node-id="9RGNeNYNZtbSke7qV4I0H8"><span class="card-kv__k" data-page-node-id="YUUfyWakHVzNoLxd5H8ndZ">操作</span><span data-page-node-id="VdvZpQpI0TSItcWrmLvIDD"><span style="display:inline-flex;gap:4px;align-items:center" data-page-node-id="CgLldHcIJDNRGJ88AUGHCH">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="whzf0010004-1" data-page-node-id="Ad1r5ih5t7VmE822mPfKPV">查看</button>
+    
+  </span></span></div>
+    
+  </div></div>
+  </main>
+
+<!-- 浮层挂载点 -->
+<div id="layers" data-page-node-id="E1Badyb0KsXep140bv0EAF"></div>
+
+<!-- 原型工具条 -->
+<div class="protobar" data-page-node-id="Casxb4AihspPJEXsRMe4Os">
+  <button class="proto-btn" id="btnNav" aria-haspopup="true" data-page-node-id="5BR9uFjOmORs0yZGjAawAt">场景导航 <svg class="ic ic--sm" viewBox="0 0 24 24" data-page-node-id="ElVZBYbB9Aq0FClSPX7OF5"><path d="M6 9l6 6 6-6" data-page-node-id="WYNI78RiD8cX5HrJIyMXa2"></path></svg></button>
+  <button class="proto-btn" id="btnNote" aria-pressed="false" data-page-node-id="1HeUGHlck7Az4PGS7pceR8">改动标注</button>
+</div>
+
+<script data-page-node-id="pPRQvlWGVu8C0fa66vUyZ8">
+/* ==================================================================
+   图标（内联 SVG path，取自 Tabler Icons，MIT，24×24 画布）
+   ================================================================== */
+const P = {
+  check:'m5 12l5 5L20 7',
+  x:'M18 6L6 18M6 6l12 12',
+  square:'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+  squareCheck:'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 12l2 2l4-4',
+  right:'M9 6l6 6-6 6',
+  down:'M6 9l6 6 6-6',
+  search:'M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0M21 21l-6-6',
+  reload:'M20 11A8 8 0 0 0 6.3 5.3L4 7.5M4 4v4h4M4 13a8 8 0 0 0 13.7 5.7L20 16.5M20 20v-4h-4',
+  upload:'M7 18a4 4 0 0 1 .9-7.9A6 6 0 0 1 20 9.5a3.5 3.5 0 0 1 .5 6.5M12 13v8M9 16l3-3 3 3',
+  excel:'M14 3v5h5M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM9 13l6 5M15 13l-6 5',
+  audit:'M9 5h-2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 3h6a2 2 0 0 1 2 2v2H7V5a2 2 0 0 1 2-2zM9 12h6M9 16h4',
+  shield:'M12 3l8 3v6c0 5-3.4 8.4-8 9-4.6-.6-8-4-8-9V6zM9 12l2 2 4-4',
+  pencil:'M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4',
+  form:'M4 4h16v16H4zM8 9h8M8 13h8M8 17h5',
+  car:'M3 17V7a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v10M3 17h2m12 0h2M14 8h4l3 3v6h-1M6.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  scissors:'M6 6m0 3a3 3 0 0 1 6 0a3 3 0 0 1-6 0M6 18m0-3a3 3 0 0 0 6 0a3 3 0 0 0-6 0M20 4L8.1 15.9M14 4l-5.9 11.9M20 20L8.1 8.1',
+  user:'M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0M4 20a8 8 0 0 1 16 0',
+  info:'M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 8h.01M11 12h1v4h1',
+  alert:'M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0M12 8v4M12 16h.01',
+  file:'M14 3v5h5M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z',
+  eye:'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  link:'M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5',
+  sparkle:'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z',
+  plus:'M12 5v14M5 12h14',
+  trash:'M4 7h16M10 11v6M14 11v6M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2',
+  chevronL:'M15 6l-6 6 6 6',
+  inbox:'M4 13h4l2 3h4l2-3h4M4 13l2-7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2l2 7v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z',
+}
+const ico = (k, cls='ic') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[k]}"/></svg>`
+
+/* ==================================================================
+   演示数据 —— 取自 src/mock/confirmations.ts 与 CANDIDATE_SOURCES
+   ================================================================== */
+const ENTITY_AUDITED = '山东某某科技股份有限公司'
+
+/** 智能核查事项（与 src/config/aiReview.ts 同源，顺序＝机器核查顺序） */
+const AI_ITEMS = {
+  往来函证:[{key:'consistency',label:'发函回函一致性',full:'发函回函一致性检测'},
+            {key:'seal',label:'印章核查',full:'印章核查'},
+            {key:'handwriting',label:'手写体识别',full:'手写体识别'}],
+  银行函证:[{key:'match',label:'回函是否相符',full:'回函是否相符检测'},
+            {key:'seal',label:'印章核查',full:'印章核查'}],
+}
+/** 事项状态：waiting / running / done / failed */
+
+const RECORDS = [
+  /* —— 往来函证 —— */
+  {
+    id:'whzf0010005-2', no:'whzf0010005', entity:'海通证券股份有限公司', type:'往来函证',
+    sendMethod:'邮寄发函', progress:'待填写回函结果',
+    express:{company:'顺丰速运', no:'SF7444706556947', file:'1-SJ01YF001_p2.pdf', face:'SF7444706556947.jpg'},
+    company:'顺丰速运', expressNo:'SF7444706556947', registeredAt:'2026-09-16 10:22:31',
+    sendRecordNo:'F2026-000512-2', times:2,
+    check:{status:'done', stages:{consistency:'done',seal:'done',handwriting:'done'}},
+    review:{reviewed:false, pending:['印章核查','手写体识别'], done:[{label:'发函回函一致性',state:'adopted'}]},
+    match:{state:'未确认'}, result:null,
+  },
+  {
+    id:'whzf0010004-1', no:'whzf0010004', entity:'国泰君安证券股份有限公司', type:'往来函证',
+    sendMethod:'电子邮件发函', progress:'已完成',
+    express:{company:'京东物流', no:'JD0033445566778', file:'whzf0010004_reply.pdf', face:'JD0033445566778.jpg'},
+    company:'京东物流', expressNo:'JD0033445566778', registeredAt:'2026-09-13 14:08:55',
+    sendRecordNo:'F2026-000498-1', times:1,
+    check:{status:'done', stages:{consistency:'done',seal:'done',handwriting:'done'}},
+    review:{reviewed:true, pending:[], done:[{label:'发函回函一致性',state:'adopted'},{label:'印章核查',state:'adopted'},{label:'手写体识别',state:'adopted'}]},
+    match:{state:'相符', basis:'印章落于「信息证明无误」区'},
+    result:{matched:true, sealConsistent:true, officialSeal:true, crossSeal:'yes'},
+  },
+  {
+    id:'whzf0010008-1', no:'whzf0010008', entity:'东方财富证券股份有限公司', type:'往来函证',
+    sendMethod:'邮寄发函', progress:'待确认快递信息',
+    express:{company:'顺丰速运', no:'SF7444706557102', file:'whzf0010008_reply.pdf', face:'SF7444706557102.jpg'},
+    company:'顺丰速运', expressNo:'SF7444706557102', registeredAt:'2026-09-17 09:41:02',
+    sendRecordNo:'F2026-000533-1', times:1,
+    check:{status:'running', stages:{consistency:'done',seal:'running',handwriting:'waiting'}},
+    review:{reviewed:false, pending:['发函回函一致性','印章核查','手写体识别'], done:[]},
+    match:{state:'未确认'}, result:null,
+  },
+  {
+    id:'whzf0010009-1', no:'whzf0010009', entity:'中金财富证券股份有限公司', type:'往来函证',
+    sendMethod:'跟函', progress:'待填写回函结果',
+    express:{company:null, no:null, file:'whzf0010009_reply.pdf', face:null},
+    company:null, expressNo:null, registeredAt:'2026-09-17 15:03:44',
+    sendRecordNo:'F2026-000540-1', times:1,
+    check:{status:'done', stages:{consistency:'done',seal:'done',handwriting:'done'}},
+    review:{reviewed:false, pending:['印章核查'], done:[{label:'发函回函一致性',state:'adopted'},{label:'手写体识别',state:'ignored'}]},
+    match:{state:'不相符', basis:'印章落于「信息不符」区'}, result:null,
+  },
+  {
+    id:'whzf0010010-1', no:'whzf0010010', entity:'平安证券股份有限公司', type:'往来函证',
+    sendMethod:'邮寄发函', progress:'待填写回函结果',
+    express:{company:'中国邮政', no:'EMS1122334455901', file:'whzf0010010_reply.pdf', face:'EMS1122334455901.jpg'},
+    company:'中国邮政', expressNo:'EMS1122334455901', registeredAt:'2026-09-18 08:12:09',
+    sendRecordNo:'F2026-000544-1', times:1,
+    check:{status:'failed', stages:{consistency:'done',seal:'failed',handwriting:'waiting'}},
+    review:{reviewed:false, pending:['印章核查','手写体识别'], done:[{label:'发函回函一致性',state:'adopted'}]},
+    match:{state:'识别失败', reason:'印章区域图像模糊，未能定位落章位置'}, result:null, failed:true,
+  },
+
+  /* —— 银行函证 —— */
+  {
+    id:'QS2024-031-1', no:'QS2024-031', entity:'齐商银行股份有限公司', type:'银行函证',
+    sendMethod:'电子函证', progress:'待确认快递信息',
+    express:{company:'中国邮政', no:'EMS1122334455667', file:'齐商银行股份有限公司-20240331.pdf', face:null},
+    company:'中国邮政', expressNo:'EMS1122334455667', registeredAt:'2026-09-18 11:26:40',
+    sendRecordNo:'F2026-000547-1', times:1,
+    check:{status:'running', stages:{match:'running',seal:'waiting'}},
+    review:{reviewed:false, pending:['回函是否相符','印章核查'], done:[]},
+    match:{state:'未确认'}, result:null,
+  },
+  {
+    id:'QS2024-019-1', no:'QS2024-019', entity:'中国建设银行股份有限公司', type:'银行函证',
+    sendMethod:'邮寄发函', progress:'待填写回函结果',
+    express:{company:'顺丰速运', no:'SF7444706557233', file:'QS2024-019_reply.pdf', face:'SF7444706557233.jpg'},
+    company:'顺丰速运', expressNo:'SF7444706557233', registeredAt:'2026-09-17 16:02:11',
+    sendRecordNo:'F2026-000538-1', times:1,
+    check:{status:'done', stages:{match:'done',seal:'done'}},
+    review:{reviewed:false, pending:['回函是否相符'], done:[{label:'印章核查',state:'adopted'}]},
+    match:{state:'不相符', basis:'询证事项逐项核对有 3 项差异'}, result:null,
+  },
+  {
+    id:'ZS2024-011-1', no:'ZS2024-011', entity:'招商银行股份有限公司', type:'银行函证',
+    sendMethod:'邮寄发函', progress:'已完成',
+    express:{company:'京东物流', no:'JD0033445566812', file:'ZS2024-011_reply.pdf', face:'JD0033445566812.jpg'},
+    company:'京东物流', expressNo:'JD0033445566812', registeredAt:'2026-09-15 13:47:52',
+    sendRecordNo:'F2026-000521-1', times:1,
+    check:{status:'done', stages:{match:'done',seal:'done'}},
+    review:{reviewed:true, pending:[], done:[{label:'回函是否相符',state:'adopted'},{label:'印章核查',state:'adopted'}]},
+    match:{state:'相符', basis:'询证事项逐项核对全部一致'},
+    result:{matched:true, sealConsistent:true, officialSeal:true},
+  },
+  {
+    id:'PF2024-011-1', no:'PF2024-011', entity:'上海浦东发展银行股份有限公司', type:'银行函证',
+    sendMethod:'跟函', progress:'已完成',
+    express:{company:null, no:null, file:'PF2024-011_reply.pdf', face:null},
+    company:null, expressNo:null, registeredAt:'2026-09-14 10:05:33',
+    sendRecordNo:'F2026-000513-1', times:1,
+    check:{status:'done', stages:{match:'done',seal:'done'}},
+    review:{reviewed:true, pending:[], done:[{label:'回函是否相符',state:'adopted'},{label:'印章核查',state:'adopted'}]},
+    match:{state:'相符', basis:'询证事项逐项核对全部一致'},
+    result:{matched:true, sealConsistent:true, officialSeal:true},
+  },
+]
+
+/** 函证类型规则（取自 src/services/replyRule.ts 的 TYPE_RULE） */
+const TYPE_RULE = {
+  往来函证:{needsSplit:true, twoPhase:false, detectHandwriting:true, sentFilePreview:true,
+           consistencyLabel:'发函回函一致性检测', sendMethods:['邮寄发函','跟函','电子邮件发函'],
+           entryTitle:'上传往来函证回函', matchBy:'sealRegion'},
+  银行函证:{needsSplit:false, twoPhase:true, detectHandwriting:false, sentFilePreview:false,
+           consistencyLabel:'询证事项逐项核对', sendMethods:['邮寄发函','跟函','电子邮件发函','电子函证'],
+           entryTitle:'上传银行函证回函', matchBy:'consistencyOnly'},
+}
+
+/* ==================================================================
+   小工具
+   ================================================================== */
+const $ = (s,r=document)=>r.querySelector(s)
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)]
+const esc = (s)=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))
+const tag = (text,tone='neutral',extra='')=>`<span class="tag tag--${tone} ${extra}">${esc(text)}</span>`
+const CHK_TEXT = {waiting:'未开始',running:'正在核查',done:'已核查',failed:'核查失败'}
+const CHK_TONE = {waiting:'neutral',running:'primary',done:'low',failed:'high'}
+
+/** 像素网格加载器 */
+const px = ()=>'<span class="px-grid">'+'<i></i>'.repeat(9)+'</span>'
+
+/* toast */
+let toastTimer
+function toast(msg){
+  $$('.toast').forEach(n=>n.remove())
+  const d=document.createElement('div');d.className='toast';d.textContent=msg
+  document.body.appendChild(d)
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>d.remove(),2400)
+}
+
+/* ==================================================================
+   应用状态
+   ================================================================== */
+const S = {
+  type:'往来函证',
+  filter:{keyword:'',sendMethod:'',progress:''},
+  form:{keyword:'',sendMethod:'',progress:''},
+  expanded:new Set(),
+  page:1,
+  /** 当前打开的工作区：null | {kind, id} */
+  ws:null,
+  split:null,          // 'entry' | 'assign'
+  upload:null,         // 'wanglai' | 'bank'
+  notesOn:false,
+}
+const isBank = ()=>S.type==='银行函证'
+const rowsOf = ()=>RECORDS.filter(r=>r.type===S.type)
+function filtered(){
+  const f=S.filter,k=(f.keyword||'').trim()
+  return rowsOf().filter(r=>{
+    if(k && !(r.entity.includes(k)||r.no.includes(k)||r.sendRecordNo.includes(k))) return false
+    if(f.sendMethod && r.sendMethod!==f.sendMethod) return false
+    if(f.progress && r.progress!==f.progress) return false
+    return true
+  }).sort((a,b)=>b.registeredAt.localeCompare(a.registeredAt))
+}
+
+/* ==================================================================
+   列表页
+   ================================================================== */
+function renderPage(){
+  const list=filtered(), total=rowsOf().length
+  $('#page').innerHTML = `
+  <div class="page-head">
+    <h1 class="page-head__title" data-note="1">
+      ${isBank()?'银行函证回函':'往来函证回函'}
+      <small>共 <b class="num">${total}</b> 封函证</small>
+    </h1>
+    <div class="seg" style="margin-left:auto" role="group" aria-label="函证类型">
+      <button data-type="往来函证" aria-pressed="${!isBank()}">往来函证</button>
+      <button data-type="银行函证" aria-pressed="${isBank()}">银行函证</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:16px">
+    <div class="filters">
+      <div class="f-keyword with-prefix">${ico('search')}
+        <input class="input" id="f-kw" placeholder="被询证单位 / 函证编号 / 发函记录编号" value="${esc(S.form.keyword)}"/>
+      </div>
+      <div class="f-select">
+        <select class="select" id="f-sm">
+          <option value="">发函方式</option>
+          ${TYPE_RULE[S.type].sendMethods.map(v=>`<option ${S.form.sendMethod===v?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="f-select">
+        <select class="select" id="f-pg">
+          <option value="">回函信息录入进度</option>
+          ${['待确认快递信息','待填写回函结果','已完成'].map(v=>`<option ${S.form.progress===v?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn--primary" id="f-query">${ico('search','ic ic--sm')}查询</button>
+      <button class="btn" id="f-reset">${ico('reload','ic ic--sm')}重置</button>
+    </div>
+    ${chipsHtml()}
+    <div class="actions" data-note="2">
+      <button class="btn btn--primary" id="btn-upload">${ico('upload','ic ic--sm')}${isBank()?'上传银行函证回函':'上传往来函证回函'}</button>
+      <button class="btn" id="btn-express">${ico('excel','ic ic--sm')}导入快递数据</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:4px 0" data-note="3">
+    ${list.length? tableHtml(list) : emptyHtml()}
+  </div>
+
+  <div class="cards">${list.map(cardHtml).join('')||emptyHtml()}</div>
+  `
+  bindPage()
+}
+
+function chipsHtml(){
+  const c=[]
+  if(S.filter.keyword) c.push(['keyword',`关键字：${S.filter.keyword}`])
+  if(S.filter.sendMethod) c.push(['sendMethod',`发函方式：${S.filter.sendMethod}`])
+  if(S.filter.progress) c.push(['progress',`回函信息录入进度：${S.filter.progress}`])
+  if(!c.length) return ''
+  return `<div class="chips"><span class="muted" style="font-size:13px">已选条件：</span>
+    ${c.map(([k,t])=>`<span class="chip">${esc(t)}<button data-chip="${k}" aria-label="移除">${ico('x','ic')}</button></span>`).join('')}
+    <button class="link" style="font-size:13px" id="chip-clear">清空</button></div>`
+}
+
+/** 列宽（含 32px 展开列）—— 合计 1220，1280 屏免横滚 */
+const WIDTHS=[32,176,116,108,228,116,148,176,120]
+
+function tableHtml(list){
+  /* 分组带：切点与列序一致（函证信息 / 智能核查 / 结论与人工复核 / 进度与操作） */
+  const widths=WIDTHS
+  const gi=[0,3,5,7]
+  const band=['函证信息','智能核查','结论与人工复核','进度与操作'].map((name,i)=>{
+    const from=gi[i], to=gi[i+1]??widths.length
+    const w=widths.slice(from,to).reduce((a,b)=>a+b,0)
+    return `<div style="width:${w}px">${name}</div>`
+  }).join('')
+
+  const total=widths.reduce((a,b)=>a+b,0)
+  const pages=Math.ceil(list.length/10)||1
+  const cur=Math.min(S.page,pages)
+  const view=list.slice((cur-1)*10,cur*10)
+
+  return `
+  <div class="grp-band" aria-hidden="true">${band}</div>
+  <div class="tablewrap">
+  <table class="tbl" style="min-width:${total}px">
+    <colgroup>${widths.map(w=>`<col style="width:${w}px">`).join('')}</colgroup>
+    <thead><tr>
+      <th></th>
+      <th>${isBank()?'被询证单位（银行）':'被询证单位'}</th>
+      <th>函证编号</th>
+      <th>智能核查状态</th>
+      <th>智能核查进度</th>
+      <th>回函是否相符</th>
+      <th>核查事项复核</th>
+      <th>回函信息录入进度</th>
+      <th class="col-act">操作</th>
+    </tr></thead>
+    <tbody>${view.map(rowHtml).join('')}</tbody>
+  </table>
+  </div>
+  <div class="pager">
+    <span>每页 10 条</span>
+    ${Array.from({length:pages},(_,i)=>`<button data-page="${i+1}" aria-current="${i+1===cur}">${i+1}</button>`).join('')}
+  </div>`
+}
+
+function rowHtml(r){
+  const open=S.expanded.has(r.id)
+  return `
+  <tr class="${open?'is-open':''}" data-row="${r.id}">
+    <td><button class="exp-btn" data-exp="${r.id}" aria-expanded="${open}" aria-label="${open?'收起详情':'展开详情'}">${ico('right','ic ic--sm')}</button></td>
+    <td><div class="cell-entity ellipsis"><button class="link" data-open="view" data-id="${r.id}">${esc(r.entity)}</button></div></td>
+    <td><span class="num">${r.no}</span></td>
+    <td data-note="4">${tag(CHK_TEXT[r.check.status],CHK_TONE[r.check.status],r.check.status==='running'?'tag--live':'')}</td>
+    <td data-note="5">${smartCheckHtml(r)}</td>
+    <td>${matchTag(r)}</td>
+    <td data-note="6">${reviewCell(r)}</td>
+    <td>${stepsHtml(r)}</td>
+    <td class="col-act">${actHtml(r)}</td>
+  </tr>
+  ${open?`<tr><td colspan="9" style="padding:0">${expandedHtml(r)}</td></tr>`:''}`
+}
+
+/** 智能核查进度 —— 每事项一枚状态标识（短横 / 像素网格 / 勾 / 叉） */
+function smartCheckHtml(r){
+  const items=AI_ITEMS[r.type]
+  return `<span class="smart-check">`+items.map(it=>{
+    const st=r.check.stages[it.key]||'waiting'
+    let mark=''
+    if(st==='waiting') mark='<span class="smart-check__dash"></span>'
+    else if(st==='running') mark=px()
+    else mark=`<svg viewBox="0 0 24 24"><path d="${st==='done'?P.check:P.x}"/></svg>`
+    const tip = it.full+' · '+({waiting:'尚未开始核查',running:'正在核查这一项…',done:'已核查完成',failed:'核查失败 —— 可在「操作」列点「重新识别」重跑'}[st])
+    return `<span class="smart-check__item is-${st}" title="${esc(tip)}"><span class="smart-check__mark">${mark}</span>${it.label}</span>`
+  }).join('')+`</span>`
+}
+
+function matchTag(r){
+  const m=r.match
+  const tone = m.state==='相符'?'low':m.state==='不相符'?'high':'neutral'
+  const tip = m.state==='识别失败'
+    ? `${m.reason} —— 可在「操作」列点「重新识别」重跑，或直接人工核对`
+    : (m.state==='未确认' ? '待确认 —— 相符性以你在「核查事项复核」里确认的结论为准；确认后这里才显示结果'
+      : (m.basis?`已确认 —— 依据：${m.basis}`:''))
+  return `<span class="tag tag--${tone}${tip?' tag-help':''}"${tip?` title="${esc(tip)}"`:''}>${esc(m.state)}</span>`
+}
+
+/** 核查事项复核 —— todo 勾选框 + 一个状态词（不报数） */
+function reviewCell(r){
+  const rv=r.review, done=rv.reviewed
+  const tip = done
+    ? '已复核全部核查事项\n'+rv.done.map(d=>`· ${d.label}：${d.state==='adopted'?'已采纳':'不采纳'}`).join('\n')
+    : `待复核：${rv.pending.join('、')}\n点击后逐项复核 —— 在详情里切换核查项，采纳或不采纳`
+  return `<button class="ai-review__link${done?' is-done':''}" data-open="verify" data-id="${r.id}"
+      aria-label="核查事项复核：${done?'已复核':'待复核（'+rv.pending.join('、')+'）'}" title="${esc(tip)}">
+    <span class="ai-review__box"><svg viewBox="0 0 24 24"><path d="${done?P.squareCheck:P.square}"/></svg></span>
+    <span class="ai-review__state">${done?'已复核':'待复核'}</span>
+    <span class="ai-review__ai">✦</span>
+  </button>`
+}
+
+/** 回函信息录入进度 —— 两步步骤条，步骤名可点 */
+function stepsHtml(r){
+  const expressDone = r.progress!=='待确认快递信息'
+  const resultDone  = !!r.result || r.progress==='已完成'
+  const st=[
+    {label:'快递信息',done:expressDone,current:!expressDone,kind:'doc'},
+    {label:'回函结果',done:resultDone,current:expressDone&&!resultDone,kind:'result'},
+  ]
+  return `<span class="progress-steps" title="${esc({
+    '待确认快递信息':'确认即完成核验留痕',
+    '待填写回函结果':'「核查事项复核」里采纳的值已带入表单，采纳或修改后保存即归档',
+    '已完成':'如需修正，点本列的步骤条打开对应步骤；改后仍保持「已完成」并记录修改人与时间',
+  }[r.progress])}">`+st.map((s,i)=>`
+    ${i?'<span class="progress-steps__sep">|</span>':''}
+    <button class="progress-steps__step${s.current?' is-current':''}" data-open="${s.kind}" data-id="${r.id}">
+      <span class="progress-steps__dot${s.done?' is-done':''}">${s.done?`<svg viewBox="0 0 24 24"><path d="${P.check}"/></svg>`:''}</span>
+      <span>${s.label}</span><span class="progress-steps__arrow">›</span>
+    </button>`).join('')+`</span>`
+}
+
+function actHtml(r){
+  return `<span style="display:inline-flex;gap:4px;align-items:center">
+    <button class="btn btn--ghost btn--sm" data-open="view" data-id="${r.id}">查看</button>
+    ${r.failed?`<button class="btn btn--ghost btn--sm" data-retry="${r.id}" style="color:var(--c-risk-high-text)">${ico('reload','ic ic--sm')}重新识别</button>`:''}
+  </span>`
+}
+
+/** 展开行 —— 一张「回函记录」表 */
+function expandedHtml(r){
+  const times=r.times
+  const rows = times>1 ? [
+    {seq:times-1,cur:false,sendNo:r.sendRecordNo.replace(/-2$/,'-1'),company:r.company,
+     no:r.expressNo?r.expressNo.slice(0,-4)+'6901':null,at:'2026-09-10 17:12:08',state:'相符',method:r.sendMethod},
+    {seq:times,cur:true,sendNo:r.sendRecordNo,company:r.company,no:r.expressNo,at:r.registeredAt,state:'—',method:r.sendMethod},
+  ] : [{seq:1,cur:true,sendNo:r.sendRecordNo,company:r.company,no:r.expressNo,at:r.registeredAt,state:'—',method:r.sendMethod}]
+
+  const GRID='190px minmax(150px,1.2fr) 104px minmax(132px,1fr) minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) 56px'
+  return `<div class="exp">
+    <div class="section-title" style="margin-bottom:8px">回函记录
+      ${times>1?'<span class="muted" style="font-weight:400;font-size:13px">（共 '+times+' 次，仅最新一次为最终有效）</span>':''}
+    </div>
+    <div style="overflow-x:auto">
+      <div class="exp-grid is-head" style="grid-template-columns:${GRID}">
+        <span>回函次序</span>
+        <span class="col-help" title="本次回函对应的是哪一次发函 —— 一封函证可以发多次函，每次发函一个编号。编号由发函登记时产生、回函落库时随记录带入，用来把「这次回函」对上「那次发函」。">发函记录编号</span>
+        <span>发函方式</span><span>回函快递公司</span><span>快递单号</span>
+        <span>回函数据登记时间</span>
+        <span class="col-help" title="这一次回函的相符性结论，与主表「回函是否相符」列同源。当前有效那一次不在这里重复 —— 主表那一列已经给了它。">回函情况</span>
+        <span>操作</span>
+      </div>
+      ${rows.map(h=>`<div class="exp-row ${h.cur?'is-current':'is-old'}" style="grid-template-columns:${GRID}">
+        <span style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+          <span>第 ${h.seq} 次</span>
+          ${h.cur?tag('当前有效','primary','tag--sm'):''}
+          ${times>1?`<span class="tag tag--sm" title="该函证共 ${times} 次回函，本行呈现最新一次">重新发函</span>`:''}
+        </span>
+        <span class="num ellipsis" title="${esc(h.sendNo)}">${esc(h.sendNo)}</span>
+        <span>${h.method}</span>
+        <span class="ellipsis">${esc(h.company??'—')}</span>
+        <span class="num ellipsis">${esc(h.no??'—')}</span>
+        <span class="num">${h.at}</span>
+        <span>${h.state}</span>
+        <span><button class="btn btn--ghost btn--sm" data-open="view" data-id="${r.id}">查看</button></span>
+      </div>`).join('')}
+    </div>
+  </div>`
+}
+
+function cardHtml(r){
+  const kv=(k,v)=>`<div class="card-kv"><span class="card-kv__k">${k}</span><span>${v}</span></div>`
+  const open=S.expanded.has(r.id)
+  return `<div class="card-item">
+    <div class="card-item__h">
+      <button class="exp-btn" data-exp="${r.id}" aria-expanded="${open}">${ico('right','ic ic--sm')}</button>
+      <div style="flex:1;min-width:0">
+        <div class="card-item__t ellipsis">${esc(r.entity)}</div>
+        <div class="muted num" style="font-size:12px">${r.no}</div>
+      </div>
+      ${tag(CHK_TEXT[r.check.status],CHK_TONE[r.check.status])}
+    </div>
+    ${kv('回函是否相符',matchTag(r))}
+    ${kv('核查事项复核',reviewCell(r))}
+    ${kv('录入进度',stepsHtml(r))}
+    ${kv('操作',actHtml(r))}
+    ${open?expandedHtml(r):''}
+  </div>`
+}
+
+/**
+ * 空状态插画 —— **一叠待处理的回函页**（拟物）。
+ *
+ * 语义：这里还没有回函数据。用"一叠纸"而不是通用空箱，是因为**空的是"回函"这件事**，
+ * 不是"这个列表没内容"—— 用户看到它就该明白：上传回函文件后，函证会一封封落到这里。
+ *
+ * 拟物的四个层次（越往前越"实"）：
+ * · **桌面投影** —— 椭圆淡影，让这叠纸"放在台面上"而不是贴在屏幕上；
+ * · **三层错开** —— 后两层各转 3° / -5°，露出纸的边，厚度就是这么来的；
+ * · **纸面渐变** —— 前层纯白→极淡灰，避免大片死白；后层用 `--c-fill-light` 压深一档拉开前后；
+ * · **两个业务细节** —— 右上角折角（这是函证原件，不是图标）、右下角**虚线圆 = 待盖章位**
+ *   （回函的核心动作就是盖章，留一个空位等于明说"就差这一步"）。
+ *
+ * 尺寸 96×72，比常规 16px 线性图标大 —— 空状态是全屏留白里唯一的锚点，需要撑得住。
+ */
+const EMPTY_ART = `
+<svg class="empty__art" viewBox="0 0 96 72" aria-hidden="true">
+  <defs>
+    <linearGradient id="artFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f7f9fc"/>
+    </linearGradient>
+    <linearGradient id="artMid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f2f5fa"/>
+    </linearGradient>
+  </defs>
+  <!-- 桌面投影 -->
+  <ellipse cx="48" cy="68" rx="27" ry="4" fill="rgba(20,28,45,.09)"/>
+  <!-- 后层 -->
+  <g transform="rotate(-5 62 33)">
+    <rect x="38" y="8" width="42" height="50" rx="3" fill="var(--c-fill-light)" stroke="var(--c-border-light)"/>
+  </g>
+  <!-- 中层 -->
+  <g transform="rotate(3 51 37)">
+    <rect x="28" y="12" width="46" height="50" rx="3" fill="#fbfcfe" stroke="var(--c-border-light)"/>
+  </g>
+  <!-- 前层：回函页 -->
+  <g>
+    <rect x="22" y="16" width="48" height="50" rx="3" fill="url(#artFront)" stroke="var(--c-border)" stroke-width="1.2"/>
+    <path d="M62 16h8v8z" fill="var(--c-fill-light)"/>
+    <path d="M62 16v8h8" fill="none" stroke="var(--c-border)" stroke-width="1.2" stroke-linejoin="round"/>
+    <rect x="30" y="24" width="18" height="3" rx="1.5" fill="var(--c-border)"/>
+    <rect x="30" y="32" width="32" height="2.2" rx="1.1" fill="var(--c-border-light)"/>
+    <rect x="30" y="38" width="26" height="2.2" rx="1.1" fill="var(--c-border-light)"/>
+    <rect x="30" y="44" width="30" height="2.2" rx="1.1" fill="var(--c-border-light)"/>
+    <!-- 待盖章位 -->
+    <circle cx="55" cy="53" r="6.5" fill="none" stroke="var(--c-border)" stroke-width="1.2" stroke-dasharray="3 3"/>
+  </g>
+</svg>`
+
+function emptyHtml(){
+  return `<div class="empty">
+    ${EMPTY_ART}
+    <div class="empty__title">还没有回函数据</div>
+    <div>上传${isBank()?'银行':'往来'}函证回函文件后，匹配成功的函证会自动进入本列表</div>
+    <div style="margin-top:12px"><button class="btn btn--primary" id="btn-upload-empty">${ico('upload','ic ic--sm')}${isBank()?'上传银行函证回函':'上传往来函证回函'}</button></div>
+  </div>`
+}
+
+function bindPage(){
+  $$('#page .seg button').forEach(b=>b.onclick=()=>{S.type=b.dataset.type;S.page=1;S.expanded.clear();renderPage()})
+  const kw=$('#f-kw'), sm=$('#f-sm'), pg=$('#f-pg')
+  if(kw){kw.oninput=e=>S.form.keyword=e.target.value; kw.onkeydown=e=>e.key==='Enter'&&doQuery()}
+  if(sm) sm.onchange=e=>S.form.sendMethod=e.target.value
+  if(pg) pg.onchange=e=>S.form.progress=e.target.value
+  const q=$('#f-query'); if(q) q.onclick=doQuery
+  const rs=$('#f-reset'); if(rs) rs.onclick=()=>{S.form={keyword:'',sendMethod:'',progress:''};S.filter={...S.form};S.page=1;renderPage()}
+  const cc=$('#chip-clear'); if(cc) cc.onclick=()=>{S.form={keyword:'',sendMethod:'',progress:''};S.filter={...S.form};S.page=1;renderPage()}
+  $$('#page [data-chip]').forEach(b=>b.onclick=()=>{
+    S.form[b.dataset.chip]='';S.filter={...S.form};renderPage()})
+  ;['#btn-upload','#btn-upload-empty'].forEach(s=>{const b=$(s);if(b)b.onclick=()=>openUpload()})
+  const be=$('#btn-express'); if(be) be.onclick=()=>toast('快递数据导入结果：已匹配 12 条，2 条单号未匹配')
+
+  $$('#page [data-exp]').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.exp; S.expanded.has(id)?S.expanded.delete(id):S.expanded.add(id); renderPage()})
+  $$('#page [data-open]').forEach(b=>b.onclick=()=>openWs(b.dataset.open,b.dataset.id))
+  $$('#page [data-retry]').forEach(b=>b.onclick=()=>{
+    const r=RECORDS.find(x=>x.id===b.dataset.retry)
+    r.check.status='running'; r.check.stages=Object.fromEntries(Object.keys(r.check.stages).map(k=>[k,'waiting']))
+    r.failed=false; r.match={state:'未确认'}
+    toast('已重新提交核查 —— 进度将在本行实时更新')
+    const ks=Object.keys(r.check.stages)
+    ks.forEach((k,i)=>setTimeout(()=>{
+      r.check.stages[k]= k==='seal'&&r.no==='whzf0010010' ? 'done' : 'done'
+      if(i===ks.length-1){r.check.status='done'; r.match={state:'不相符',basis:'印章落于「信息不符」区'}}
+      if(S.ws&&S.ws.id===r.id) renderWs()
+      renderPage()
+    },900*(i+1)))
+  })
+  $$('#page [data-page]').forEach(b=>b.onclick=()=>{S.page=+b.dataset.page;renderPage()})
+}
+function doQuery(){S.filter={...S.form};S.page=1;renderPage()}
+
+/* ==================================================================
+   全屏工作区（容器形态统一：标题栏 / 内容 / 底栏，三处关闭入口）
+   ================================================================== */
+const WS_TITLE={view:'查看函证',verify:'AI 智能核验',doc:'回函快递信息',result:'回函结果填写'}
+
+function openWs(kind,id){
+  S.ws={kind,id}
+  if(kind==='verify'){
+    const r=RECORDS.find(x=>x.id===id)
+    const first=(AI_ITEMS[r.type].find(it=>r.review.pending.includes(it.full))||AI_ITEMS[r.type][0]).key
+    S.ws.panel=first
+  }
+  renderWs()
+  const t=$('.fs-head__x'); if(t) t.focus()
+}
+function closeWs(){S.ws=null;renderWs();renderPage()}
+
+function renderWs(){
+  const L=$('#layers')
+  $$('.fs,.fs-mask').forEach(n=>n.remove())
+  if(!S.ws) return
+  const r=RECORDS.find(x=>x.id===S.ws.id)
+  const mask=document.createElement('div');mask.className='fs-mask';mask.onclick=closeWs
+  const box=document.createElement('div');box.className='fs';box.setAttribute('role','dialog');box.setAttribute('aria-modal','true')
+  box.innerHTML=`
+    <div class="fs-head">
+      <span class="fs-head__t">${WS_TITLE[S.ws.kind]}</span>
+      <span class="fs-head__s">${esc(r.no)} · ${esc(r.type)} · ${esc(r.entity)}</span>
+      ${S.ws.kind==='verify'?`<span style="margin-left:8px">${tag(r.review.reviewed?'✓ 已人工复核':'待核验', r.review.reviewed?'primary':'neutral')}</span>`:''}
+      <button class="fs-head__x" id="fs-x" aria-label="关闭（Esc）">${ico('x','ic')}</button>
+    </div>
+    <div class="fs-body">${wsBody()}</div>
+    <div class="fs-foot">${wsFoot()}</div>`
+  L.appendChild(mask);L.appendChild(box)
+  $('#fs-x').onclick=closeWs
+  bindWs()
+}
+
+function wsBody(){
+  const k=S.ws.kind
+  if(k==='view')   return viewBody()
+  if(k==='verify') return verifyBody()
+  if(k==='doc')    return docBody()
+  if(k==='result') return resultBody()
+  return ''
+}
+function wsFoot(){
+  const k=S.ws.kind, r=RECORDS.find(x=>x.id===S.ws.id)
+  const note=(t,ic)=>`<span class="fs-foot__note">${ico(ic,'ic ic--sm')}<span>${t}</span></span>`
+  if(k==='view')   return note('本页为只读查看；如需修改，请在列表行的「回函信息录入进度」列点开对应步骤','info')+
+    `<span class="fs-foot__btns"><button class="btn" data-close="1">关闭</button></span>`
+  if(k==='verify'){
+    const rv=r.review
+    const left = rv.reviewed
+      ? note('已复核全部核查事项','check')
+      : note(`看完依据后在这里表态 —— 采纳或不采纳都算把这一项办完　· 还剩 ${rv.pending.length} 项`,'info')
+    return left+`<span class="fs-foot__btns">
+      ${tag(rv.reviewed?'✓ 已人工核验':'待核验', rv.reviewed?'primary':'neutral')}
+      <button class="btn" data-ignore="1">不采纳识别数据</button>
+      <button class="btn btn--primary" data-adopt="1">采纳识别数据</button>
+      <button class="btn" data-close="1">关闭</button></span>`
+  }
+  if(k==='doc')    return note('确认后记录核验人与核验时间，并把 AI 核验结论带入「填写回函结果」由你采纳或修改','check')+
+    `<span class="fs-foot__btns"><button class="btn" data-close="1">取消</button><button class="btn btn--primary" data-doc-next="1">确认并进入结果填写</button></span>`
+  if(k==='result') return note('带 * 的必填项处理后方可归档；归档将记录处理人「张审计」与处理时间','info')+
+    `<span class="fs-foot__btns"><button class="btn" data-close="1">取消</button><button class="btn btn--primary" data-save="1">保存并归档</button></span>`
+  return ''
+}
+
+function bindWs(){
+  $$('[data-close]').forEach(b=>b.onclick=closeWs)
+  const ad=$('[data-adopt]')
+  if(ad) ad.onclick=()=>{
+    const r=RECORDS.find(x=>x.id===S.ws.id)
+    const it=AI_ITEMS[r.type].find(i=>i.key===S.ws.panel)
+    r.review.done=r.review.done.filter(d=>d.label!==it.full)
+    r.review.done.push({label:it.full,state:'adopted'})
+    r.review.pending=r.review.pending.filter(p=>p!==it.full)
+    if(!r.review.pending.length) r.review.reviewed=true
+    if(it.key==='seal'&&r.type==='往来函证'||it.key==='match') r.match={state:'相符',basis:r.type==='银行函证'?'询证事项逐项核对全部一致':'印章落于「信息证明无误」区'}
+    toast(`已采纳「${it.full}」的识别数据`)
+    const next=AI_ITEMS[r.type].find(i=>r.review.pending.includes(i.full))
+    if(next){S.ws.panel=next.key;renderWs()}
+    else {S.ws.panel='extra';renderWs()}
+    renderPage()
+  }
+  const ig=$('[data-ignore]')
+  if(ig) ig.onclick=()=>{
+    const r=RECORDS.find(x=>x.id===S.ws.id)
+    const it=AI_ITEMS[r.type].find(i=>i.key===S.ws.panel)
+    r.review.done=r.review.done.filter(d=>d.label!==it.full)
+    r.review.done.push({label:it.full,state:'ignored'})
+    r.review.pending=r.review.pending.filter(p=>p!==it.full)
+    if(!r.review.pending.length) r.review.reviewed=true
+    toast(`已标记不采纳「${it.full}」—— 相符性以回函结果填写页的人工判断为准`)
+    const next=AI_ITEMS[r.type].find(i=>r.review.pending.includes(i.full))
+    if(next){S.ws.panel=next.key;renderWs()} else {S.ws.panel='extra';renderWs()}
+    renderPage()
+  }
+  const dn=$('[data-doc-next]'); if(dn) dn.onclick=()=>{const id=S.ws.id;S.ws={kind:'result',id};renderWs()}
+  const sv=$('[data-save]')
+  if(sv) sv.onclick=()=>{
+    const bad=$$('.form-row.is-error').length
+    if(bad){toast('请先处理必填项：回函结果是否相符、回函盖章是否与被询证方名称一致');return}
+    const r=RECORDS.find(x=>x.id===S.ws.id)
+    r.result={matched:true,sealConsistent:true,officialSeal:true};r.progress='已完成'
+    toast('已保存并归档 —— 该函证状态更新为「已完成」')
+    closeWs()
+  }
+  $$('.tabs button').forEach(b=>b.onclick=()=>{S.ws.panel=b.dataset.panel;renderWs()})
+  $$('[data-pane-toggle]').forEach(b=>b.onclick=()=>{
+    const p=b.closest('.pv-pane'); p.classList.toggle('is-collapsed')
+    b.innerHTML=ico(p.classList.contains('is-collapsed')?'right':'down','ic ic--sm')
+  })
+  $$('.cmp-group__head [data-fold]').forEach(b=>b.onclick=()=>{
+    const g=b.closest('.cmp-group'); g.classList.toggle('is-fold')
+    const body=$('.cmp-side',g.parentNode)||null
+    $$('.cmp-side',g).forEach(s=>s.style.display=g.classList.contains('is-fold')?'none':'')
+    b.textContent=g.classList.contains('is-fold')?'展开':'收起'
+  })
+}
+
+/* ---------- 纸页占位（真实系统为 pdf.js 渲染，此处用等比占位） ---------- */
+function paper(h,opt={}){
+  const w=Math.round(h/1.414)
+  const box=opt.boxes||[]
+  return `<div class="paper" style="width:${w}px;min-height:${h}px">
+    <div class="paper__lines">
+      <b style="width:44%"></b>
+      ${'<i style="width:100%"></i>'.repeat(2)}
+      ${'<i style="width:92%"></i><i style="width:78%"></i>'.repeat(Math.max(2,Math.floor(h/70)))}
+    </div>
+    ${box.map(b=>`<div style="position:absolute;left:${b.x}%;top:${b.y}%;width:${b.w}%;height:${b.h}%;
+       border:1.5px solid ${b.c};border-radius:3px;${b.dash?'border-style:dashed;':''}
+       background:${b.bg||'transparent'}"></div>`).join('')}
+  </div>`
+}
+function pvPane(name,file,page,h,opt={}){
+  return `<div class="pv-pane${opt.collapsed?' is-collapsed':''}">
+    <div class="pv-pane__head">
+      <span class="pv-pane__name">${name}</span>
+      <span class="pv-pane__file">${esc(file)}</span>
+      <span class="muted num" style="font-size:12px">· ${page}</span>
+      ${opt.toggle?`<button data-pane-toggle="1" aria-label="展开 / 收起" style="margin-left:auto;color:var(--c-text-3)">${ico(opt.collapsed?'right':'down','ic ic--sm')}</button>`:''}
+    </div>
+    <div class="pv-pane__body">${paper(h,opt)}</div>
+  </div>`
+}
+const LEGEND_WL = `<div class="legend">
+  <span><i style="border:1.5px solid var(--c-primary)"></i>检出印章</span>
+  <span><i style="border:1.5px dashed var(--c-primary)"></i>手写区</span>
+  <span><i style="border:1.5px solid var(--c-risk-low)"></i>相符</span>
+  <span><i style="border:1.5px solid var(--c-risk-high)"></i>异常 / 不相符</span>
+  <span><i style="border:1.5px dashed var(--c-text-3);background:rgba(16,24,40,.04)"></i>未命中落章区</span>
+</div>`
+const LEGEND_BK = `<div class="legend">
+  <span><i style="border:1.5px solid var(--c-primary)"></i>检出印章</span>
+  <span><i style="border:1.5px solid var(--c-risk-low);background:var(--c-risk-low-bg)"></i>印章位于常规位置（仅作风险参考）</span>
+  <span><i style="border:1.5px solid var(--c-risk-high);background:var(--c-risk-high-bg)"></i>异常印章</span>
+  <span class="muted">相符性由逐项核对决定；不检测手写体</span>
+</div>`
+
+/* ---------- ① 查看函证 ---------- */
+function viewBody(){
+  const r=RECORDS.find(x=>x.id===S.ws.id)
+  const bank=r.type==='银行函证'
+  const info=[
+    ['被询证单位',r.entity],['函证编号',r.no],['函证类型',r.type],['发函方式',r.sendMethod],
+    ['发函记录编号',r.sendRecordNo],['快递公司',r.company??'—'],['快递运单号',r.expressNo??'—'],
+    ['回函数据登记时间',r.registeredAt],
+  ]
+  return `<div class="fs-body-inner">
+    <div class="panel" style="padding:16px;margin-bottom:16px">
+      <div class="section-title" style="margin-bottom:10px">函证基础信息</div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 24px">
+        ${info.map(([k,v])=>`<div class="info-row" style="border:0;padding:4px 0">
+          <span class="info-row__k" style="width:auto;min-width:96px">${k}</span>
+          <span class="info-row__v" style="font-weight:500">${esc(v)}</span></div>`).join('')}
+      </div>
+    </div>
+    <div class="fs-split">
+      <div style="flex:1.15;min-width:0;display:flex;flex-direction:column;min-height:0">
+        <div class="pv-stack" style="flex:1;min-height:0">
+          ${bank? pvPane('回函件',r.express.file,'本封第 1-4 页',420,{boxes:[{x:60,y:58,w:24,h:12,c:'var(--c-primary)'}]})
+                : pvPane('发函用印件','发函用印件_'+r.no+'.pdf','本封第 1-2 页',250)+pvPane('回函件',r.express.file,'本封第 1-2 页',250,{toggle:true,boxes:[{x:58,y:24,w:26,h:13,c:'var(--c-primary)'},{x:20,y:60,w:60,h:22,c:'var(--c-text-3)',dash:true,bg:'rgba(16,24,40,.03)'}]})}
+        </div>
+        ${bank?LEGEND_BK:LEGEND_WL}
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:12px" class="col-scroll">
+        <div class="panel" style="padding:16px">
+          <div class="section-title" style="margin-bottom:8px">回函结论</div>
+          ${tag(r.match.state==='相符'?'相符':r.match.state==='不相符'?'不相符':'未确认',
+                r.match.state==='相符'?'low':r.match.state==='不相符'?'high':'neutral','tag--lg')}
+          <div class="muted" style="margin-top:8px;font-size:13px">${esc(r.match.basis??'尚未经人工确认 —— 在「核查事项复核」里确认后这里才有结论')}</div>
+        </div>
+        <div class="panel" style="padding:16px">
+          <div class="section-title" style="margin-bottom:8px">附件</div>
+          ${attachCard(r.express.file)}
+          ${r.express.face?attachCard(r.express.face):''}
+        </div>
+      </div>
+    </div>
+  </div>`
+}
+const attachCard=(n)=>`<div class="attach"><span class="attach__ic">${ico('file','ic ic--sm')}</span>
+  <span class="ellipsis" style="flex:1">${esc(n)}</span><span class="muted" style="font-size:12px">PDF</span></div>`
+
+/* ---------- ② AI 智能核验 ---------- */
+function verifyBody(){
+  const r=RECORDS.find(x=>x.id===S.ws.id)
+  const bank=r.type==='银行函证'
+  const items=AI_ITEMS[r.type]
+  const tabs=[...items.map(it=>({key:it.key,label:it.short||it.full,icon:{consistency:'audit',match:'audit',seal:'shield',handwriting:'pencil'}[it.key],risk:false})),
+              {key:'extra',label:'回函结果补充',icon:'form'}]
+  const cur=S.ws.panel||tabs[0].key
+  const doneCount=items.filter(it=>r.review.done.some(d=>d.label===it.full)).length
+  return `<div class="fs-body-inner fs-split is-fill" style="height:100%">
+    <div style="flex:1.15;min-width:0;display:flex;flex-direction:column;min-height:0">
+      <div class="pv-stack" style="flex:1;min-height:0">
+        ${bank? pvPane('回函件',r.express.file,'本封第 1-4 页',430,{boxes:[{x:60,y:58,w:24,h:12,c:'var(--c-primary)'}]})
+              : pvPane('发函用印件','发函用印件_'+r.no+'.pdf','本封第 1-2 页',250,{hideToggle:true})+pvPane('回函件',r.express.file,'本封第 1-2 页',250,{toggle:true,boxes:[{x:58,y:24,w:26,h:13,c:'var(--c-primary)'}]})}
+      </div>
+      ${bank?LEGEND_BK:LEGEND_WL}
+    </div>
+    <div class="col-scroll" style="flex:1;min-width:0;padding-right:2px">
+      <div class="tabs" role="tablist">
+        ${tabs.map(t=>`<button role="tab" data-panel="${t.key}" aria-selected="${t.key===cur}">
+          ${ico(t.icon,'ic ic--sm')}<span>${t.label}</span></button>`).join('')}
+      </div>
+      <div class="tabs-progress">${tabs.map(t=>`<i class="${t.key==='extra'?'':(r.review.done.some(d=>d.label===(items.find(i=>i.key===t.key)?.full))?'is-done':'')}"></i>`).join('')}</div>
+      <div style="margin-top:12px">${panelBody(r,cur)}</div>
+    </div>
+  </div>`
+}
+
+function panelBody(r,key){
+  if(key==='extra') return extraPanel(r)
+  if(key==='consistency'||key==='match') return consistencyPanel(r)
+  if(key==='seal') return sealPanel(r)
+  if(key==='handwriting') return handwritingPanel(r)
+  return ''
+}
+function twoCol(left,right,note){
+  return `<div class="fs-split" style="gap:16px;align-items:flex-start">
+    <div style="flex:1;min-width:0">
+      <div class="section-title" style="margin-bottom:8px">✦ AI 识别结果
+        ${note?`<span class="muted" style="font-weight:400;font-size:12px">${note}</span>`:''}</div>
+      ${left}
+    </div>
+    <div style="flex:1;min-width:0">
+      <div class="section-title" style="margin-bottom:8px">${ico('user','ic ic--sm')}人工确认</div>
+      ${right}
+    </div>
+  </div>`
+}
+function consistencyPanel(r){
+  const bank=r.type==='银行函证'
+  const diff=bank&&r.no==='QS2024-019'
+  const bar=`<div class="tone-block ${diff?'tone-risk':'tone-ok'}" style="margin-bottom:12px">
+    <span style="color:${diff?'var(--c-risk-high)':'var(--c-risk-low)'}">${ico(diff?'alert':'check','ic ic--sm')}</span>
+    <div style="flex:1">${diff?'检出 <b>3 项</b>金额不符（共核对 14 项）':'14 项金额与系统内数据全部一致'}
+      <div class="muted" style="font-size:12px">${bank?'回函 × 系统内格式一 / 格式二数据逐项核对':'逐表逐格与发函底稿对照'}</div></div>
+  </div>`
+  const rows=bank?[
+    ['银行存款 · 基本户','1,200,000.00','1,200,000.00',0],
+    ['银行存款 · 一般户','486,300.55','486,300.55',0],
+    ['银行存款 · 保证金户','250,000.00','240,000.00',-10000],
+    ['银行借款 · 流动','3,000,000.00','3,150,000.00',150000],
+    ['已贴现汇票','820,000.00','800,000.00',-20000],
+  ]:[
+    ['应收账款 · A 客户','293,338.73','293,338.73',0],
+    ['应收账款 · B 客户','118,420.00','118,420.00',0],
+    ['预付账款','56,000.00','56,000.00',0],
+    ['应付账款','204,915.60','204,915.60',0],
+  ]
+  const table=(side)=>`<table class="cmp"><colgroup><col style="width:34%"><col style="width:33%"><col style="width:33%"></colgroup>
+    <thead><tr><th>项目</th><th>${side==='sent'?(bank?'系统数据':'发函件'):(bank?'AI 识别值':'回函件')}</th><th>${side==='sent'?(bank?'AI 识别值':'发函金额'):(bank?'回函值':'回函金额')}</th></tr></thead>
+    <tbody>${rows.map(([k,a,b,d])=>`<tr><td>${k}</td>
+      <td class="${d&&side==='recv'?'diff':''}">${a}</td>
+      <td class="${d&&side==='recv'?'diff':''}">${side==='sent'?a:b}</td></tr>`).join('')}</tbody></table>`
+  const left=bar+`<div class="cmp-group">
+    <div class="cmp-group__head"><span style="font-weight:600">${bank?'询证事项明细':'往来科目余额表'}</span>
+      <span class="muted" style="font-size:12px">${diff?'共 5 项 · 3 项存在差异':'全部一致'}</span>
+      <button class="btn btn--ghost btn--sm" style="margin-left:auto" data-fold="1">收起</button></div>
+    <div class="cmp-side"><div class="cmp-side__t">${bank?'系统内数据':'发函文件识别结果'}</div>${table('sent')}</div>
+    <div class="cmp-side"><div class="cmp-side__t">${bank?'回函文件识别结果':'回函文件识别结果'}</div>${table('recv')}</div>
+  </div>`
+  const right=`
+    ${formRow('函证结果是否相符',`<div class="radio-row">
+      <label class="radio"><input type="radio" name="m1" ${!diff?'checked':''}>相符</label>
+      <label class="radio"><input type="radio" name="m1" ${diff?'checked':''}>不相符</label></div>`,
+      '逐项核对无误后确认相符性；有差异则写明不相符处')}
+    ${formRow('回函结果不相符处的描述',`<textarea class="textarea" rows="3" placeholder="差在哪、差多少">${diff?'银行存款保证金户少列 10,000.00 元；银行借款多列 150,000.00 元；已贴现汇票少列 20,000.00 元。':''}</textarea>`,
+      '确认不相符时必写',diff)}
+    ${formRow('差异调节表',`<button class="btn btn--sm">${ico('upload','ic ic--sm')}上传附件（支持 PDF / Excel）</button>`)}`
+  return twoCol(left,right,bank?'回函 × 系统内询证事项逐项核对':'逐表逐格与发函底稿对照')
+}
+function sealPanel(r){
+  const bank=r.type==='银行函证'
+  const left=`
+    <div class="tone-block tone-ok" style="margin-bottom:12px">
+      <span style="color:var(--c-risk-low)">${ico('check','ic ic--sm')}</span>
+      <div style="flex:1">检出 1 枚印章，名称与被询证单位一致，落于常规位置
+        <div class="muted" style="font-size:12px">依据：印章名称「${esc(r.entity)}」</div></div>
+    </div>
+    <div>${infoRow('是否盖章','是',{tone:'ok'})}
+      ${infoRow('印章数量','1 枚')}
+      ${bank?'':infoRow('骑缝章','有（2 处）',{tone:'ok'})}
+      ${infoRow('印章类型','公章')}
+      ${infoRow('印章名称',r.entity)}
+      ${infoRow('与被询证单位一致','一致',{tone:'ok'})}
+      ${bank?'':infoRow('落章区域','信息证明无误区',{tone:'ok'})}</div>`
+  const right=`
+    ${formRow('函证结果是否相符',`<div class="radio-row">
+      <label class="radio"><input type="radio" name="s1" checked>相符</label>
+      <label class="radio"><input type="radio" name="s1">不相符</label></div>`)}
+    ${formRow('回函盖章是否与被询证方名称一致',`<div class="radio-row">
+      <label class="radio"><input type="radio" name="s2" checked>是</label>
+      <label class="radio"><input type="radio" name="s2">否</label></div>`)}
+    ${formRow('盖章不一致处原因描述',`<textarea class="textarea" rows="2" placeholder="名称不一致时必写"></textarea>`,'名称不一致时必写')}
+    ${formRow('是否为公章',`<div class="radio-row">
+      <label class="radio"><input type="radio" name="s3" checked>是</label>
+      <label class="radio"><input type="radio" name="s3">否（财务章等其他印章）</label></div>`)}
+    ${bank?'':formRow('是否有骑缝章',`<div class="radio-row">
+      <label class="radio"><input type="radio" name="s4" checked>是</label>
+      <label class="radio"><input type="radio" name="s4">否</label>
+      <label class="radio"><input type="radio" name="s4">不适用（单页回函）</label></div>`,'单页回函选择「不适用」')}`
+  return twoCol(left,right)
+}
+function handwritingPanel(r){
+  const left=`
+    <div class="tone-block tone-neutral" style="margin-bottom:12px">
+      <span style="color:var(--c-text-3)">${ico('info','ic ic--sm')}</span>
+      <div style="flex:1">检出 1 处手写内容，已转录为文本
+        <div class="muted" style="font-size:12px">手写区位于第 2 页中部</div></div>
+    </div>
+    <div class="panel" style="padding:14px;box-shadow:none;background:var(--c-ai-bg)">
+      <div style="font-size:13px;line-height:1.9">「第 3 项金额有误，应为 293,338.73 元，系我方系统录入错误，已更正。」</div>
+      <div class="muted" style="font-size:12px;margin-top:8px">✦ AI 转录　·　需人工确认后方可生效</div>
+    </div>`
+  const right=`
+    ${formRow('是否采纳该手写内容',`<div class="radio-row">
+      <label class="radio"><input type="radio" name="h1" checked>采纳</label>
+      <label class="radio"><input type="radio" name="h1">不采纳</label></div>`)}
+    ${formRow('人工校正后的文本',`<textarea class="textarea" rows="4">第 3 项金额有误，应为 293,338.73 元，系我方系统录入错误，已更正。</textarea>`)}`
+  return twoCol(left,right)
+}
+function extraPanel(r){
+  const rv=r.review
+  const alert = rv.pending.length
+    ? `<div class="tone-block tone-primary" style="margin-bottom:12px"><span style="color:var(--c-primary)">${ico('info','ic ic--sm')}</span>
+        <div style="flex:1">还剩 <b>${rv.pending.length}</b> 项未完成（在前几个页签里办）：${esc(rv.pending.join('、'))}</div></div>`
+    : `<div class="tone-block tone-ok" style="margin-bottom:12px"><span style="color:var(--c-risk-low)">${ico('check','ic ic--sm')}</span>
+        <div style="flex:1">全部事项已完成 —— 补完本页附件与底稿指引即可归档</div></div>`
+  return `${alert}
+    <div class="panel" style="padding:16px;margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:4px">附件</div>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">与「回函结果填写」页是同一份数据，两处都能传</div>
+      ${formRow('替代性测试文件',`<button class="btn btn--sm">${ico('upload','ic ic--sm')}上传附件（JPG / JPEG / PDF，可多附件）</button>`)}
+      ${formRow('差异调节表',`<button class="btn btn--sm">${ico('upload','ic ic--sm')}上传附件（支持 PDF / Excel）</button>`)}
+    </div>
+    <div class="panel" style="padding:16px">
+      <div class="section-title" style="margin-bottom:10px">拟执行的进一步核查程序及底稿指引</div>
+      <textarea class="textarea" rows="4" placeholder="写清准备执行哪些程序、相应底稿怎么索引"></textarea>
+    </div>`
+}
+function infoRow(k,v,opt={}){
+  return `<div class="info-row"><span class="info-row__k">${k}</span>
+    <span class="info-row__v ${opt.tone?'is-'+opt.tone:''}">${esc(v)}</span>
+    ${opt.hint?`<span class="info-row__hint">${opt.hint}</span>`:''}</div>`
+}
+function formRow(k,ctl,hint,err){
+  return `<div class="form-row${err?' is-error':''}">
+    <div class="form-row__k"><span class="form-row__req">*</span>${k}</div>
+    ${ctl}${hint?`<div class="form-row__hint">${hint}</div>`:''}</div>`
+}
+
+/* ---------- ③ 回函快递信息 ---------- */
+function docBody(){
+  const r=RECORDS.find(x=>x.id===S.ws.id)
+  const hasFace=!!r.express.face
+  const F=[
+    ['回函文件',r.express.file,false],
+    ['快递面单',r.express.face??'未识别',!hasFace],
+    ['快递公司',r.company??'',!r.company],
+    ['快递运单号',r.expressNo??'',!r.expressNo],
+    ['发件人姓名','陈静',false],
+    ['发件人联系电话','13800000005',false],
+    ['发件地址','广东省广州市黄埔区腾飞一街 2 号 618 室',false],
+    ['收件人姓名','王海涛',false],
+    ['收件人联系电话','021-58881234',false],
+    ['收件人地址','上海市浦东新区世纪大道 100 号环球金融中心 58 层',false],
+    ['寄件时间（下单时间）','2026-09-12 10:22:31',false],
+    ['签收时间（回函时间）','2026-09-14 09:41:02',false],
+  ]
+  const miss=F.filter(f=>f[2]).length
+  const left=`<div class="panel" style="padding:14px;height:100%">
+      <div class="section-title" style="margin-bottom:4px">回函快递面单
+        <span class="muted" style="font-weight:400;font-size:12px">${hasFace?'仅展示面单页':'未识别到面单'}</span></div>
+      <div style="background:var(--c-preview-bg);border-radius:10px;padding:14px;margin-top:10px;min-height:420px;display:flex;align-items:center;justify-content:center">
+        ${hasFace?paper(360,{boxes:[]}):`<div style="text-align:center;color:var(--c-text-3)">
+          ${ico('car','ic')}<div style="margin-top:8px;font-size:13px">未识别到快递面单</div>
+          <div style="font-size:12px;margin-top:6px;max-width:280px">面单随回函一并寄回、由识别阶段读出；银行函证回函由银行自行出具，通常不含快递面单</div></div>`}
+      </div>
+    </div>`
+  const right=`<div>
+      <div class="section-title" style="margin-bottom:4px">回函快递信息
+        <span class="muted" style="font-weight:400;font-size:12px">请核对下方信息；识别不到的项需手工填写</span></div>
+      <div style="margin:12px 0">${attachCard(r.express.file).replace('</div>','<button class="btn btn--ghost btn--sm">替换</button></div>')}
+        ${attachCard(r.express.face??'未识别').replace('</div>','<button class="btn btn--ghost btn--sm">替换</button></div>')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">
+        ${F.map(([k,v,err])=>`<div class="form-row${err?' is-error':''}">
+          <div class="form-row__k"><span class="form-row__req">*</span>${k}</div>
+          <input class="input" value="${esc(v)}" placeholder="${err?'需人工填写':''}"/>
+          ${err?'<div class="form-row__hint">需人工填写</div>':''}
+        </div>`).join('')}
+      </div>
+    </div>`
+  S._docMiss=miss
+  return `<div class="fs-body-inner"><div class="fs-split" style="align-items:flex-start">
+    <div style="flex:0 0 460px">${left}</div>
+    <div class="col-scroll" style="flex:1;min-width:0">${right}</div>
+  </div></div>`
+}
+
+/* ---------- ④ 回函结果填写 ---------- */
+function resultBody(){
+  const r=RECORDS.find(x=>x.id===S.ws.id)
+  const bank=r.type==='银行函证'
+  const ai=[
+    {tone:r.match.state==='不相符'?'risk':'ok',text:r.match.state==='不相符'?'回函结果不符':'回函结果相符',
+     basis:bank?'回函与系统内询证事项逐项核对有 3 项差异':'印章落于「信息证明无误」区'},
+    {tone:'ok',text:'印章与被询证单位一致',basis:`印章名称「${esc(r.entity)}」`},
+    {tone:'ok',text:'不为财务章',basis:'检出印章类型为公章'},
+  ]
+  if(!bank) ai.push({tone:'ok',text:'有骑缝章（2 处）',basis:'跨页处检出骑缝章'})
+  if(!bank) ai.push({tone:'risk',text:'不相符手写内容识别',basis:'“第 3 项金额有误，应为 293,338.73 元…”'})
+
+  const aiBlock=ai.map(a=>`<div class="tone-block ${a.tone==='ok'?'tone-ok':'tone-risk'}" style="margin-bottom:8px">
+      <span style="color:${a.tone==='ok'?'var(--c-risk-low)':'var(--c-risk-high)'}">${ico(a.tone==='ok'?'check':'alert','ic ic--sm')}</span>
+      <div style="flex:1"><b style="margin-right:6px">${a.text}</b><span class="muted">依据：${esc(a.basis)}</span></div>
+      <button class="btn btn--ghost btn--sm">采纳</button></div>`).join('')
+
+  const left=`<div class="panel" style="padding:14px;height:100%;display:flex;flex-direction:column">
+      <div class="section-title" style="margin-bottom:10px">回函函证</div>
+      <div style="flex:1;min-height:0;overflow:auto;background:var(--c-preview-bg);border-radius:10px;padding:14px;display:flex;align-items:center;justify-content:center">
+        ${paper(430,{boxes:[{x:58,y:26,w:26,h:13,c:'var(--c-primary)'}]})}
+      </div>
+      ${bank?LEGEND_BK:LEGEND_WL}
+    </div>`
+
+  const right=`
+    <div class="panel" style="padding:16px;margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:4px">✦ AI 核验结论
+        <span class="muted" style="font-weight:400;font-size:12px">默认不填入表单，采纳后仍可修改</span></div>
+      <div style="margin:10px 0 12px">${aiBlock}</div>
+      <div class="muted" style="font-size:12px">以上结论可逐条采纳，也可
+        <button class="link" style="font-size:12px">一键采纳所有</button></div>
+    </div>
+    <div class="panel" style="padding:16px;margin-bottom:12px">
+      <div class="section-title" style="margin-bottom:8px">函证结果</div>
+      ${formRow('函证结果是否相符',`<div class="radio-row">
+        <label class="radio"><input type="radio" name="r1" ${r.match.state!=='不相符'?'checked':''}>相符</label>
+        <label class="radio"><input type="radio" name="r1" ${r.match.state==='不相符'?'checked':''}>不相符</label></div>`,
+        'ⓘ 建议值见上方 AI 核验结论，采纳后仍可修改')}
+      ${formRow('回函结果不相符处的描述',`<textarea class="textarea" rows="3" placeholder="${bank?'请描述不符项目及差异缘由，可参考上方「询证事项逐项核对」结果':'请描述不符项目及差异缘由，可由上方「手写体识别」一键带入'}"></textarea>`)}
+      ${formRow('差异调节表',`<button class="btn btn--sm">${ico('upload','ic ic--sm')}上传附件（支持 PDF / Excel）</button>`)}
+      ${formRow('回函盖章是否与被询证方名称一致',`<div class="radio-row">
+        <label class="radio"><input type="radio" name="r2" checked>是</label>
+        <label class="radio"><input type="radio" name="r2">否</label></div>`)}
+      ${formRow('是否为公章',`<div class="radio-row">
+        <label class="radio"><input type="radio" name="r3" checked>是</label>
+        <label class="radio"><input type="radio" name="r3">否（财务章等其他印章）</label></div>`)}
+      ${bank?'':formRow('是否有骑缝章',`<div class="radio-row">
+        <label class="radio"><input type="radio" name="r4" checked>是</label>
+        <label class="radio"><input type="radio" name="r4">否</label>
+        <label class="radio"><input type="radio" name="r4">不适用（单页回函）</label></div>`,'单页回函选择「不适用」')}
+      ${formRow('盖章不一致处原因描述',`<textarea class="textarea" rows="2"></textarea>`)}
+      ${formRow('替代性测试文件',`<button class="btn btn--sm">${ico('upload','ic ic--sm')}上传附件（JPG / JPEG / PDF，可多附件）</button>`)}
+      ${formRow('拟执行的进一步核查程序及底稿指引',`<textarea class="textarea" rows="3" placeholder="例：差异科目逐笔追至明细账与出入库单并留存复印件（底稿索引 D-3-2）"></textarea>`)}
+    </div>
+    ${bank?bankItemsPanel(r):wlItemsPanel(r)}`
+
+  return `<div class="fs-body-inner fs-split is-fill" style="height:100%">
+    <div style="flex:1.15;min-width:0;display:flex;flex-direction:column;min-height:0">${left}</div>
+    <div class="col-scroll" style="flex:1;min-width:0">${right}</div>
+  </div>`
+}
+function bankItemsPanel(r){
+  const rows=[
+    ['基本户 3201****8821','1,200,000.00','1,200,000.00','0.00','相符'],
+    ['一般户 3201****7743','486,300.55','486,300.55','0.00','相符'],
+    ['保证金户 3201****0091','250,000.00','240,000.00','-10,000.00','不符'],
+    ['流动借款 LN-2024-018','3,000,000.00','3,150,000.00','150,000.00','不符'],
+    ['已贴现汇票 BP-0092','820,000.00','800,000.00','-20,000.00','不符'],
+  ]
+  return `<div class="panel" style="padding:16px">
+    <div class="section-title" style="margin-bottom:4px">询证事项逐项核对
+      <button class="btn btn--ghost btn--sm" style="margin-left:auto">${ico('plus','ic ic--sm')}新增询证事项</button></div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">按标准《银行询证函》固定询证项核对，已自动带入回函识别结果</div>
+    <div class="tone-block tone-risk" style="margin-bottom:12px"><span style="color:var(--c-risk-high)">${ico('alert','ic ic--sm')}</span>
+      <div style="flex:1">询证事项存在 <b>3 项</b>差异，核实后请填写「回函结果不相符处的描述」</div></div>
+    <div class="cmp-group">
+      <div class="cmp-group__head"><span style="font-weight:600">1 · 银行存款</span>
+        <span class="muted" style="font-size:12px">3 笔 · 1 项存在差异</span>
+        <button class="btn btn--ghost btn--sm" style="margin-left:auto" data-fold="1">收起</button></div>
+      <div class="cmp-side"><table class="cmp">
+        <colgroup><col style="width:26%"><col style="width:18%"><col style="width:18%"><col style="width:18%"><col style="width:10%"><col style="width:10%"></colgroup>
+        <thead><tr><th>账户</th><th>系统数据</th><th>AI 识别值</th><th>回函值</th><th>差异</th><th>结论</th></tr></thead>
+        <tbody>${rows.map(([a,b,c,d,e,f])=>`<tr><td>${a}</td><td>${b}</td><td>${c}</td>
+          <td><input class="input" style="height:24px;font-size:12px;padding:0 6px" value="${c}"/></td>
+          <td class="${e!=='0.00'?'diff':''}">${e}</td><td>${e!=='0.00'?'<span style="color:var(--c-risk-high-text);font-weight:600">不符</span>':'相符'}</td></tr>`).join('')}</tbody></table></div>
+    </div>
+  </div>`
+}
+function wlItemsPanel(r){
+  return `<div class="panel" style="padding:16px">
+    <div class="section-title" style="margin-bottom:4px">科目余额分录
+      <button class="btn btn--ghost btn--sm" style="margin-left:auto">${ico('plus','ic ic--sm')}新增分录</button></div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">已自动带入回函识别的差异科目</div>
+    <div class="cmp-group"><div class="cmp-side"><table class="cmp">
+      <colgroup><col style="width:26%"><col style="width:22%"><col style="width:18%"><col style="width:18%"><col style="width:16%"></colgroup>
+      <thead><tr><th>截止日期 / 所属期间</th><th>科目</th><th>询证金额</th><th>科目金额（元）</th><th>差异</th></tr></thead>
+      <tbody>
+        <tr><td>2024-06-30</td><td>应收账款 · A 客户</td><td>293,338.73</td>
+          <td><input class="input" style="height:24px;font-size:12px;padding:0 6px" value="293,338.73"/></td><td class="muted">0.00</td></tr>
+        <tr><td>2024-06-30</td><td>预付账款</td><td>56,000.00</td>
+          <td><input class="input" style="height:24px;font-size:12px;padding:0 6px" value="52,000.00"/></td><td class="diff">-4,000.00</td></tr>
+      </tbody></table></div></div>
+  </div>`
+}
+
+/* ==================================================================
+   上传弹窗 + 回函归属（页级手动切分）
+   ================================================================== */
+function openUpload(){S.upload=S.type;renderUpload()}
+function closeUpload(){S.upload=null;$('.dlg')?.remove()}
+
+function renderUpload(){
+  $('.dlg')?.remove()
+  if(!S.upload) return
+  const bank=S.upload==='银行函证'
+  const d=document.createElement('div');d.className='dlg'
+  d.innerHTML=`
+    <div class="dlg__mask"></div>
+    <div class="dlg__box" role="dialog" aria-modal="true" aria-label="${bank?'上传银行函证回函':'上传往来函证回函'}">
+      <div class="dlg__head">${bank?'上传银行函证回函':'上传往来函证回函'}</div>
+      <div class="dlg__body">
+        ${bank?'':
+        `<div class="section-title" style="margin-bottom:10px">最后页是否快递面单</div>
+         <div class="radio-row" style="margin-bottom:14px">
+           <label class="radio"><input type="radio" name="fs" checked>是</label>
+           <label class="radio"><input type="radio" name="fs">否</label></div>`}
+        <div class="dropzone">${ico('upload','ic')}<div>拖拽文件到此处，或<span class="link">点击选择</span></div>
+          <div style="font-size:12px;margin-top:4px">支持 PDF，可多选</div></div>
+        ${bank?`<div class="tone-block tone-ai" style="margin-top:12px"><span style="color:var(--c-primary)">✦</span>
+          <div style="flex:1">也可以先让系统认一遍：切分 · 归属 · 快递单号一次给出，你只需核对</div></div>`:''}
+      </div>
+      <div class="dlg__foot">
+        <span class="muted" style="font-size:12px">${bank?'下一步：切分并指定归属':'下一步：核对切分与归属'}</span>
+        <button class="btn" data-u-cancel="1">取消</button>
+        ${bank?`<button class="btn" data-u-demo="1">${ico('sparkle','ic ic--sm')}智能识别</button>`:''}
+        <button class="btn" data-u-demo="1">${ico('sparkle','ic ic--sm')}用演示数据体验</button>
+        <button class="btn btn--primary" data-u-next="1">下一步</button>
+      </div>
+    </div>`
+  $('#layers').appendChild(d)
+  $('[data-u-cancel]',d).onclick=closeUpload
+  $('[data-u-next]',d).onclick=()=>{closeUpload();openAssign()}
+  $$('[data-u-demo]',d).forEach(b=>b.onclick=()=>{closeUpload();openAssign(true)})
+  $('.dlg__mask',d).onclick=closeUpload
+}
+
+/* ---------- 回函归属 ---------- */
+const SEGS_INIT = [
+  {no:'1',from:1,to:4,pkg:1,owner:'待指定',ownerSub:null,exp:null},
+]
+function openAssign(smart){
+  S.split={smart:!!smart, cuts:[4,8], segs:null, railOpen:isBank()}
+  buildSegs(smart)
+  renderAssign()
+}
+function buildSegs(smart){
+  const bank=isBank()
+  if(bank){
+    if(smart) S.split.segs=[
+      {no:'1',from:1,to:4,pkg:1,owner:'齐商银行股份有限公司',ownerSub:'QS2024-031',exp:'—',expState:'none'},
+      {no:'2',from:5,to:8,pkg:2,owner:'齐商银行股份有限公司',ownerSub:'QS2024-018',exp:'—',expState:'none'},
+      {no:'3',from:9,to:9,pkg:2,owner:'快递面单（本文件共用）',ownerSub:null,exp:'SF7444706557233',expState:'ok'},
+    ]
+    else S.split.segs=[{no:'1',from:1,to:11,pkg:1,owner:'待指定',ownerSub:null,exp:null,expState:'none'}]
+  }else{
+    S.split.segs=[
+      {no:'1',from:1,to:4,pkg:1,owner:'海通证券股份有限公司',ownerSub:'whzf0010005',exp:'SF7444706556901',expState:'ok'},
+      {no:'2',from:5,to:8,pkg:2,owner:'东方财富证券股份有限公司',ownerSub:'whzf0010008',exp:'SF7444706557102',expState:'bad'},
+      {no:'3',from:9,to:9,pkg:2,owner:'快递面单（本文件共用）',ownerSub:null,exp:'未识别到',expState:'warn'},
+    ]
+  }
+}
+function closeAssign(){S.split=null;$$('.fs,.fs-mask').forEach(n=>n.remove());renderPage()}
+
+function renderAssign(){
+  if(!S.split) return
+  $$('.fs,.fs-mask').forEach(n=>n.remove())
+  const bank=isBank(), sp=S.split, segs=sp.segs
+  const assigned=segs.filter(s=>s.owner!=='待指定').length
+  const box=document.createElement('div');box.className='fs';box.setAttribute('role','dialog')
+  box.innerHTML=`
+    <div class="fs-head">
+      <span class="fs-head__t">回函归属</span>
+      <span class="fs-head__s">${bank?'银行函证':'往来函证'} · ${bank?'齐商银行回函件_11页.pdf':'往来回函拼接件_9页.pdf'} · 共 ${bank?11:9} 页</span>
+      <button class="fs-head__x" id="as-x" aria-label="放弃本次上传（Esc）">${ico('x','ic')}</button>
+    </div>
+    <div class="fs-body"><div class="fs-body-inner">
+      ${bank?`<div class="tone-block ${sp.smart?'tone-ai':'tone-neutral'}" style="margin-bottom:12px">
+        <span style="color:var(--c-primary)">${sp.smart?'✦':ico('info','ic ic--sm')}</span>
+        <div style="flex:1">${sp.smart
+          ?'✦ 智能识别已应用 —— 已切好 2 封函证 + 1 段快递面单（2 个包裹），归属与快递单号已带入，请逐段确认；识别结果同样可以改'
+          :'当前为<b>手动切分</b>（初稿：整份一段）—— 也可由系统先认一遍：切分 · 归属 · 快递单号'}
+        </div>
+        ${sp.smart?'':`<button class="btn btn--sm" data-smart="1">${ico('sparkle','ic ic--sm')}智能识别</button>`}
+      </div>`:''}
+      <div class="assign-pane">
+        <div class="board">${boardHtml(bank)}</div>
+        <div class="right-rail">
+          <div class="rail-section">
+            <div class="rail-section__head">拆分方式 <span class="count">共 ${bank?11:9} 页</span>
+              <button data-rail-fold="1" style="margin-left:auto;color:var(--c-text-3)" aria-label="折叠">${ico(sp.railOpen?'down':'right','ic ic--sm')}</button></div>
+            ${sp.railOpen?`<div class="rail-section__body">
+              <label class="radio" style="display:flex;padding:6px 0"><input type="radio" name="sp" checked><span style="margin-left:8px">按固定页数拆分</span>
+                <input class="input" style="width:64px;height:26px;margin-left:auto" value="4"><span style="margin-left:6px;align-self:center">页</span></label>
+              <label class="radio" style="display:flex;padding:6px 0"><input type="radio" name="sp"><span style="margin-left:8px">按自定义范围拆分</span></label>
+              <input class="input" style="height:28px;margin:4px 0 8px" placeholder="如：1-4, 5-8, 9-11"/>
+              <label class="radio" style="display:flex;padding:6px 0"><input type="radio" name="sp"><span style="margin-left:8px">按文档数量均分</span>
+                <input class="input" style="width:64px;height:26px;margin-left:auto" value="3"><span style="margin-left:6px;align-self:center">段</span></label>
+              <button class="btn btn--primary btn--sm" style="width:100%;margin-top:10px" data-split-go="1">按此方式切分</button>
+            </div>`:''}
+          </div>
+          <div class="rail-section">
+            <div class="rail-section__head">切分结果 <span class="count">共 ${segs.length} 段${segs.some(s=>s.owner==='快递面单（本文件共用）')?' · 含 1 段快递面单':''}</span></div>
+            <div class="rail-section__body">
+              ${segs.map(s=>segRow(s,bank)).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="fs-foot">
+      <span class="fs-foot__note">共 ${segs.length} 段 · 已指定归属 ${assigned}/${segs.length}
+        ${assigned<segs.length?`　· 还有 ${segs.length-assigned} 段为「待指定」，确定后这些段不会写入回函列表`:''}</span>
+      <span class="fs-foot__btns"><button class="btn btn--primary" data-assign-ok="1">确定</button></span>
+    </div>`
+  $('#layers').appendChild(box)
+  $('#as-x').onclick=closeAssign
+  $$('[data-cut]',box).forEach(b=>b.onclick=()=>{
+    const i=+b.dataset.cut
+    S.split.cuts.includes(i)?S.split.cuts=S.split.cuts.filter(c=>c!==i):S.split.cuts.push(i)
+    S.split.cuts.sort((a,b)=>a-b); rebuildFromCuts(); renderAssign()
+  })
+  $$('[data-rail-fold]',box).forEach(b=>b.onclick=()=>{S.split.railOpen=!S.split.railOpen;renderAssign()})
+  $$('[data-split-go]',box).forEach(b=>b.onclick=()=>{toast('已按固定页数切分为 3 段');renderAssign()})
+  $$('[data-smart]',box).forEach(b=>b.onclick=()=>{S.split.smart=true;buildSegs(true);renderAssign()})
+  $$('[data-assign-ok]',box).forEach(b=>b.onclick=()=>{
+    closeAssign()
+    toast('已开始识别 —— 进度直接在列表每行的「智能核查状态 / 进度」里更新')
+  })
+  $$('[data-owner]',box).forEach(sel=>sel.onchange=e=>{
+    const i=+sel.dataset.owner, v=e.target.value
+    const s=S.split.segs[i]
+    if(v==='快递面单（本文件共用）'){s.owner=v;s.ownerSub=null}
+    else if(v==='待指定'){s.owner=v;s.ownerSub=null}
+    else{const [en,no]=v.split('|');s.owner=en;s.ownerSub=no}
+    renderAssign()
+  })
+}
+function rebuildFromCuts(){
+  const bank=isBank(), total=bank?11:9
+  const cuts=[...new Set(S.split.cuts)]
+  let from=1, out=[]
+  cuts.concat([total]).forEach(to=>{
+    out.push({from,to}); from=to+1
+  })
+  const pool = bank
+    ? ['齐商银行股份有限公司|QS2024-031','齐商银行股份有限公司|QS2024-018','齐商银行股份有限公司|QS2024-017','待指定']
+    : ['海通证券股份有限公司|whzf0010005','东方财富证券股份有限公司|whzf0010008','中金财富证券股份有限公司|whzf0010009','平安证券股份有限公司|whzf0010010','待指定']
+  S.split.segs=out.map((s,i)=>({
+    no:String(i+1),from:s.from,to:s.to,pkg:i+1,
+    owner: pool[Math.min(i,pool.length-1)]==='待指定'?'待指定':pool[Math.min(i,pool.length-1)].split('|')[0],
+    ownerSub: pool[Math.min(i,pool.length-1)]==='待指定'?null:pool[Math.min(i,pool.length-1)].split('|')[1],
+    exp:null, expState:'none',
+  }))
+}
+function boardHtml(bank){
+  const total=bank?11:9
+  let html=''
+  for(let p=1;p<=total;p++){
+    const cut=S.split.cuts.includes(p)
+    html+=`<div class="pagewrap">
+      <div class="pagecard" title="第 ${p} 页">
+        <div class="pagecard__p"><b></b><i style="width:100%"></i><i style="width:88%"></i><i style="width:96%"></i><i style="width:70%"></i>
+          ${p===total?'<div style="margin-top:10px;font-size:8px;color:#b9bfcc">快递面单</div>':''}
+        </div>
+        <div class="pagecard__f"><span>${p}</span>${p===total?ico('car','ic'):''}</div>
+      </div>
+      ${p<total?`<div class="scissor ${cut?'is-cut':''}"><button data-cut="${p}" aria-label="在第 ${p} 页后切一刀">${ico('scissors','ic ic--sm')}</button></div>`:''}
+    </div>`
+  }
+  return html
+}
+function segRow(s,bank){
+  const opts = bank
+    ? ['齐商银行股份有限公司|QS2024-031','齐商银行股份有限公司|QS2024-018','齐商银行股份有限公司|QS2024-017','中信银行股份有限公司|ZX2024-011','快递面单（本文件共用）','待指定']
+    : ['海通证券股份有限公司|whzf0010005','东方财富证券股份有限公司|whzf0010008','中金财富证券股份有限公司|whzf0010009','平安证券股份有限公司|whzf0010010','快递面单（本文件共用）','待指定']
+  const cur = s.ownerSub? `${s.owner}|${s.ownerSub}` : s.owner
+  const pkgCls=`pkg pkg--${(s.pkg-1)%8}`
+  return `<div class="seg-item">
+    <span class="seg-item__no">段 ${s.no}</span>
+    <div class="seg-item__main">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="${pkgCls}">包裹 ${s.pkg}</span>
+        <span class="muted num" style="font-size:12px">第 ${s.from}-${s.to} 页 · ${s.to-s.from+1} 页</span>
+      </div>
+      <div style="margin-top:6px">
+        <select class="select" data-owner="${+s.no-1}" style="height:28px;font-size:13px">
+          ${opts.map(o=>`<option value="${esc(o)}" ${o===cur?'selected':''}>${esc(o==='快递面单（本文件共用）'||o==='待指定'?o:o.split('|')[0]+' · '+o.split('|')[1])}</option>`).join('')}
+        </select>
+      </div>
+      ${s.owner!=='快递面单（本文件共用）'?`<div class="seg-item__pg">段尾面单 · 快递单号：
+        ${s.expState==='ok'?`<span class="num">${s.exp}</span>`
+         :s.expState==='bad'?`<span style="color:var(--c-risk-high-text)">${s.exp}</span> <button class="link" style="font-size:12px">改</button>`
+         :s.expState==='warn'?`<span class="muted">未识别到</span> <button class="link" style="font-size:12px">改</button>`
+         :`<span class="muted">待面单段填入</span>`}</div>`:''}
+    </div>
+  </div>`
+}
+
+/* ==================================================================
+   原型专用：场景导航
+   ================================================================== */
+const SCENES=[
+  {g:'列表页',items:[
+    {t:'① 表格形态',run:()=>{reset();}},
+    {t:'② 展开行（历次回函）',run:()=>{reset();S.expanded.add('whzf0010005-2');}},
+    {t:'③ 筛选无结果（空状态）',run:()=>{reset();S.filter={keyword:'不存在的公司',sendMethod:'',progress:''};S.form={...S.filter};}},
+    {t:'④ 已选筛选条件',run:()=>{reset();S.filter={keyword:'',sendMethod:'邮寄发函',progress:''};S.form={...S.filter};}},
+    {t:'⑤ 银行函证列表',run:()=>{reset();S.type='银行函证';}},
+  ]},
+  {g:'明细工作区',items:[
+    {t:'⑥ ① 查看 · 往来',run:()=>{reset();S.ws={kind:'view',id:'whzf0010005-2'};}},
+    {t:'⑦ ① 查看 · 银行',run:()=>{reset();S.type='银行函证';S.ws={kind:'view',id:'QS2024-019-1'};}},
+    {t:'⑧ ② AI 核验 · 往来（一致性）',run:()=>{reset();S.ws={kind:'verify',id:'whzf0010005-2',panel:'consistency'};}},
+    {t:'⑨ ② AI 核验 · 银行（逐项核对有差异）',run:()=>{reset();S.type='银行函证';S.ws={kind:'verify',id:'QS2024-019-1',panel:'match'};}},
+    {t:'⑩ ③ 回函快递信息 · 有面单',run:()=>{reset();S.ws={kind:'doc',id:'whzf0010008-1'};}},
+    {t:'⑪ ③ 回函快递信息 · 空态',run:()=>{reset();S.type='银行函证';S.ws={kind:'doc',id:'QS2024-031-1'};}},
+    {t:'⑫ ④ 回函结果填写',run:()=>{reset();S.ws={kind:'result',id:'whzf0010005-2'};}},
+    {t:'⑬ ④ 银行结果填写（含询证事项表）',run:()=>{reset();S.type='银行函证';S.ws={kind:'result',id:'QS2024-019-1'};}},
+  ]},
+  {g:'上传与归属',items:[
+    {t:'⑭ 上传 · 往来（含面单声明）',run:()=>{reset();S.upload='往来函证';}},
+    {t:'⑮ 上传 · 银行（含智能识别）',run:()=>{reset();S.type='银行函证';S.upload='银行函证';}},
+    {t:'⑯ 回函归属 · 往来（二维码初稿）',run:()=>{reset();openAssign(false);}},
+    {t:'⑰ 回函归属 · 银行（整份一段）',run:()=>{reset();S.type='银行函证';openAssign(false);}},
+    {t:'⑱ 回函归属 · 银行（智能识别初稿）',run:()=>{reset();S.type='银行函证';openAssign(true);}},
+  ]},
+  {g:'状态与异常',items:[
+    {t:'⑲ 正在核查（行内动效）',run:()=>{reset();S.filter={keyword:'东方财富',sendMethod:'',progress:''};S.form={...S.filter};}},
+    {t:'⑳ 核查失败（含重新识别）',run:()=>{reset();S.filter={keyword:'平安证券',sendMethod:'',progress:''};S.form={...S.filter};}},
+    {t:'㉑ 全部已复核',run:()=>{reset();S.filter={keyword:'国泰君安',sendMethod:'',progress:''};S.form={...S.filter};}},
+  ]},
+]
+function reset(){
+  S.type='往来函证';S.filter={keyword:'',sendMethod:'',progress:''};S.form={...S.filter}
+  S.expanded.clear();S.page=1;S.ws=null;S.split=null;S.upload=null
+}
+function openMenu(anchor,items,cur){
+  $$('.menu').forEach(n=>n.remove())
+  const m=document.createElement('div');m.className='menu'
+  const r=anchor.getBoundingClientRect()
+  m.style.left=Math.max(12,r.right-m.offsetWidth||240)+'px'
+  m.innerHTML=items.map((it,i)=>`<div class="menu__g">${esc(it.g)}</div>`+
+    it.items.map(s=>`<button data-scene="${esc(it.g+i+'|'+s.t)}" class="${s.t===cur?'is-cur':''}">${esc(s.t)}</button>`).join('')).join('')
+  document.body.appendChild(m)
+  const h=m.offsetHeight
+  m.style.top=Math.max(12,Math.min(window.innerHeight-h-12,r.top-h+anchor.offsetHeight))+'px'
+  m.style.left=Math.max(12,Math.min(window.innerWidth-292,r.right-(m.offsetWidth||280)))+'px'
+  $$('button',m).forEach(b=>b.onclick=()=>{
+    const t=b.dataset.scene.split('|').slice(1).join('|')
+    const found=SCENES.flatMap(x=>x.items).find(s=>s.t===t)
+    m.remove()
+    if(found){closeAll();found.run();renderAll()}
+  })
+  setTimeout(()=>document.addEventListener('click',function h(e){
+    if(!m.contains(e.target)&&e.target!==anchor){m.remove();document.removeEventListener('click',h)}
+  }),0)
+}
+function closeAll(){$$('.fs,.fs-mask,.dlg').forEach(n=>n.remove());S.ws=null;S.split=null;S.upload=null}
+
+/* ==================================================================
+   原型专用：改动标注
+   ================================================================== */
+const NOTES=[
+  {n:1,t:'表格不再横向滚动',d:'列宽合计由系统的 1404px 压到 1220px：核查进度列改用「简称 + 状态标识」（350 → 228）、被询证单位按最长单位名量到 176。1280 屏下不再出现横向滚动条。'},
+  {n:2,t:'表头加一层分组带',d:'原来 9 列是一条等距直线，横向定位只能数格子。新增 22px 分组带（函证信息 / 智能核查 / 结论与人工复核 / 进度与操作），组界只给一条发丝线 —— 不在数据行里加任何竖线，保住「去线条化」。'},
+  {n:3,t:'窄屏退化为卡片列表',d:'系统目前全站零响应式断点。这里补四档：<b>≤1103px 表格换成「一封函证一张卡」</b>，卡片内同样可展开历次回函，不再让用户在窄屏横拖一张 8 列表。'},
+  {n:4,t:'核查进度：简称 + 逐项状态',d:'系统该列横排三项全名占 350px。改为「状态标识 + 简称」，全名进悬停。标识保持四态：未核查＝浅灰短横、正在核查＝像素网格在跑、已核查＝主色勾、失败＝红叉。'},
+  {n:5,t:'两列动效分工',d:'「智能核查状态」用标签底色扫光（整体），「智能核查进度」用像素网格（逐项）。同一个动效不在两处重复出现 —— 否则用户会以为两列说的是同一件事。'},
+  {n:6,t:'容器形态统一',d:'查看 / 核验 / 快递信息 / 结果填写 / 回函归属全部统一为「标题栏 + 内容 + 底栏」一种全屏工作区，不再有全屏弹窗与右侧抽屉混用；最深只剩两层。'},
+  {n:7,t:'底栏左侧一句话说明落点',d:'每个工作区底栏左侧固定一句「点了会发生什么」：谁留痕、下一步去哪、还剩几项必填。文案随状态变，按钮只说动作。'},
+  {n:8,t:'关闭入口三处等效',d:'右上角 ×、Esc、底栏按钮，三处关闭路径等价；打开后焦点落在关闭按钮上，关闭后归还给触发它的那一行。'},
+]
+function renderNotes(){
+  $$('.badge-num').forEach(n=>n.remove())
+  if(!S.notesOn){$('.notepanel')?.remove();return}
+  $$('[data-note]').forEach(el=>{
+    const n=+el.dataset.note, cfg=NOTES.find(x=>x.n===n); if(!cfg) return
+    const b=document.createElement('span');b.className='badge-num';b.textContent=n
+    document.body.appendChild(b)
+    const r=el.getBoundingClientRect()
+    b.style.left=(r.left-8)+'px';b.style.top=(r.top-8)+'px'
+  })
+  if($('.notepanel')) return
+  const p=document.createElement('aside');p.className='notepanel'
+  p.innerHTML=`<div class="notepanel__h">${ico('info','ic ic--sm')}<span>改动标注</span>
+      <button style="margin-left:auto" id="note-x" aria-label="关闭">${ico('x','ic')}</button></div>
+    <div class="notepanel__b">${NOTES.map(x=>`<div class="note"><span class="note__n">${x.n}</span>
+      <div><div class="note__t">${x.t}</div><div class="note__d">${x.d}</div></div></div>`).join('')}</div>`
+  document.body.appendChild(p)
+  $('#note-x').onclick=()=>{S.notesOn=false;$('#btnNote').setAttribute('aria-pressed','false');$('#btnNote').classList.remove('is-on');renderNotes()}
+}
+window.addEventListener('scroll',()=>{if(S.notesOn)renderNotes()},true)
+window.addEventListener('resize',()=>{if(S.notesOn)renderNotes()})
+
+/* ==================================================================
+   初始化与全局键盘
+   ================================================================== */
+function renderAll(){
+  renderPage()
+  renderWs()
+  if(S.upload) renderUpload()
+  if(S.split) renderAssign()
+  if(S.notesOn) renderNotes()
+}
+$('#btnNav').onclick=(e)=>{e.stopPropagation();openMenu($('#btnNav'),SCENES,null)}
+$('#btnNote').onclick=()=>{
+  S.notesOn=!S.notesOn
+  $('#btnNote').setAttribute('aria-pressed',String(S.notesOn))
+  $('#btnNote').classList.toggle('is-on',S.notesOn)
+  renderNotes()
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    if($('.menu')){$('.menu').remove();return}
+    if(S.upload){closeUpload();return}
+    if(S.split){closeAssign();return}
+    if(S.ws){closeWs();return}
+  }
+})
+renderAll()
+</script>
+
+
+</body></html>
