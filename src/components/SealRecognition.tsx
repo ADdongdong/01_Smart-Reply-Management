@@ -103,14 +103,29 @@ export default function SealRecognition({
           hint={seal.sealCount > 1 ? '存在多枚印章，建议确认是否均有效' : undefined}
         />
       )}
-      {/* 骑缝章：仅往来函证检测（v2.39 起 R-03 限定往来；银行回函无此业务要求） */}
+      {/* 骑缝章：仅往来函证检测（v2.39 起 R-03 限定往来；银行回函无此业务要求）。
+          v3.49 拆两方 —— 发行人客户 / 被询证单位各判各的（检出 / 未检出）。 */}
       {!isBank && (
-        <InfoRow
-          label="骑缝章"
-          value={seal.crossPageSeal ? `有（${seal.crossPageSealCount} 处）` : '未检出'}
-          tone={seal.crossPageSeal ? 'ok' : 'risk'}
-          hint={!seal.crossPageSeal ? '建议加盖' : undefined}
-        />
+        <>
+          <InfoRow
+            label="骑缝章（发行人客户）"
+            value={
+              seal.crossSealIssuer ? `检出（${seal.crossSealIssuerCount ?? 0} 处）` : '未检出'
+            }
+            tone={seal.crossSealIssuer ? 'ok' : 'risk'}
+            hint={!seal.crossSealIssuer ? '建议加盖' : undefined}
+          />
+          <InfoRow
+            label="骑缝章（被询证单位）"
+            value={
+              seal.crossSealCounterparty
+                ? `检出（${seal.crossSealCounterpartyCount ?? 0} 处）`
+                : '未检出'
+            }
+            tone={seal.crossSealCounterparty ? 'ok' : 'risk'}
+            hint={!seal.crossSealCounterparty ? '建议加盖' : undefined}
+          />
+        </>
       )}
       {!isBank && <InfoRow label="印章类型" value={seal.sealType} />}
       <InfoRow label="印章名称" value={seal.sealName} />
@@ -180,17 +195,30 @@ export default function SealRecognition({
               />
             </ManualRow>
           )}
+          {/* 骑缝章两行（v3.49）—— 与结果页同一份标签与选项 */}
           {!isBank && (
-            <ManualRow label={labelOf('crossSeal')}>
-              <Radio.Group
-                size="small"
-                optionType="button"
-                buttonStyle="solid"
-                value={draft?.crossSeal}
-                options={optionsOf('crossSeal')}
-                onChange={(e) => patch({ crossSeal: e.target.value })}
-              />
-            </ManualRow>
+            <>
+              <ManualRow label={labelOf('crossSealIssuer')}>
+                <Radio.Group
+                  size="small"
+                  optionType="button"
+                  buttonStyle="solid"
+                  value={draft?.crossSealIssuer}
+                  options={optionsOf('crossSealIssuer')}
+                  onChange={(e) => patch({ crossSealIssuer: e.target.value })}
+                />
+              </ManualRow>
+              <ManualRow label={labelOf('crossSealCounterparty')}>
+                <Radio.Group
+                  size="small"
+                  optionType="button"
+                  buttonStyle="solid"
+                  value={draft?.crossSealCounterparty}
+                  options={optionsOf('crossSealCounterparty')}
+                  onChange={(e) => patch({ crossSealCounterparty: e.target.value })}
+                />
+              </ManualRow>
+            </>
           )}
         </ManualConfirm>
       )}

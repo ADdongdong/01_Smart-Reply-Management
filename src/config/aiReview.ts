@@ -347,7 +347,7 @@ function handwriteDescOf(record: ReplyRecord): string {
  * 故映射只在这里写一遍，`aiReviewPrefill` 由它折叠而来。
  *
  * 映射（逐条对应口径）：
- * · `seal` 采纳 → `sealConsistent`（往来另有 `officialSeal` / `matched` / `crossSeal`）——
+ * · `seal` 采纳 → `sealConsistent`（往来另有 `officialSeal` / `matched` / 两方 `crossSealIssuer`·`crossSealCounterparty`）——
  *   往来函证的相符性由**落章区域**判定，银行侧印章不作相符性依据（R-01），故银行不带 `matched`；
  *   银行 v3.48 起也不核印章类型，故不带 `officialSeal`（只核有没有盖章、章名一致否）；
  * · `consistency` 采纳 → 往来是 `diffDesc`（差异项清单）；银行这一项即「询证事项逐项核对」，
@@ -371,8 +371,12 @@ export function aiReviewAdoptPatchOf(
       if (v.seal.hasSeal) {
         /* 印章类型 / 公章与否仅往来（v3.48：银行只核有没有盖章、章名一致否） */
         if (record.type === '往来函证') out.officialSeal = v.seal.sealType === '公章'
-        /* 骑缝章仅往来函证检测（v2.39 起 R-03 限定往来；银行回函无此业务要求） */
-        if (record.type === '往来函证') out.crossSeal = v.seal.crossPageSeal ? 'yes' : 'no'
+        /* 骑缝章仅往来函证检测（v2.39 起 R-03 限定往来；银行回函无此业务要求）。
+           v3.49 起拆两方，各带各的（检出 / 未检出） */
+        if (record.type === '往来函证') {
+          out.crossSealIssuer = v.seal.crossSealIssuer ? 'yes' : 'no'
+          out.crossSealCounterparty = v.seal.crossSealCounterparty ? 'yes' : 'no'
+        }
       }
       return out
     }

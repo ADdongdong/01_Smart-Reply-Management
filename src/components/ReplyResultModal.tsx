@@ -11,7 +11,7 @@ import BankItemsTable from '@/components/BankItemsTable'
 import { AiGlyph, ResultBar } from '@/components/Marks'
 import { StatusTag } from '@/components/StatusTag'
 import { aiReviewPrefill } from '@/config/aiReview'
-import { RESULT_NOTE_FIELDS } from '@/config/replyTasks'
+import { RESULT_NOTE_FIELDS, RESULT_REQUIRED_LABELS } from '@/config/replyTasks'
 import type {
   BankItemGroup,
   BankItemRow,
@@ -53,7 +53,10 @@ function adoptedFromAiReview(record?: ReplyRecord): Record<string, boolean> {
   if (pre.matched !== undefined && saved?.matched === undefined) out.matched = true
   if (pre.sealConsistent !== undefined && saved?.sealConsistent === undefined) out.seal = true
   if (pre.officialSeal !== undefined && saved?.officialSeal === undefined) out.official = true
-  if (pre.crossSeal !== undefined && saved?.crossSeal === undefined) out.cross = true
+  if (pre.crossSealIssuer !== undefined && saved?.crossSealIssuer === undefined) out.crossIssuer = true
+  if (pre.crossSealCounterparty !== undefined && saved?.crossSealCounterparty === undefined) {
+    out.crossCounterparty = true
+  }
   if (pre.diffDesc && !saved?.diffDesc) out.desc = true
   return out
 }
@@ -190,12 +193,16 @@ export default function ReplyResultModal({
   )
 
   /**
-   * AI 推导「是否有骑缝章」。
-   * 只有「是 / 否」两态 —— 单页回函不存在骑缝章概念，但页数不在识别输出里，
+   * AI 推导骑缝章 —— **两方各一份**（v3.49）。
+   * 只有「检出 / 未检出」两态 —— 单页回函不存在骑缝章概念，但页数不在识别输出里，
    * 故第三态「不适用」交给人工在表单中选择。
    */
-  const aiCrossSeal = useMemo<'yes' | 'no' | undefined>(
-    () => (v && v.seal.hasSeal ? (v.seal.crossPageSeal ? 'yes' : 'no') : undefined),
+  const aiCrossSealIssuer = useMemo<'yes' | 'no' | undefined>(
+    () => (v && v.seal.hasSeal ? (v.seal.crossSealIssuer ? 'yes' : 'no') : undefined),
+    [v],
+  )
+  const aiCrossSealCounterparty = useMemo<'yes' | 'no' | undefined>(
+    () => (v && v.seal.hasSeal ? (v.seal.crossSealCounterparty ? 'yes' : 'no') : undefined),
     [v],
   )
 
@@ -231,9 +238,13 @@ export default function ReplyResultModal({
   const [officialSeal, setOfficialSeal] = useState<boolean | undefined>(
     record?.resultInfo?.officialSeal ?? aiPrefill.officialSeal,
   )
-  /** 是否有骑缝章 */
-  const [crossSeal, setCrossSeal] = useState<CrossSealChoice | undefined>(
-    record?.resultInfo?.crossSeal ?? aiPrefill.crossSeal,
+  /** 骑缝章（发行人客户）—— v3.49 起由单一字段拆成两方各一份 */
+  const [crossSealIssuer, setCrossSealIssuer] = useState<CrossSealChoice | undefined>(
+    record?.resultInfo?.crossSealIssuer ?? aiPrefill.crossSealIssuer,
+  )
+  /** 骑缝章（被询证单位） */
+  const [crossSealCounterparty, setCrossSealCounterparty] = useState<CrossSealChoice | undefined>(
+    record?.resultInfo?.crossSealCounterparty ?? aiPrefill.crossSealCounterparty,
   )
   /**
    * **三个"人工补充"字段**（v3.34）—— 两个附件 + 一段底稿指引文本。
@@ -307,9 +318,15 @@ export default function ReplyResultModal({
         markAdopt('official')
         n += 1
       }
-      if (!isBank && aiCrossSeal !== undefined) {
-        setCrossSeal(aiCrossSeal)
-        markAdopt('cross')
+      /* 骑缝章两方各一份（v3.49），有结论的都带 */
+      if (!isBank && aiCrossSealIssuer !== undefined) {
+        setCrossSealIssuer(aiCrossSealIssuer)
+        markAdopt('crossIssuer')
+        n += 1
+      }
+      if (!isBank && aiCrossSealCounterparty !== undefined) {
+        setCrossSealCounterparty(aiCrossSealCounterparty)
+        markAdopt('crossCounterparty')
         n += 1
       }
       if (rule?.detectHandwriting && v.handwriting) {
@@ -324,7 +341,8 @@ export default function ReplyResultModal({
   /**
    * 必填 —— 未处理时保存被拦下，并明确指出是哪几项（而非按钮点不动却说不出原因）。
    *
-   * **按类型分流**：往来 = 4 项（含「是否有骑缝章」「是否为公章」）；
+   * **按类型分流**：往来 = 5 项（相符性 / 章名一致 / 是否为公章 / 骑缝章两方；
+   * v3.49 骑缝章拆成「发行人客户」「被询证单位」两份后 +1）；
    * **银行 = 2 项**（相符性 + 章名一致）—— 自 v2.39 起银行不检测骑缝章（R-03 限定往来），
    * v3.48 起银行也不再核印章类型（「是否为公章」随印章数量 / 类型 / 落章区域一并去掉）。
    * 该字段在银行侧不渲染，校验自然也不该要求它（**系统不检测的项不该要求人工填**）。
@@ -334,7 +352,10 @@ export default function ReplyResultModal({
     if (matched === undefined) miss.push('函证结果是否相符')
     if (sealConsistent === undefined) miss.push('回函盖章是否与被询证方名称一致')
     if (!isBank && officialSeal === undefined) miss.push('是否为公章')
-    if (!isBank && crossSeal === undefined) miss.push('是否有骑缝章')
+    if (!isBank && crossSealIssuer === undefined) miss.push(RESULT_REQUIRED_LABELS.crossSealIssuer)
+    if (!isBank && crossSealCounterparty === undefined) {
+      miss.push(RESULT_REQUIRED_LABELS.crossSealCounterparty)
+    }
     return miss
   }
 
@@ -383,7 +404,9 @@ export default function ReplyResultModal({
                   sealReason,
                   /* 银行侧没有这个字段（v3.48）—— 显式写 undefined，把历史数据里可能存在的值一并清掉 */
                   officialSeal: isBank ? undefined : officialSeal,
-                  crossSeal,
+                  /* 骑缝章两方各一份（v3.49） */
+                  crossSealIssuer: isBank ? undefined : crossSealIssuer,
+                  crossSealCounterparty: isBank ? undefined : crossSealCounterparty,
                   altTestFiles,
                   diffAdjustFiles,
                   procedureNote,
@@ -562,41 +585,84 @@ export default function ReplyResultModal({
               />
               )}
 
-              {/* 是否有骑缝章 —— 仅往来函证（v2.39 起银行不检测骑缝章） */}
+              {/* 骑缝章 —— 两方各一条（v3.49）；仅往来函证（v2.39 起银行不检测骑缝章） */}
               {!isBank && (
-                <ResultBar
-                  status={aiCrossSeal === undefined ? 'info' : aiCrossSeal === 'yes' ? 'ok' : 'risk'}
-                  message={
-                    aiCrossSeal === undefined
-                      ? '无法判定（未检出印章）'
-                      : aiCrossSeal === 'yes'
-                        ? `有骑缝章（${v.seal.crossPageSealCount} 处）`
-                        : '无骑缝章'
-                  }
-                  detail={
-                    aiCrossSeal === undefined
-                      ? '未在回函文件任何页检出印章'
-                      : aiCrossSeal === 'yes'
-                        ? '依据：多页回函已检出骑缝章'
-                        : '依据：多页回函未检出骑缝章；若原件为单页回函，可在下方改为「不适用」'
-                  }
-                  extra={
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      <Button
-                        size="small"
-                        type={adopted.cross ? 'default' : 'primary'}
-                        ghost={!adopted.cross}
-                        disabled={aiCrossSeal === undefined}
-                        onClick={() => {
-                          setCrossSeal(aiCrossSeal)
-                          markAdopt('cross')
-                        }}
-                      >
-                        {adopted.cross ? '已采纳' : '采纳'}
-                      </Button>
-                    </span>
-                  }
-                />
+                <>
+                  <ResultBar
+                    status={
+                      aiCrossSealIssuer === undefined ? 'info' : aiCrossSealIssuer === 'yes' ? 'ok' : 'risk'
+                    }
+                    message={
+                      aiCrossSealIssuer === undefined
+                        ? '无法判定（未检出印章）'
+                        : aiCrossSealIssuer === 'yes'
+                          ? `检出骑缝章（发行人客户 · ${v.seal.crossSealIssuerCount ?? 0} 处）`
+                          : '骑缝章（发行人客户）未检出'
+                    }
+                    detail={
+                      aiCrossSealIssuer === undefined
+                        ? '未在回函文件任何页检出印章'
+                        : aiCrossSealIssuer === 'yes'
+                          ? '依据：多页回函页边检出发行人客户的骑缝章'
+                          : '依据：多页回函未检出发行人客户的骑缝章；若原件为单页回函，可在下方改为「不适用」'
+                    }
+                    extra={
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <Button
+                          size="small"
+                          type={adopted.crossIssuer ? 'default' : 'primary'}
+                          ghost={!adopted.crossIssuer}
+                          disabled={aiCrossSealIssuer === undefined}
+                          onClick={() => {
+                            setCrossSealIssuer(aiCrossSealIssuer)
+                            markAdopt('crossIssuer')
+                          }}
+                        >
+                          {adopted.crossIssuer ? '已采纳' : '采纳'}
+                        </Button>
+                      </span>
+                    }
+                  />
+                  <ResultBar
+                    status={
+                      aiCrossSealCounterparty === undefined
+                        ? 'info'
+                        : aiCrossSealCounterparty === 'yes'
+                          ? 'ok'
+                          : 'risk'
+                    }
+                    message={
+                      aiCrossSealCounterparty === undefined
+                        ? '无法判定（未检出印章）'
+                        : aiCrossSealCounterparty === 'yes'
+                          ? `检出骑缝章（被询证单位 · ${v.seal.crossSealCounterpartyCount ?? 0} 处）`
+                          : '骑缝章（被询证单位）未检出'
+                    }
+                    detail={
+                      aiCrossSealCounterparty === undefined
+                        ? '未在回函文件任何页检出印章'
+                        : aiCrossSealCounterparty === 'yes'
+                          ? '依据：多页回函页边检出被询证单位的骑缝章'
+                          : '依据：多页回函未检出被询证单位的骑缝章；若原件为单页回函，可在下方改为「不适用」'
+                    }
+                    extra={
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <Button
+                          size="small"
+                          type={adopted.crossCounterparty ? 'default' : 'primary'}
+                          ghost={!adopted.crossCounterparty}
+                          disabled={aiCrossSealCounterparty === undefined}
+                          onClick={() => {
+                            setCrossSealCounterparty(aiCrossSealCounterparty)
+                            markAdopt('crossCounterparty')
+                          }}
+                        >
+                          {adopted.crossCounterparty ? '已采纳' : '采纳'}
+                        </Button>
+                      </span>
+                    }
+                  />
+                </>
               )}
 
               {/* 不相符手写内容识别（v2.67 改名，原「不相符处描述」）—— 手写体转录全文可见
@@ -794,38 +860,73 @@ export default function ReplyResultModal({
                 </div>
               )}
 
-              {/* 是否有骑缝章 —— 仅往来函证（v2.39 起银行不检测骑缝章） */}
+              {/* 骑缝章 —— 拆两方各一行（v3.49）；仅往来函证（v2.39 起银行不检测骑缝章） */}
               {!isBank && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '6px 8px',
-                    borderRadius: 6,
-                    background:
-                      showErrors && crossSeal === undefined ? 'var(--c-risk-high-bg)' : undefined,
-                  }}
-                >
-                  <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
-                    <span style={{ color: 'var(--c-risk-high)' }}>* </span>是否有骑缝章
-                  </span>
-                  <Radio.Group
-                    value={crossSeal}
-                    onChange={(e) => setCrossSeal(e.target.value)}
-                    optionType="button"
-                    buttonStyle="solid"
-                    size="small"
-                    options={[
-                      { label: '是', value: 'yes' },
-                      { label: '否', value: 'no' },
-                      { label: '不适用（单页回函）', value: 'na' },
-                    ]}
-                  />
-                  <span className="muted" style={{ fontSize: 12 }}>
-                    ⓘ 单页回函选择「不适用」
-                  </span>
-                </div>
+                <>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      background:
+                        showErrors && crossSealIssuer === undefined
+                          ? 'var(--c-risk-high-bg)'
+                          : undefined,
+                    }}
+                  >
+                    <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
+                      <span style={{ color: 'var(--c-risk-high)' }}>* </span>
+                      {RESULT_REQUIRED_LABELS.crossSealIssuer}
+                    </span>
+                    <Radio.Group
+                      value={crossSealIssuer}
+                      onChange={(e) => setCrossSealIssuer(e.target.value)}
+                      optionType="button"
+                      buttonStyle="solid"
+                      size="small"
+                      options={[
+                        { label: '检出', value: 'yes' },
+                        { label: '未检出', value: 'no' },
+                        { label: '不适用（单页回函）', value: 'na' },
+                      ]}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      background:
+                        showErrors && crossSealCounterparty === undefined
+                          ? 'var(--c-risk-high-bg)'
+                          : undefined,
+                    }}
+                  >
+                    <span style={{ width: 200, fontSize: 13, color: 'var(--c-text-2)', flexShrink: 0, textAlign: 'right' }}>
+                      <span style={{ color: 'var(--c-risk-high)' }}>* </span>
+                      {RESULT_REQUIRED_LABELS.crossSealCounterparty}
+                    </span>
+                    <Radio.Group
+                      value={crossSealCounterparty}
+                      onChange={(e) => setCrossSealCounterparty(e.target.value)}
+                      optionType="button"
+                      buttonStyle="solid"
+                      size="small"
+                      options={[
+                        { label: '检出', value: 'yes' },
+                        { label: '未检出', value: 'no' },
+                        { label: '不适用（单页回函）', value: 'na' },
+                      ]}
+                    />
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      ⓘ 单页回函选择「不适用」
+                    </span>
+                  </div>
+                </>
               )}
 
               {/* 「盖章不一致处原因描述」—— 同上，核验页印章识别的「人工确认」列也填这一格 */}

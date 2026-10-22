@@ -25,7 +25,8 @@ import type { AiReviewKey, ConfirmationType, ReplyRecord, ReplyResultInfo } from
  * ```
  * 一条回函的 todo
  * ├── AI 核查项（往来 3 / 银行 2）—— 口径见 `config/aiReview`，本文件只做汇总
- * └── 回函结果必填项（往来 4 / 银行 3）—— 口径见下面的 `RESULT_REQUIRED_FIELDS`
+ * └── 回函结果必填项（往来 5 / 银行 2）—— 口径见下面的 `RESULT_REQUIRED_FIELDS`
+ *     （往来 5 = 相符性 / 章名一致 / 是否为公章 / 骑缝章两方；v3.49 骑缝章拆两方后 +1。银行 2 = 相符性 / 章名一致，v3.48 起）
  * ```
  *
  * 两者都**逐项**判定（不只看"整类做完没有"），这样列表那一格才能算出"还剩几项"，
@@ -41,8 +42,28 @@ import type { AiReviewKey, ConfirmationType, ReplyRecord, ReplyResultInfo } from
 /** 事项的两类来源 */
 export type ReplyTaskKind = 'ai' | 'field'
 
-/** 回函结果的必填字段名 —— 与 `ReplyResultInfo` 的键一一对应 */
-export type ResultFieldKey = 'matched' | 'sealConsistent' | 'officialSeal' | 'crossSeal'
+/**
+ * 回函结果的必填字段名 —— 与 `ReplyResultInfo` 的键一一对应。
+ * v3.49：`crossSeal` 拆成 `crossSealIssuer` / `crossSealCounterparty`（骑缝章按加盖方分两方）。
+ */
+export type ResultFieldKey =
+  | 'matched'
+  | 'sealConsistent'
+  | 'officialSeal'
+  | 'crossSealIssuer'
+  | 'crossSealCounterparty'
+
+/**
+ * 必填项的**显示名**（跨类型合一份）—— 表单标签、核验页人工确认列、保存时的校验提示
+ * 都从这一处取，同一件事不写三个名字。
+ */
+export const RESULT_REQUIRED_LABELS: Record<ResultFieldKey, string> = {
+  matched: '函证结果是否相符',
+  sealConsistent: '回函盖章是否与被询证方名称一致',
+  officialSeal: '是否为公章',
+  crossSealIssuer: '骑缝章（发行人客户）',
+  crossSealCounterparty: '骑缝章（被询证单位）',
+}
 
 export interface ResultField {
   key: ResultFieldKey
@@ -90,12 +111,26 @@ export const RESULT_REQUIRED_FIELDS: Record<ConfirmationType, ResultField[]> = {
         { label: '否（财务章等其他印章）', value: false },
       ],
     },
+    /*
+     * 骑缝章拆两方（v3.49，用户口径：「这个字段扩展为两个字段：骑缝章（发行人客户）检出/未检出、
+     * 骑缝章（被询证单位）检出/未检出」）—— 两者是独立事实，各判各的；
+     * 第三态「不适用」仍保留：单页回函本就没有骑缝章可言。
+     */
     {
-      key: 'crossSeal',
-      label: '是否有骑缝章',
+      key: 'crossSealIssuer',
+      label: RESULT_REQUIRED_LABELS.crossSealIssuer,
       options: [
-        { label: '是', value: 'yes' },
-        { label: '否', value: 'no' },
+        { label: '检出', value: 'yes' },
+        { label: '未检出', value: 'no' },
+        { label: '不适用（单页回函）', value: 'na' },
+      ],
+    },
+    {
+      key: 'crossSealCounterparty',
+      label: RESULT_REQUIRED_LABELS.crossSealCounterparty,
+      options: [
+        { label: '检出', value: 'yes' },
+        { label: '未检出', value: 'no' },
         { label: '不适用（单页回函）', value: 'na' },
       ],
     },

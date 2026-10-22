@@ -139,8 +139,18 @@ export interface SealBox {
 export interface SealResult {
   hasSeal: boolean
   sealCount: number
-  crossPageSeal: boolean
-  crossPageSealCount: number
+  /**
+   * 骑缝章（v3.49 起拆成两个字段）—— 骑缝章是**加盖方**的章，一封函证上可能有两方各盖：
+   * · 发行人客户：发函时由客户在发给被询证单位的那份上盖；
+   * · 被询证单位：回函时由被询证单位盖。
+   * 二者有无是两件独立的事实（用户口径：拆成「骑缝章（发行人客户）」「骑缝章（被询证单位）」，
+   * 取值 检出 / 未检出），故不再用单一布尔表达。
+   */
+  crossSealIssuer: boolean
+  crossSealCounterparty: boolean
+  /** 各自检出几处 —— 仅用于界面展示「检出 N 处」，缺省按 0 处理 */
+  crossSealIssuerCount?: number
+  crossSealCounterpartyCount?: number
   sealType: '公章' | '财务章' | '无'
   sealName: string
   nameMatched: boolean
@@ -692,7 +702,10 @@ export interface ExpressInfo {
   signTime?: string
 }
 
-/** 骑缝章选择 —— 单页回函不存在该概念，故保留第三态「不适用」 */
+/**
+ * 骑缝章选择 —— 单页回函不存在该概念，故保留第三态「不适用」。
+ * 界面文案：yes = 检出 / no = 未检出 / na = 不适用（单页回函）。
+ */
 export type CrossSealChoice = 'yes' | 'no' | 'na'
 
 /**
@@ -735,8 +748,10 @@ export interface ReplyResultInfo {
   sealReason?: string
   /** 是否为公章 */
   officialSeal?: boolean
-  /** 是否有骑缝章 */
-  crossSeal?: CrossSealChoice
+  /** 骑缝章（发行人客户）—— 检出 / 未检出 / 不适用（v3.49 起由单一字段拆成两方各一份） */
+  crossSealIssuer?: CrossSealChoice
+  /** 骑缝章（被询证单位） */
+  crossSealCounterparty?: CrossSealChoice
   /** **差异调节表**（v3.32 立字段，v3.33 落库）—— PDF / Excel，可多附件 */
   diffAdjustFiles?: ReplyAttachment[]
   /** **替代性测试文件**（v3.33 落库）—— JPG / JPEG / PDF，可多附件 */
